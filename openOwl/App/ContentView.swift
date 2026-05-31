@@ -78,7 +78,9 @@ struct ContentView: View {
         .onChange(of: rightDockStore.activeTab) { _, _ in
             resignFirstResponderForTabSwitch()
         }
-        .onChange(of: rightDockStore.isExpanded) { _, _ in
+        .onChange(of: rightDockStore.isExpanded) { _, newValue in
+            AppLogger.log("resize-diag", "=== RightDock.isExpanded -> %@ activeTab=%@ ===",
+                          newValue ? "TRUE" : "FALSE", rightDockStore.activeTab.rawValue)
             resignFirstResponderForTabSwitch()
         }
     }

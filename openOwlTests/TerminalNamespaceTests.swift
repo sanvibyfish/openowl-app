@@ -83,6 +83,44 @@ struct TerminalNamespaceTests {
         #expect(store.visibleTabs.count == 1)
     }
 
+    @Test @MainActor func switchNamespace_sameNamespace_preservesActiveTab() {
+        // Regression: typing in a non-first tab fired updatePanePwd ->
+        // onContextDidChange -> syncActiveProjectContext -> switchNamespace,
+        // which unconditionally reset activeTabID to the first tab in the
+        // namespace. The user's selection of a later tab must survive
+        // re-entering the same namespace.
+        let store = TerminalWorkspaceStore()
+        let termNS: TerminalNamespace = .freeTerminal(UUID())
+        _ = store.newTab(for: termNS)
+        let tab2 = store.newTab(for: termNS)
+
+        store.switchNamespace(termNS)
+        store.selectTab(id: tab2)
+        #expect(store.activeTabID == tab2)
+
+        store.switchNamespace(termNS)
+        #expect(store.activeTabID == tab2)
+    }
+
+    @Test @MainActor func switchNamespace_differentNamespace_resetsToFirstTab() {
+        // The same-namespace guard must not block legitimate cross-namespace
+        // switches: when activeTabID belongs to a different namespace, the
+        // new namespace's first tab should take over.
+        let store = TerminalWorkspaceStore()
+        let projectNS: TerminalNamespace = .project("proj-A")
+        let termNS: TerminalNamespace = .freeTerminal(UUID())
+
+        let projectTab = store.newTab(for: projectNS)
+        let termTab1 = store.newTab(for: termNS)
+        _ = store.newTab(for: termNS)
+
+        store.switchNamespace(projectNS)
+        #expect(store.activeTabID == projectTab)
+
+        store.switchNamespace(termNS)
+        #expect(store.activeTabID == termTab1)
+    }
+
     @Test @MainActor func switchNamespace_nil_clearsActive() {
         let store = TerminalWorkspaceStore()
         let projectNS: TerminalNamespace = .project("proj-A")
