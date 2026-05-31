@@ -22,6 +22,7 @@
 | 006 | 项目管理侧边栏 | ✅ Done | [006-project-sidebar.md](006-project-sidebar.md) |
 | 007 | UI 设计系统 | ✅ Done | [007-ui-design-system.md](007-ui-design-system.md) |
 | 008 | Right Dock + 独立 Terminals | ✅ Done | [008-right-dock.md](008-right-dock.md) |
+| 009 | 文件日志系统 (AppLogger) | ✅ Done | [009-app-logger.md](009-app-logger.md) |
 
 ## 分类
 
@@ -46,6 +47,7 @@
 
 - [006-project-sidebar.md](006-project-sidebar.md) — 项目列表、Worktree 管理、持久化
 - [008-right-dock.md](008-right-dock.md) — 右侧可折叠 inspector + 独立 free terminals + ContentView 三栏布局
+- [009-app-logger.md](009-app-logger.md) — 文件日志系统，写入 ~/Library/Logs/openOwl/，打包后可查看
 
 ## 依赖关系
 
@@ -64,3 +66,4 @@
 | 2026-03-16 | 创建索引，补全 001–006 功能文档 |
 | 2026-05-07 | 加入 008 Right Dock + 独立 Terminals（实现完成） |
 | 2026-05-10 | v1.0.8 下架本地部署，005 文档归档至 docs/archive/ |
+| 2026-05-30 | 加入 009 文件日志系统 (AppLogger) |

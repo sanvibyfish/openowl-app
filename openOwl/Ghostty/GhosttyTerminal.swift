@@ -291,6 +291,13 @@ class TerminalNSView: NSView {
         guard let surface else { return }
         let fbSize = convertToBacking(newSize)
         ghostty_surface_set_size(surface, UInt32(fbSize.width), UInt32(fbSize.height))
+        let after = ghostty_surface_size(surface)
+        AppLogger.log("resize-diag", "setFrameSize pane=%@ pts=%.1fx%.1f px=%.0fx%.0f cols=%d rows=%d window=%@",
+                      paneID.uuidString.prefix(8) as CVarArg,
+                      newSize.width, newSize.height,
+                      fbSize.width, fbSize.height,
+                      Int(after.columns), Int(after.rows),
+                      window == nil ? "nil" : "set")
     }
 
     override func viewDidChangeBackingProperties() {

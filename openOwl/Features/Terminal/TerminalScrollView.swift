@@ -55,6 +55,7 @@ class TerminalScrollView: NSView {
 
     override func layout() {
         super.layout()
+        let prev = terminalView.frame
         terminalView.frame = bounds
         let indicatorWidth: CGFloat = 8
         let margin: CGFloat = 2
@@ -64,6 +65,11 @@ class TerminalScrollView: NSView {
             width: indicatorWidth,
             height: bounds.height - margin * 2
         )
+        AppLogger.log("resize-diag", "ScrollView.layout pane=%@ bounds=%.1fx%.1f prevTermFrame=%.1fx%.1f changed=%@",
+                      terminalView.paneIdentifier.uuidString.prefix(8) as CVarArg,
+                      bounds.width, bounds.height,
+                      prev.width, prev.height,
+                      prev.size == bounds.size ? "no" : "YES")
     }
 
     // MARK: - Public API

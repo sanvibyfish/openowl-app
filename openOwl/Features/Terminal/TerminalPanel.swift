@@ -41,5 +41,10 @@ struct TerminalPanel: NSViewRepresentable {
     func updateNSView(_ nsView: TerminalScrollView, context: Context) {
         nsView.terminalView.onFocus = onFocus
         nsView.setTerminalVisibility(isVisible)
+        AppLogger.log("resize-diag", "TerminalPanel.updateNSView pane=%@ scrollFrame=%.1fx%.1f termFrame=%.1fx%.1f isVisible=%@",
+                      paneID.uuidString.prefix(8) as CVarArg,
+                      nsView.frame.width, nsView.frame.height,
+                      nsView.terminalView.frame.width, nsView.terminalView.frame.height,
+                      isVisible ? "y" : "n")
     }
 }

@@ -30,6 +30,7 @@
 		465C4C06EEE907C3154E2329 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F692AB2575EE0D90EDAE529 /* StatusBarView.swift */; };
 		467A828AC1805D834ABAFF66 /* OrderedProjectTabsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00642698655A3329F3C67DB7 /* OrderedProjectTabsTests.swift */; };
 		4897E77332A433283D871460 /* TerminalScrollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79636F7D772A467ADC94B313 /* TerminalScrollView.swift */; };
+		4D9AE12397A51C88BD1D3B4F /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A99F1BD2E832DC109BCC03A /* AppLogger.swift */; };
 		4EB8B6468815663DFB8126CA /* NotificationNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA86C7ADE1E696F8BF004DAD /* NotificationNames.swift */; };
 		502E0FCB5AEF997F4C45E298 /* TerminalWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F733F678544F126652F6B93E /* TerminalWorkspaceView.swift */; };
 		521860E4905A1AFE5052874D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 740A85D83B4812D1CDBD53E0 /* SettingsView.swift */; };
@@ -123,6 +124,7 @@
 		552C03468C64C29EEA14DE99 /* IconButtonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconButtonStyle.swift; sourceTree = "<group>"; };
 		5533A6D4B3B1811FF42BB1D1 /* FreeTerminalTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeTerminalTabBar.swift; sourceTree = "<group>"; };
 		56D3EFADA4D64C3ABBF4887E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		5A99F1BD2E832DC109BCC03A /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
 		5BAFE9E75DAA3DB62ECD73CB /* FileWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileWatcher.swift; sourceTree = "<group>"; };
 		61BBA8C4BCDD5442FF64552D /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		61BBAD397E75BD6423E0EB63 /* SpinningIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpinningIcon.swift; sourceTree = "<group>"; };
@@ -224,6 +226,7 @@
 		0CDD52835B9426B5F422FCA5 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				5A99F1BD2E832DC109BCC03A /* AppLogger.swift */,
 				3C32FF68B777207179BFEFB0 /* BranchNameGenerator.swift */,
 				38E541F2A395A5EB308D9C38 /* Constants.swift */,
 				175F149F9E6D1A6C45F00FC8 /* EffectView.swift */,
@@ -529,6 +532,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				BBD5731ED2E2CA722DF77BA0 /* AppDelegate.swift in Sources */,
+				4D9AE12397A51C88BD1D3B4F /* AppLogger.swift in Sources */,
 				25638B8C67FB225663CCE5A1 /* BookmarkStore.swift in Sources */,
 				68E8E1B4A11A9861636A80B3 /* BranchNameGenerator.swift in Sources */,
 				F9DFB41D15D5628E3305431E /* CommitMessageGenerator.swift in Sources */,
@@ -707,7 +711,7 @@
 				LIBRARY_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
-				MARKETING_VERSION = 1.0.8;
+				MARKETING_VERSION = 1.0.9;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-framework Metal",
@@ -754,7 +758,7 @@
 				LIBRARY_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
-				MARKETING_VERSION = 1.0.8;
+				MARKETING_VERSION = 1.0.9;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-framework Metal",
