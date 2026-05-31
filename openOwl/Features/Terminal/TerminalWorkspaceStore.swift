@@ -417,9 +417,16 @@ final class TerminalWorkspaceStore {
         let nsTabs = tabs.filter { tabNamespaceMap[$0.id] == namespace }
         if nsTabs.isEmpty {
             _ = newTab(for: namespace)
-        } else if let firstTab = nsTabs.first {
-            activeTabID = firstTab.id
+            return
         }
+        // Preserve the user's tab selection when re-entering the same namespace.
+        // Without this guard, every `syncActiveProjectContext` (fired by OSC 7
+        // pwd reports on each shell command) would reset activeTabID to the
+        // first tab — making any non-first tab impossible to stay on while typing.
+        if let currentID = activeTabID, tabNamespaceMap[currentID] == namespace {
+            return
+        }
+        activeTabID = nsTabs.first?.id
     }
 
     /// Tabs for the currently active namespace

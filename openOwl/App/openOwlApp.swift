@@ -231,12 +231,25 @@ struct openOwlApp: App {
             return false
         }
 
+        let wasExpanded = rightDockStore.isExpanded && rightDockStore.activeTab == .files
         rightDockStore.expand(tab: .files)
-        NotificationCenter.default.post(
-            name: .openFileFromTerminal,
-            object: nil,
-            userInfo: ["url": url]
-        )
+        // When the dock was collapsed (or showing a different tab), FileExplorerView
+        // is conditionally mounted by ContentView and its `onReceive` subscription
+        // doesn't exist yet at this point in the runloop. Posting synchronously
+        // would drop the notification. Defer one tick so SwiftUI has time to mount
+        // the view and register its subscriber.
+        let post = {
+            NotificationCenter.default.post(
+                name: .openFileFromTerminal,
+                object: nil,
+                userInfo: ["url": url]
+            )
+        }
+        if wasExpanded {
+            post()
+        } else {
+            DispatchQueue.main.async(execute: post)
+        }
         return true
     }
 
