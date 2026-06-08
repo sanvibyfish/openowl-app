@@ -36,6 +36,7 @@ final class RightDockStore {
     private static let keyActiveTab = "openowl.rightDock.activeTab"
     private static let keyWidth = "openowl.rightDock.width"
     private static let keyFilesShowsEditor = "openowl.rightDock.files.showsEditor"
+    private static let keyFilesShowsTree = "openowl.rightDock.files.showsTree"
     private static let keyGitShowsDiff = "openowl.rightDock.git.showsDiff"
 
     var isExpanded: Bool {
@@ -58,7 +59,18 @@ final class RightDockStore {
 
     /// File explorer: false hides the editor pane, leaving only the tree.
     var filesShowsEditor: Bool {
-        didSet { UserDefaults.standard.set(filesShowsEditor, forKey: Self.keyFilesShowsEditor) }
+        didSet {
+            if !filesShowsEditor { filesShowsTree = true }
+            UserDefaults.standard.set(filesShowsEditor, forKey: Self.keyFilesShowsEditor)
+        }
+    }
+
+    /// File explorer: false hides the tree pane, leaving only the editor.
+    var filesShowsTree: Bool {
+        didSet {
+            if !filesShowsTree { filesShowsEditor = true }
+            UserDefaults.standard.set(filesShowsTree, forKey: Self.keyFilesShowsTree)
+        }
     }
 
     /// Git changes: false hides the diff pane, leaving only the changes list.
@@ -75,6 +87,7 @@ final class RightDockStore {
         let resolvedWidth = CGFloat(savedWidth ?? Double(Self.defaultWidth))
         self.width = max(Self.minWidth, resolvedWidth)
         self.filesShowsEditor = defaults.object(forKey: Self.keyFilesShowsEditor) as? Bool ?? true
+        self.filesShowsTree = defaults.object(forKey: Self.keyFilesShowsTree) as? Bool ?? true
         self.gitShowsDiff = defaults.object(forKey: Self.keyGitShowsDiff) as? Bool ?? true
     }
 
@@ -83,6 +96,14 @@ final class RightDockStore {
         switch activeTab {
         case .files: return filesShowsEditor
         case .git: return gitShowsDiff
+        }
+    }
+
+    /// True if the active tab's list/tree panel is currently visible.
+    var showsListForActiveTab: Bool {
+        switch activeTab {
+        case .files: return filesShowsTree
+        case .git: return true
         }
     }
 

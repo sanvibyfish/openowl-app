@@ -378,6 +378,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let flags = event.modifierFlags.intersection([.command, .shift, .control, .option])
+        if routeTerminalFallbackKeyDown(event, flags: flags) {
+            return true
+        }
+
         guard flags.contains(.command) else { return false }
         guard !flags.contains(.control), !flags.contains(.option) else { return false }
 
@@ -490,6 +494,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         default:
             return false
         }
+    }
+
+    private func routeTerminalFallbackKeyDown(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+        guard !(rightDockStore?.isFullscreen ?? false) else { return false }
+
+        let isEscape = event.keyCode == 53 && (flags.isEmpty || flags == [.shift])
+        let isControlC = flags == [.control] && event.charactersIgnoringModifiers?.lowercased() == "c"
+        guard isEscape || isControlC else { return false }
+
+        guard let window = NSApp.keyWindow else { return false }
+        if let firstResponder = window.firstResponder {
+            if let terminalResponder = firstResponder as? TerminalNSView,
+               terminalResponder.acceptsTerminalKeyboardInput {
+                // The active terminal already owns the responder chain; let AppKit
+                // deliver the key normally so keyDown/keyUp stay paired.
+                return false
+            }
+            guard firstResponder is TerminalNSView else { return false }
+        }
+
+        guard let workspaceStore else { return false }
+        guard let tab = workspaceStore.tabs.first(where: { $0.id == workspaceStore.activeTabID }),
+              let paneID = tab.focusedPaneID ?? tab.splitTree.firstPaneID,
+              let terminalView = ghosttyManager?.terminalView(for: paneID) else { return false }
+
+        if !terminalView.acceptsTerminalKeyboardInput {
+            _ = ghosttyManager?.focusPane(paneID)
+        }
+        return terminalView.handleMonitoredKeyDown(event)
     }
 }
 

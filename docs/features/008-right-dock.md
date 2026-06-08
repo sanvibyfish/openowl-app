@@ -153,7 +153,7 @@ GeometryReader { geo in
 - **删除 ViewTab enum。** 以前调用 `navigationStore.activate(.terminal/.gitChanges/...)` 的代码全部迁移。如果新增功能要"切换主区域显示某 view"，请直接操作 `RightDockStore`。
 - **Free Terminal 行的 title** 来自 ghostty surface 通过 OSC 0/2 设置的 pane title（与 ghostty quick terminal 一致）。shell 启动后 zsh 会自动设置 title 为 cwd 末段；初始显示 "Terminal"。
 - **关闭最后一个 free terminal** 在 UI 层（hover button 不显示）和 model 层（`removeFreeTerminal` 早返回）双重保护。
-- **Right Dock 全屏时 Terminal 仍后台运行。** Terminal 的 `frame(width: 0)` + `clipped()` 隐藏视图但不卸载 ghostty surface，shell 进程不受影响。
+- **Right Dock 全屏时 Terminal 仍后台运行。** Terminal 的 `frame(width: 0)` + `clipped()` 隐藏视图但不卸载 ghostty surface，shell 进程不受影响。隐藏期间不会把 0/1px 尺寸同步给 libghostty，pane 保留上一次可用 PTY 尺寸；退出全屏恢复显示时会按当前 bounds 强制重同步，避免 TUI 仍按旧列数绘制。
 - **`activeKind` 和 `activeProjectID` 不要双向同步。** 内部代码读 `activeKind`，写优先用 `activate(_:)`。`activeProjectID` 的直接赋值仍兼容（didSet 自动清 `activeFreeTerminalID`），但不再推荐。
 
 ## 5. 相关需求
@@ -164,5 +164,6 @@ GeometryReader { geo in
 
 | 日期 | 变更 | 作者 |
 |------|------|------|
+| 2026-06-04 | 补充 Terminal 隐藏期间保留 PTY 尺寸、恢复显示时强制重同步的规则 | Codex |
 | 2026-05-07 | 初稿 + 实现完成 | Lead |
 | 2026-05-10 | Right Dock 展开时隐藏 toolbar 入口，避免与 header tab 重复 | Lead |

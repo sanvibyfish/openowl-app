@@ -14,6 +14,7 @@ class TerminalNSView: NSView {
     private var trackingArea: NSTrackingArea?
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
+    private var lastSyncedBackingSize: CGSize?
     /// Whether the host (TerminalScrollView) considers this surface visible.
     /// Used by viewDidMoveToWindow to avoid briefly un-hiding a paused surface.
     private var hostVisible = true
@@ -27,6 +28,10 @@ class TerminalNSView: NSView {
     var paneIdentifier: UUID { paneID }
     /// Whether Metal is currently rendering (layer not hidden).
     var isRenderingActive: Bool { !(metalLayer?.isHidden ?? true) }
+    var acceptsTerminalKeyboardInput: Bool {
+        guard let surface else { return false }
+        return appManager?.activeSurface == surface && isEffectivelyVisible
+    }
 
     init(ghosttyApp: ghostty_app_t, paneID: UUID) {
         self.ghosttyApp = ghosttyApp
@@ -65,6 +70,9 @@ class TerminalNSView: NSView {
         guard hostVisible != visible else { return }
         hostVisible = visible
         metalLayer?.isHidden = !visible
+        if visible {
+            syncSurfaceSize(reason: "visibility", force: true)
+        }
     }
 
     override func viewDidMoveToWindow() {
@@ -88,7 +96,7 @@ class TerminalNSView: NSView {
             ghostty_surface_set_content_scale(surface, Double(window.backingScaleFactor), Double(window.backingScaleFactor))
             let fbSize = convertToBacking(bounds.size)
             if fbSize.width > 0 && fbSize.height > 0 {
-                ghostty_surface_set_size(surface, UInt32(fbSize.width), UInt32(fbSize.height))
+                syncSurfaceSize(reason: "reattach", force: true)
             }
             setupTrackingArea()
             // Only restore focus if the host considers this surface visible.
@@ -171,7 +179,7 @@ class TerminalNSView: NSView {
 
         let fbSize = convertToBacking(bounds.size)
         if fbSize.width > 0 && fbSize.height > 0 {
-            ghostty_surface_set_size(surface, UInt32(fbSize.width), UInt32(fbSize.height))
+            syncSurfaceSize(reason: "create", force: true)
         }
         ghostty_surface_set_content_scale(surface, Double(window.backingScaleFactor), Double(window.backingScaleFactor))
 
@@ -288,14 +296,55 @@ class TerminalNSView: NSView {
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
+        syncSurfaceSize(reason: "setFrameSize")
+    }
+
+    /// Synchronize the libghostty surface/PTY size with the current AppKit bounds.
+    ///
+    /// AppKit resize callbacks are not reliable enough on their own when SwiftUI
+    /// temporarily hides panes by driving their host view to zero width (right-dock
+    /// fullscreen, inactive tabs, maximized siblings). Hidden panes should keep
+    /// their last usable PTY size; when they become visible again, callers force a
+    /// resync against the settled bounds.
+    func syncSurfaceSize(reason: String, force: Bool = false) {
         guard let surface else { return }
-        let fbSize = convertToBacking(newSize)
-        ghostty_surface_set_size(surface, UInt32(fbSize.width), UInt32(fbSize.height))
+        guard hostVisible else {
+            AppLogger.log("resize-diag", "syncSurfaceSize skipped pane=%@ reason=%@ hostVisible=false pts=%.1fx%.1f",
+                          paneID.uuidString.prefix(8) as CVarArg,
+                          reason,
+                          bounds.size.width, bounds.size.height)
+            return
+        }
+
+        let pointSize = bounds.size
+        guard pointSize.width > 1, pointSize.height > 1 else {
+            AppLogger.log("resize-diag", "syncSurfaceSize skipped pane=%@ reason=%@ tiny pts=%.1fx%.1f",
+                          paneID.uuidString.prefix(8) as CVarArg,
+                          reason,
+                          pointSize.width, pointSize.height)
+            return
+        }
+
+        let fbSize = convertToBacking(pointSize)
+        guard fbSize.width > 1, fbSize.height > 1 else {
+            AppLogger.log("resize-diag", "syncSurfaceSize skipped pane=%@ reason=%@ tiny px=%.0fx%.0f",
+                          paneID.uuidString.prefix(8) as CVarArg,
+                          reason,
+                          fbSize.width, fbSize.height)
+            return
+        }
+
+        let backingSize = CGSize(width: floor(fbSize.width), height: floor(fbSize.height))
+        guard force || backingSize != lastSyncedBackingSize else { return }
+
+        ghostty_surface_set_size(surface, UInt32(backingSize.width), UInt32(backingSize.height))
+        lastSyncedBackingSize = backingSize
         let after = ghostty_surface_size(surface)
-        AppLogger.log("resize-diag", "setFrameSize pane=%@ pts=%.1fx%.1f px=%.0fx%.0f cols=%d rows=%d window=%@",
+        AppLogger.log("resize-diag", "syncSurfaceSize pane=%@ reason=%@ pts=%.1fx%.1f px=%.0fx%.0f cols=%d rows=%d window=%@",
                       paneID.uuidString.prefix(8) as CVarArg,
-                      newSize.width, newSize.height,
-                      fbSize.width, fbSize.height,
+                      reason,
+                      pointSize.width, pointSize.height,
+                      backingSize.width, backingSize.height,
                       Int(after.columns), Int(after.rows),
                       window == nil ? "nil" : "set")
     }
@@ -309,11 +358,13 @@ class TerminalNSView: NSView {
             Double(window.backingScaleFactor),
             Double(window.backingScaleFactor)
         )
+        syncSurfaceSize(reason: "backing-change", force: true)
     }
 
     // MARK: - Keyboard Input
 
     override func keyDown(with event: NSEvent) {
+        guard acceptsTerminalKeyboardInput else { return }
         guard let surface else {
             interpretKeyEvents([event])
             return
@@ -396,6 +447,11 @@ class TerminalNSView: NSView {
         guard event.type == .keyDown, let surface else { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
+        // performKeyEquivalent traverses every TerminalNSView in the window,
+        // including inactive tabs hidden via SwiftUI opacity. Only the active,
+        // visible pane may claim terminal shortcuts.
+        guard acceptsTerminalKeyboardInput else { return false }
+
         // Only handle if this view is the actual first responder.
         // performKeyEquivalent traverses ALL NSViews in the window —
         // without this guard, Cmd+V/C get stolen from TextFields
@@ -444,6 +500,13 @@ class TerminalNSView: NSView {
         }
 
         return false
+    }
+
+    @discardableResult
+    func handleMonitoredKeyDown(_ event: NSEvent) -> Bool {
+        guard acceptsTerminalKeyboardInput else { return false }
+        keyDown(with: event)
+        return true
     }
 
     override func insertText(_ insertString: Any) {

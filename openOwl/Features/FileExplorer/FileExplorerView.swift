@@ -48,6 +48,73 @@ private struct EditorTab: Identifiable, Equatable {
     var name: String { url.lastPathComponent }
 }
 
+struct FileEditorSession: Codable, Equatable {
+    var openFilePaths: [String]
+    var activeFilePath: String?
+}
+
+enum FileEditorSessionPersistence {
+    private static let defaultsKey = "openowl.fileExplorer.editorSessions.v1"
+
+    static func projectKey(for projectURL: URL?) -> String? {
+        projectURL?.standardizedFileURL.path
+    }
+
+    static func load(forProjectKey projectKey: String?, defaults: UserDefaults = .standard) -> FileEditorSession? {
+        guard let projectKey else { return nil }
+        return loadAll(defaults: defaults)[projectKey]
+    }
+
+    static func save(_ session: FileEditorSession, forProjectKey projectKey: String?, defaults: UserDefaults = .standard) {
+        guard let projectKey else { return }
+        var all = loadAll(defaults: defaults)
+        let normalized = normalize(session)
+        if normalized.openFilePaths.isEmpty {
+            all.removeValue(forKey: projectKey)
+        } else {
+            all[projectKey] = normalized
+        }
+        saveAll(all, defaults: defaults)
+    }
+
+    static func clear(forProjectKey projectKey: String?, defaults: UserDefaults = .standard) {
+        guard let projectKey else { return }
+        var all = loadAll(defaults: defaults)
+        all.removeValue(forKey: projectKey)
+        saveAll(all, defaults: defaults)
+    }
+
+    static func normalize(_ session: FileEditorSession) -> FileEditorSession {
+        var seen = Set<String>()
+        let paths = session.openFilePaths.compactMap { path -> String? in
+            let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
+            guard !normalized.isEmpty, seen.insert(normalized).inserted else { return nil }
+            return normalized
+        }
+        let active = session.activeFilePath.map {
+            URL(fileURLWithPath: $0).standardizedFileURL.path
+        }
+        return FileEditorSession(
+            openFilePaths: paths,
+            activeFilePath: active.flatMap { paths.contains($0) ? $0 : nil } ?? paths.last
+        )
+    }
+
+    private static func loadAll(defaults: UserDefaults) -> [String: FileEditorSession] {
+        guard let data = defaults.data(forKey: defaultsKey) else { return [:] }
+        return (try? JSONDecoder().decode([String: FileEditorSession].self, from: data)) ?? [:]
+    }
+
+    private static func saveAll(_ sessions: [String: FileEditorSession], defaults: UserDefaults) {
+        if sessions.isEmpty {
+            defaults.removeObject(forKey: defaultsKey)
+            return
+        }
+        guard let data = try? JSONEncoder().encode(sessions) else { return }
+        defaults.set(data, forKey: defaultsKey)
+    }
+}
+
 // MARK: - Dirty Tracking Coordinator
 
 /// Detects text changes in SourceEditor and marks the active tab as dirty.
@@ -90,6 +157,7 @@ struct FileExplorerView: View {
     @State private var tabStorages: [URL: NSTextStorage] = [:]
     @State private var tabImageCache: [URL: NSImage] = [:]
     @State private var dirtyTabs: Set<URL> = []
+    @State private var editorSessionProjectKey: String?
 
     /// Tabs currently in large-file mode: syntax highlighting off, read-only.
     /// User can lift this per-tab via the "Enable Anyway" banner.
@@ -146,32 +214,31 @@ struct FileExplorerView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            if rightDockStore.filesShowsEditor {
+            if rightDockStore.filesShowsTree && rightDockStore.filesShowsEditor {
                 treePanel
                     .frame(width: treePanelWidth)
 
                 treePanelDivider
 
                 editorPanel
-            } else {
+            } else if rightDockStore.filesShowsTree {
                 treePanel
                     .frame(maxWidth: .infinity)
+            } else {
+                editorOnlyPanel
             }
         }
         .onAppear {
             store.setProject(projectStore.activeProjectURL)
             setupEditTracker()
+            restoreEditorSession(for: projectStore.activeProjectURL, reason: "appear")
         }
         .onChange(of: projectStore.activeProjectID) { _, _ in
             saveAllDirtyTabs()
+            persistEditorSession(reason: "project-switch-out")
             store.setProject(projectStore.activeProjectURL)
-            openTabs = []
-            activeTabURL = nil
-            tabStorages.removeAll()
-            tabImageCache.removeAll()
-            dirtyTabs.removeAll()
-            largeModeTabs.removeAll()
-            previewImage = nil
+            clearEditorTabs(reason: "project-switch", persist: false)
+            restoreEditorSession(for: projectStore.activeProjectURL, reason: "project-switch-in")
         }
         .onChange(of: store.selectedNodeID) { _, newID in
             // Auto-open file when selected externally (e.g. QuickOpen).
@@ -195,6 +262,7 @@ struct FileExplorerView: View {
         }
         .onDisappear {
             saveAllDirtyTabs()
+            persistEditorSession(reason: "disappear")
         }
         // Shortcuts are gated on right-dock visibility — without this gate, Cmd+S / Cmd+W
         // would fire even while the dock is closed or showing a different tab (the view
@@ -251,6 +319,18 @@ struct FileExplorerView: View {
                 .buttonStyle(.plain).help("Refresh")
                 .accessibilityLabel("Refresh")
                 .disabled(store.isRefreshing)
+
+                Button {
+                    rightDockStore.filesShowsTree = false
+                    rightDockStore.filesShowsEditor = true
+                } label: {
+                    Image(systemName: "sidebar.right")
+                        .font(AppFonts.secondaryLabel)
+                }
+                .buttonStyle(.plain)
+                .help("Editor only")
+                .accessibilityLabel("Editor only")
+                .disabled(!rightDockStore.filesShowsEditor || openTabs.isEmpty)
 
                 Button { rightDockStore.filesShowsEditor.toggle() } label: {
                     Image(systemName: rightDockStore.filesShowsEditor
@@ -328,6 +408,38 @@ struct FileExplorerView: View {
         .background(.regularMaterial)
     }
 
+    // MARK: - Editor Only Panel
+
+    private var editorOnlyPanel: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Button {
+                    rightDockStore.filesShowsTree = true
+                } label: {
+                    Image(systemName: "sidebar.left")
+                        .font(AppFonts.secondaryLabel)
+                }
+                .buttonStyle(.plain)
+                .help("Show explorer")
+                .accessibilityLabel("Show explorer")
+                .padding(.leading, AppSpacing.panelPadding)
+                .padding(.trailing, 4)
+
+                if !openTabs.isEmpty {
+                    editorTabBar
+                } else {
+                    Spacer()
+                }
+            }
+            .frame(height: AppSpacing.editorTabBarHeight)
+            .background(AppPalette.surface)
+
+            PanelDivider()
+
+            editorContentArea
+        }
+    }
+
     // MARK: - Editor Panel
 
     private var editorPanel: some View {
@@ -354,50 +466,53 @@ struct FileExplorerView: View {
 
     private var editorPanelContent: some View {
         VStack(spacing: 0) {
-            // Tab bar
             if !openTabs.isEmpty {
                 editorTabBar
             }
 
             PanelDivider()
 
-            // Editor content
-            if let url = activeTabURL {
-                if isActiveTabImage, let image = previewImage {
-                    ScrollView([.horizontal, .vertical]) {
-                        Image(nsImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .padding()
+            editorContentArea
+        }
+    }
+
+    @ViewBuilder
+    private var editorContentArea: some View {
+        if let url = activeTabURL {
+            if isActiveTabImage, let image = previewImage {
+                ScrollView([.horizontal, .vertical]) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .background(Color(nsColor: .windowBackgroundColor))
+            } else if !isActiveTabImage, let storage = tabStorages[url] {
+                let isLargeMode = largeModeTabs.contains(url)
+                VStack(spacing: 0) {
+                    if isLargeMode {
+                        largeFileBanner(for: url)
                     }
+                    SourceEditor(
+                        storage,
+                        language: isLargeMode ? CodeLanguage.default : editorLanguage(for: url),
+                        configuration: isLargeMode ? readOnlyEditorConfiguration : editorConfiguration,
+                        state: $editorState,
+                        coordinators: [editTracker]
+                    )
+                    .id(url)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
-                    .background(Color(nsColor: .windowBackgroundColor))
-                } else if !isActiveTabImage, let storage = tabStorages[url] {
-                    let isLargeMode = largeModeTabs.contains(url)
-                    VStack(spacing: 0) {
-                        if isLargeMode {
-                            largeFileBanner(for: url)
-                        }
-                        SourceEditor(
-                            storage,
-                            language: isLargeMode ? CodeLanguage.default : editorLanguage(for: url),
-                            configuration: isLargeMode ? readOnlyEditorConfiguration : editorConfiguration,
-                            state: $editorState,
-                            coordinators: [editTracker]
-                        )
-                        .id(url)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
-                    }
                 }
-            } else {
-                Spacer()
-                EmptyStateView("Select a file to edit", subtitle: "Click a file in the explorer or use ⌘P")
-                    .frame(maxWidth: .infinity)
-                Spacer()
             }
+        } else {
+            Spacer()
+            EmptyStateView("Select a file to edit", subtitle: "Click a file in the explorer or use ⌘P")
+                .frame(maxWidth: .infinity)
+            Spacer()
         }
     }
 
@@ -481,9 +596,8 @@ struct FileExplorerView: View {
 
         let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
 
-        let ext = url.pathExtension.lowercased()
-        let isImage = Self.imageExtensions.contains(ext)
-        let needsLargeMode = !isImage && fileSize >= Self.largeFileThreshold
+        let isImage = isImageURL(url)
+        let needsLargeMode = shouldOpenInLargeMode(url)
 
         // Huge files (>= 50 MB) require explicit confirmation. Skip the prompt
         // for images — NSImage handles its own decoding cost and we cap them
@@ -506,7 +620,11 @@ struct FileExplorerView: View {
 
         // Image cap stays — NSImage decode for huge images is unbounded.
         let imageMaxBytes = 50_000_000
-        if isImage && fileSize > imageMaxBytes { return }
+        if isImage && fileSize > imageMaxBytes {
+            AppLogger.log("file-editor-state", "open-skip reason=image-too-large path=%@ size=%d",
+                          url.path, fileSize)
+            return
+        }
 
         evictOldestTabIfNeeded()
 
@@ -517,6 +635,8 @@ struct FileExplorerView: View {
         if needsLargeMode {
             largeModeTabs.insert(url)
         }
+        persistEditorSession(reason: "open-tab", activeOverride: url)
+        AppLogger.log("file-editor-state", "open-tab path=%@ tabs=%d", url.path, openTabs.count)
 
         if isImage {
             Task.detached(priority: .userInitiated) {
@@ -528,6 +648,7 @@ struct FileExplorerView: View {
                     activeTabURL = url
                     loadingFileURL = nil
                     isEditorLoading = false
+                    persistEditorSession(reason: "open-image-loaded")
                 }
             }
         } else {
@@ -559,6 +680,7 @@ struct FileExplorerView: View {
                     if needsLargeMode {
                         heavyProgressText = nil
                     }
+                    persistEditorSession(reason: "open-text-loaded")
                 }
                 try? await Task.sleep(for: .milliseconds(50))
                 await MainActor.run {
@@ -567,6 +689,177 @@ struct FileExplorerView: View {
                 }
             }
         }
+    }
+
+    private func restoreEditorSession(for projectURL: URL?, reason: String) {
+        let projectKey = FileEditorSessionPersistence.projectKey(for: projectURL)
+        guard editorSessionProjectKey != projectKey || openTabs.isEmpty else {
+            AppLogger.log("file-editor-state", "restore-skip reason=already-loaded project=%@",
+                          projectKey ?? "nil")
+            return
+        }
+
+        editorSessionProjectKey = projectKey
+        clearEditorTabs(reason: "restore-reset", persist: false)
+
+        guard let projectKey else {
+            AppLogger.log("file-editor-state", "restore-skip reason=no-project")
+            return
+        }
+        guard let session = FileEditorSessionPersistence.load(forProjectKey: projectKey) else {
+            AppLogger.log("file-editor-state", "restore-empty project=%@", projectKey)
+            return
+        }
+
+        let urls = restorableURLs(from: session, projectKey: projectKey)
+        guard !urls.isEmpty else {
+            FileEditorSessionPersistence.clear(forProjectKey: projectKey)
+            AppLogger.log("file-editor-state", "restore-empty-after-filter project=%@", projectKey)
+            return
+        }
+
+        openTabs = urls.map { EditorTab(url: $0) }
+        largeModeTabs = Set(urls.filter { shouldOpenInLargeMode($0) })
+        let activePath = session.activeFilePath
+        let activeURL = urls.first { $0.standardizedFileURL.path == activePath } ?? urls.last
+        activeTabURL = activeURL
+        loadingFileURL = activeURL
+        isEditorLoading = activeURL != nil
+        previewImage = nil
+        editorState = SourceEditorState()
+
+        AppLogger.log("file-editor-state",
+                      "restore project=%@ reason=%@ saved=%d restored=%d active=%@",
+                      projectKey, reason, session.openFilePaths.count, urls.count, activeURL?.path ?? "nil")
+        persistEditorSession(reason: "restore-sanitized")
+
+        for url in urls {
+            loadRestoredTabContent(url)
+        }
+    }
+
+    private func restorableURLs(from session: FileEditorSession, projectKey: String) -> [URL] {
+        let normalized = FileEditorSessionPersistence.normalize(session)
+        var urls: [URL] = []
+        for path in normalized.openFilePaths {
+            guard urls.count < Self.maxOpenTabs else { break }
+            let url = URL(fileURLWithPath: path).standardizedFileURL
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+                AppLogger.log("file-editor-state", "restore-skip reason=missing project=%@ path=%@",
+                              projectKey, url.path)
+                continue
+            }
+            guard !isDirectory.boolValue else {
+                AppLogger.log("file-editor-state", "restore-skip reason=directory project=%@ path=%@",
+                              projectKey, url.path)
+                continue
+            }
+            let fileSize = fileSize(for: url)
+            if isImageURL(url), fileSize > 50_000_000 {
+                AppLogger.log("file-editor-state",
+                              "restore-skip reason=image-too-large project=%@ path=%@ size=%d",
+                              projectKey, url.path, fileSize)
+                continue
+            }
+            urls.append(url)
+        }
+        return urls
+    }
+
+    private func loadRestoredTabContent(_ url: URL) {
+        if isImageURL(url) {
+            Task.detached(priority: .userInitiated) {
+                let image = NSImage(contentsOf: url)
+                await MainActor.run {
+                    guard openTabs.contains(where: { $0.url == url }) else { return }
+                    tabImageCache[url] = image
+                    if activeTabURL == url {
+                        previewImage = image
+                        loadingFileURL = nil
+                        isEditorLoading = false
+                    }
+                }
+            }
+            return
+        }
+
+        let isLargeMode = largeModeTabs.contains(url)
+        Task.detached(priority: .userInitiated) {
+            let content = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            let storage = NSTextStorage(string: content)
+
+            if isLargeMode {
+                await MainActor.run {
+                    guard activeTabURL == url else { return }
+                    heavyProgressText = "Restoring \(url.lastPathComponent)..."
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+
+            await MainActor.run {
+                guard openTabs.contains(where: { $0.url == url }) else { return }
+                tabStorages[url] = storage
+                if activeTabURL == url {
+                    previewImage = nil
+                    editorState = SourceEditorState()
+                    loadingFileURL = nil
+                    if isLargeMode {
+                        heavyProgressText = nil
+                    }
+                }
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+            await MainActor.run {
+                guard activeTabURL == url else { return }
+                isEditorLoading = false
+            }
+        }
+    }
+
+    private func clearEditorTabs(reason: String, persist: Bool) {
+        openTabs = []
+        activeTabURL = nil
+        tabStorages.removeAll()
+        tabImageCache.removeAll()
+        dirtyTabs.removeAll()
+        largeModeTabs.removeAll()
+        previewImage = nil
+        loadingFileURL = nil
+        isEditorLoading = false
+        heavyProgressText = nil
+        if persist {
+            persistEditorSession(reason: reason)
+        }
+        AppLogger.log("file-editor-state", "clear reason=%@ project=%@", reason, editorSessionProjectKey ?? "nil")
+    }
+
+    private func persistEditorSession(reason: String, activeOverride: URL? = nil) {
+        guard let editorSessionProjectKey else {
+            AppLogger.log("file-editor-state", "persist-skip reason=%@ project=nil tabs=%d",
+                          reason, openTabs.count)
+            return
+        }
+        let activePath = (activeOverride ?? activeTabURL)?.standardizedFileURL.path
+        let session = FileEditorSession(
+            openFilePaths: openTabs.map { $0.url.standardizedFileURL.path },
+            activeFilePath: activePath
+        )
+        FileEditorSessionPersistence.save(session, forProjectKey: editorSessionProjectKey)
+        AppLogger.log("file-editor-state", "persist reason=%@ project=%@ tabs=%d active=%@",
+                      reason, editorSessionProjectKey, openTabs.count, activePath ?? "nil")
+    }
+
+    private func fileSize(for url: URL) -> Int {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+    }
+
+    private func isImageURL(_ url: URL) -> Bool {
+        Self.imageExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    private func shouldOpenInLargeMode(_ url: URL) -> Bool {
+        !isImageURL(url) && fileSize(for: url) >= Self.largeFileThreshold
     }
 
     private static func formattedSize(_ bytes: Int) -> String {
@@ -608,6 +901,7 @@ struct FileExplorerView: View {
         isEditorLoading = true
         activeTabURL = url
         editorState = SourceEditorState()
+        persistEditorSession(reason: "switch-tab")
 
         let ext = url.pathExtension.lowercased()
         let isImage = Self.imageExtensions.contains(ext)
@@ -693,6 +987,7 @@ struct FileExplorerView: View {
                 }
             }
         }
+        persistEditorSession(reason: "close-tab")
     }
 
     private func closeActiveTab() {
@@ -712,6 +1007,7 @@ struct FileExplorerView: View {
         tabStorages.removeValue(forKey: evictURL)
         tabImageCache.removeValue(forKey: evictURL)
         largeModeTabs.remove(evictURL)
+        persistEditorSession(reason: "evict-tab")
     }
 
     // MARK: - Save

@@ -150,4 +150,79 @@ struct FileExplorerErrorHandlingTests {
         let result = FileExplorerStore.compactDirectoryPrefixes(input)
         #expect(Set(result) == Set(input))
     }
+
+    // MARK: - File editor session persistence
+
+    @Test func fileEditorSessionPersistence_roundTripsPerProject() throws {
+        let defaults = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuiteName) }
+
+        let projectA = URL(fileURLWithPath: "/Users/openowl-project-a")
+        let projectB = URL(fileURLWithPath: "/Users/openowl-project-b")
+        let session = FileEditorSession(
+            openFilePaths: ["/Users/openowl-project-a/a.swift", "/Users/openowl-project-a/b.swift"],
+            activeFilePath: "/Users/openowl-project-a/b.swift"
+        )
+
+        FileEditorSessionPersistence.save(
+            session,
+            forProjectKey: FileEditorSessionPersistence.projectKey(for: projectA),
+            defaults: defaults
+        )
+
+        #expect(FileEditorSessionPersistence.load(
+            forProjectKey: FileEditorSessionPersistence.projectKey(for: projectA),
+            defaults: defaults
+        ) == FileEditorSessionPersistence.normalize(session))
+        #expect(FileEditorSessionPersistence.load(
+            forProjectKey: FileEditorSessionPersistence.projectKey(for: projectB),
+            defaults: defaults
+        ) == nil)
+    }
+
+    @Test func fileEditorSessionPersistence_emptySessionClearsProject() throws {
+        let defaults = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: defaultsSuiteName) }
+
+        let project = URL(fileURLWithPath: "/Users/openowl-project")
+        let projectKey = FileEditorSessionPersistence.projectKey(for: project)
+        FileEditorSessionPersistence.save(
+            FileEditorSession(openFilePaths: ["/Users/openowl-project/a.swift"], activeFilePath: nil),
+            forProjectKey: projectKey,
+            defaults: defaults
+        )
+        FileEditorSessionPersistence.save(
+            FileEditorSession(openFilePaths: [], activeFilePath: nil),
+            forProjectKey: projectKey,
+            defaults: defaults
+        )
+
+        #expect(FileEditorSessionPersistence.load(forProjectKey: projectKey, defaults: defaults) == nil)
+    }
+
+    @Test func fileEditorSessionPersistence_normalizeDedupesAndRepairsActivePath() {
+        let normalized = FileEditorSessionPersistence.normalize(
+            FileEditorSession(
+                openFilePaths: ["/tmp/openowl-project/a.swift", "/tmp/openowl-project/a.swift"],
+                activeFilePath: "/tmp/openowl-project/missing.swift"
+            )
+        )
+
+        #expect(normalized.openFilePaths == [
+            URL(fileURLWithPath: "/tmp/openowl-project/a.swift").standardizedFileURL.path
+        ])
+        #expect(normalized.activeFilePath == URL(
+            fileURLWithPath: "/tmp/openowl-project/a.swift"
+        ).standardizedFileURL.path)
+    }
+
+    private var defaultsSuiteName: String {
+        "openowl.file-editor-session.tests"
+    }
+
+    private func makeDefaults() throws -> UserDefaults {
+        let defaults = try #require(UserDefaults(suiteName: defaultsSuiteName))
+        defaults.removePersistentDomain(forName: defaultsSuiteName)
+        return defaults
+    }
 }

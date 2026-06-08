@@ -48,7 +48,8 @@ AppLogger.log("resize-diag", "frame=%.1fx%.1f", width, height)
 
 ```
 2026-05-30 22:30:15.123 [resize-diag] ScrollView.layout pane=A1B2C3D4 bounds=800.0x600.0
-2026-05-30 22:30:15.125 [resize-diag] setFrameSize pane=A1B2C3D4 pts=800.0x600.0 cols=120 rows=40
+2026-06-04 14:12:22.125 [resize-diag] syncSurfaceSize pane=A1B2C3D4 reason=scroll-layout pts=800.0x600.0 px=1600x1200 cols=120 rows=40 window=set
+2026-06-05 18:40:10.012 [file-editor-state] restore project=/repo reason=appear saved=3 restored=3 active=/repo/App.swift
 ```
 
 每行包含：时间戳（毫秒精度）+ `[tag]` + 消息内容。
@@ -57,7 +58,9 @@ AppLogger.log("resize-diag", "frame=%.1fx%.1f", width, height)
 
 - 日志目录在首次写入时自动创建，无需手动创建
 - `FileHandle` 在 app 生命周期内保持打开，避免频繁 open/close
-- 当前仅 `[resize-diag]` 相关日志使用 `AppLogger`，其他模块的 `NSLog` 可按需逐步迁移
+- 当前 `[resize-diag]` 与 `[file-editor-state]` 相关日志使用 `AppLogger`，其他模块的 `NSLog` 可按需逐步迁移
+- `syncSurfaceSize skipped ... hostVisible=false/tiny ...` 表示 pane 当前隐藏或尺寸未稳定，openOwl 会保留上一次可用 PTY 尺寸，恢复显示后再同步
+- `[file-editor-state] restore-skip ...` 表示 editor tab session 恢复时跳过不存在文件、目录或超过图片解码上限的图片
 
 ## 5. 相关需求
 
@@ -67,4 +70,6 @@ AppLogger.log("resize-diag", "frame=%.1fx%.1f", width, height)
 
 | 日期 | 说明 |
 |------|------|
+| 2026-06-05 | 新增 file-editor-state 示例与恢复跳过语义 |
+| 2026-06-04 | resize-diag 示例更新为 `syncSurfaceSize`，补充隐藏 pane 尺寸跳过语义 |
 | 2026-05-30 | 初始实现，覆盖 resize-diag 日志 |
