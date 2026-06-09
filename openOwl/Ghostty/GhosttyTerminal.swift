@@ -70,9 +70,6 @@ class TerminalNSView: NSView {
         guard hostVisible != visible else { return }
         hostVisible = visible
         metalLayer?.isHidden = !visible
-        if visible {
-            syncSurfaceSize(reason: "visibility", force: true)
-        }
     }
 
     override func viewDidMoveToWindow() {
@@ -308,30 +305,21 @@ class TerminalNSView: NSView {
     /// resync against the settled bounds.
     func syncSurfaceSize(reason: String, force: Bool = false) {
         guard let surface else { return }
-        guard hostVisible else {
-            AppLogger.log("resize-diag", "syncSurfaceSize skipped pane=%@ reason=%@ hostVisible=false pts=%.1fx%.1f",
-                          paneID.uuidString.prefix(8) as CVarArg,
-                          reason,
-                          bounds.size.width, bounds.size.height)
-            return
+        let paneTag = paneID.uuidString.prefix(8) as CVarArg
+        func logSkip(_ detail: String) {
+            AppLogger.log("resize-diag", "syncSurfaceSize skipped pane=%@ reason=%@ %@", paneTag, reason, detail)
         }
+
+        guard hostVisible else { logSkip("hostVisible=false pts=\(bounds.size.width)x\(bounds.size.height)"); return }
 
         let pointSize = bounds.size
         guard pointSize.width > 1, pointSize.height > 1 else {
-            AppLogger.log("resize-diag", "syncSurfaceSize skipped pane=%@ reason=%@ tiny pts=%.1fx%.1f",
-                          paneID.uuidString.prefix(8) as CVarArg,
-                          reason,
-                          pointSize.width, pointSize.height)
-            return
+            logSkip("tiny pts=\(pointSize.width)x\(pointSize.height)"); return
         }
 
         let fbSize = convertToBacking(pointSize)
         guard fbSize.width > 1, fbSize.height > 1 else {
-            AppLogger.log("resize-diag", "syncSurfaceSize skipped pane=%@ reason=%@ tiny px=%.0fx%.0f",
-                          paneID.uuidString.prefix(8) as CVarArg,
-                          reason,
-                          fbSize.width, fbSize.height)
-            return
+            logSkip("tiny px=\(Int(fbSize.width))x\(Int(fbSize.height))"); return
         }
 
         let backingSize = CGSize(width: floor(fbSize.width), height: floor(fbSize.height))

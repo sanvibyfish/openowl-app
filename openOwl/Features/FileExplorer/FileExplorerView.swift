@@ -158,6 +158,7 @@ struct FileExplorerView: View {
     @State private var tabImageCache: [URL: NSImage] = [:]
     @State private var dirtyTabs: Set<URL> = []
     @State private var editorSessionProjectKey: String?
+    @State private var persistDebounceWork: DispatchWorkItem?
 
     /// Tabs currently in large-file mode: syntax highlighting off, read-only.
     /// User can lift this per-tab via the "Enable Anyway" banner.
@@ -205,6 +206,9 @@ struct FileExplorerView: View {
     /// available, but the user has been warned).
     private static let hugeFileThreshold: Int = 50_000_000
 
+    /// NSImage decode for huge images is unbounded; cap at the same threshold.
+    private static let imageMaxBytes: Int = 50_000_000
+
     private var isActiveTabImage: Bool {
         guard let ext = activeTabURL?.pathExtension.lowercased() else { return false }
         return Self.imageExtensions.contains(ext)
@@ -235,7 +239,7 @@ struct FileExplorerView: View {
         }
         .onChange(of: projectStore.activeProjectID) { _, _ in
             saveAllDirtyTabs()
-            persistEditorSession(reason: "project-switch-out")
+            flushEditorSession(reason: "project-switch-out")
             store.setProject(projectStore.activeProjectURL)
             clearEditorTabs(reason: "project-switch", persist: false)
             restoreEditorSession(for: projectStore.activeProjectURL, reason: "project-switch-in")
@@ -262,7 +266,7 @@ struct FileExplorerView: View {
         }
         .onDisappear {
             saveAllDirtyTabs()
-            persistEditorSession(reason: "disappear")
+            flushEditorSession(reason: "disappear")
         }
         // Shortcuts are gated on right-dock visibility — without this gate, Cmd+S / Cmd+W
         // would fire even while the dock is closed or showing a different tab (the view
@@ -618,9 +622,7 @@ struct FileExplorerView: View {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
 
-        // Image cap stays — NSImage decode for huge images is unbounded.
-        let imageMaxBytes = 50_000_000
-        if isImage && fileSize > imageMaxBytes {
+        if isImage && fileSize > Self.imageMaxBytes {
             AppLogger.log("file-editor-state", "open-skip reason=image-too-large path=%@ size=%d",
                           url.path, fileSize)
             return
@@ -648,7 +650,6 @@ struct FileExplorerView: View {
                     activeTabURL = url
                     loadingFileURL = nil
                     isEditorLoading = false
-                    persistEditorSession(reason: "open-image-loaded")
                 }
             }
         } else {
@@ -680,7 +681,6 @@ struct FileExplorerView: View {
                     if needsLargeMode {
                         heavyProgressText = nil
                     }
-                    persistEditorSession(reason: "open-text-loaded")
                 }
                 try? await Task.sleep(for: .milliseconds(50))
                 await MainActor.run {
@@ -731,7 +731,7 @@ struct FileExplorerView: View {
         AppLogger.log("file-editor-state",
                       "restore project=%@ reason=%@ saved=%d restored=%d active=%@",
                       projectKey, reason, session.openFilePaths.count, urls.count, activeURL?.path ?? "nil")
-        persistEditorSession(reason: "restore-sanitized")
+        flushEditorSession(reason: "restore-sanitized")
 
         for url in urls {
             loadRestoredTabContent(url)
@@ -756,7 +756,7 @@ struct FileExplorerView: View {
                 continue
             }
             let fileSize = fileSize(for: url)
-            if isImageURL(url), fileSize > 50_000_000 {
+            if isImageURL(url), fileSize > Self.imageMaxBytes {
                 AppLogger.log("file-editor-state",
                               "restore-skip reason=image-too-large project=%@ path=%@ size=%d",
                               projectKey, url.path, fileSize)
@@ -834,20 +834,30 @@ struct FileExplorerView: View {
         AppLogger.log("file-editor-state", "clear reason=%@ project=%@", reason, editorSessionProjectKey ?? "nil")
     }
 
-    private func persistEditorSession(reason: String, activeOverride: URL? = nil) {
-        guard let editorSessionProjectKey else {
-            AppLogger.log("file-editor-state", "persist-skip reason=%@ project=nil tabs=%d",
-                          reason, openTabs.count)
-            return
-        }
+    private func persistEditorSession(reason: String, activeOverride: URL? = nil, immediate: Bool = false) {
+        guard let editorSessionProjectKey else { return }
+        persistDebounceWork?.cancel()
         let activePath = (activeOverride ?? activeTabURL)?.standardizedFileURL.path
-        let session = FileEditorSession(
-            openFilePaths: openTabs.map { $0.url.standardizedFileURL.path },
-            activeFilePath: activePath
-        )
-        FileEditorSessionPersistence.save(session, forProjectKey: editorSessionProjectKey)
-        AppLogger.log("file-editor-state", "persist reason=%@ project=%@ tabs=%d active=%@",
-                      reason, editorSessionProjectKey, openTabs.count, activePath ?? "nil")
+        let tabs = openTabs.map { $0.url.standardizedFileURL.path }
+        let projectKey = editorSessionProjectKey
+
+        let work = DispatchWorkItem { [tabs, activePath, projectKey] in
+            let session = FileEditorSession(openFilePaths: tabs, activeFilePath: activePath)
+            FileEditorSessionPersistence.save(session, forProjectKey: projectKey)
+            AppLogger.log("file-editor-state", "persist reason=%@ project=%@ tabs=%d active=%@",
+                          reason, projectKey, tabs.count, activePath ?? "nil")
+        }
+        persistDebounceWork = work
+
+        if immediate {
+            work.perform()
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+        }
+    }
+
+    private func flushEditorSession(reason: String) {
+        persistEditorSession(reason: reason, immediate: true)
     }
 
     private func fileSize(for url: URL) -> Int {

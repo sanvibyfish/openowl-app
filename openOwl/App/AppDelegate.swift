@@ -505,13 +505,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard let window = NSApp.keyWindow else { return false }
         if let firstResponder = window.firstResponder {
-            if let terminalResponder = firstResponder as? TerminalNSView,
-               terminalResponder.acceptsTerminalKeyboardInput {
-                // The active terminal already owns the responder chain; let AppKit
-                // deliver the key normally so keyDown/keyUp stay paired.
+            if firstResponder === window {
+                // No view has focus (SwiftUI state transition cleared responder
+                // chain) — fall through to forward to the terminal.
+            } else if let terminalResponder = firstResponder as? TerminalNSView,
+                      terminalResponder.acceptsTerminalKeyboardInput {
                 return false
+            } else {
+                guard firstResponder is TerminalNSView else { return false }
             }
-            guard firstResponder is TerminalNSView else { return false }
         }
 
         guard let workspaceStore else { return false }

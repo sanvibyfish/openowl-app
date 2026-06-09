@@ -89,6 +89,10 @@ final class RightDockStore {
         self.filesShowsEditor = defaults.object(forKey: Self.keyFilesShowsEditor) as? Bool ?? true
         self.filesShowsTree = defaults.object(forKey: Self.keyFilesShowsTree) as? Bool ?? true
         self.gitShowsDiff = defaults.object(forKey: Self.keyGitShowsDiff) as? Bool ?? true
+        if !filesShowsTree && !filesShowsEditor {
+            filesShowsTree = true
+            defaults.set(true, forKey: Self.keyFilesShowsTree)
+        }
     }
 
     /// True if the active tab's detail panel (editor / diff) is currently visible.
