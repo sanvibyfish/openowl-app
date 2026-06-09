@@ -57,6 +57,7 @@ class TerminalScrollView: NSView {
         super.layout()
         let prev = terminalView.frame
         terminalView.frame = bounds
+        terminalView.syncSurfaceSize(reason: "scroll-layout")
         let indicatorWidth: CGFloat = 8
         let margin: CGFloat = 2
         scroller.frame = CGRect(
@@ -139,8 +140,20 @@ class TerminalScrollView: NSView {
     }
 
     func setTerminalVisibility(_ isVisible: Bool) {
+        let changed = terminalShouldBeVisible != isVisible
         terminalShouldBeVisible = isVisible
         terminalView.setSurfaceVisibility(isVisible)
+        guard isVisible else { return }
+
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+        terminalView.syncSurfaceSize(reason: changed ? "visibility-restored" : "visibility-update", force: changed)
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.terminalShouldBeVisible else { return }
+            self.layoutSubtreeIfNeeded()
+            self.terminalView.syncSurfaceSize(reason: "visibility-async")
+        }
     }
 
     // MARK: - Drag & Drop (forwarded to terminalView)
@@ -296,4 +309,3 @@ class ScrollIndicatorView: NSView {
         onInteractionChange?(false)
     }
 }
-

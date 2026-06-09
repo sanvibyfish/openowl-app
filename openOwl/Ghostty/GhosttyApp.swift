@@ -285,6 +285,17 @@ final class GhosttyAppManager {
         return window.makeFirstResponder(view)
     }
 
+    func ensurePaneFocused(_ paneID: UUID) {
+        guard let surface = paneSurfaceMap[paneID] else { return }
+        if activeSurface != surface {
+            activeSurface = surface
+        }
+        if let view = paneViewMap[paneID]?.value,
+           view.window?.firstResponder !== view {
+            _ = view.window?.makeFirstResponder(view)
+        }
+    }
+
     /// Surface stats for debug display: (total retained, currently rendering).
     var surfaceStats: (total: Int, active: Int) {
         let total = retainedTerminalViews.count

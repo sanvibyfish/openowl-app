@@ -91,6 +91,7 @@ macOS 有两条路径将 Cmd+C/V 送到终端视图：
 - `performKeyEquivalent` 遍历所有 NSView，包括 `opacity(0)` 的隐藏视图。多个 TerminalNSView（分屏/多 tab）都会被调到，必须用 `activeSurface` + `isEffectivelyVisible` 过滤
 - 非终端 tab（如 Deployment 的 TextField）时，终端视图必须 return false 放行事件
 - 不能在 `performKeyEquivalent` 中调 `makeFirstResponder` — 会触发 `onFocus` → `@Published` 状态变更 → SwiftUI 重建视图
+- Right Dock / SwiftUI 状态切换可能临时清空 firstResponder。ESC 与 Ctrl+C 在没有文本输入控件占焦点、且当前 firstResponder 为空或是 stale TerminalNSView 时，由 AppDelegate local monitor 转发给 workspace 当前 focused pane；若 TextField/TextView/OutlineView 占焦点则必须放行
 
 **粘贴实现**
 

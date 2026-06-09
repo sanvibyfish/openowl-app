@@ -83,6 +83,10 @@ struct ContentView: View {
                           newValue ? "TRUE" : "FALSE", rightDockStore.activeTab.rawValue)
             resignFirstResponderForTabSwitch()
         }
+        .onChange(of: rightDockStore.isFullscreen) { _, newValue in
+            AppLogger.log("resize-diag", "=== RightDock.isFullscreen -> %@ activeTab=%@ ===",
+                          newValue ? "TRUE" : "FALSE", rightDockStore.activeTab.rawValue)
+        }
     }
 
     @ViewBuilder
