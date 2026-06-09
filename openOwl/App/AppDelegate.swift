@@ -505,14 +505,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard let window = NSApp.keyWindow else { return false }
         if let firstResponder = window.firstResponder {
-            if firstResponder === window {
-                // No view has focus (SwiftUI state transition cleared responder
-                // chain) — fall through to forward to the terminal.
-            } else if let terminalResponder = firstResponder as? TerminalNSView,
-                      terminalResponder.acceptsTerminalKeyboardInput {
+            if let terminalResponder = firstResponder as? TerminalNSView,
+               terminalResponder.acceptsTerminalKeyboardInput {
                 return false
-            } else {
-                guard firstResponder is TerminalNSView else { return false }
+            }
+            if firstResponder is NSTextView || firstResponder is NSTextField || firstResponder is NSOutlineView {
+                return false
             }
         }
 
@@ -521,9 +519,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               let paneID = tab.focusedPaneID ?? tab.splitTree.firstPaneID,
               let terminalView = ghosttyManager?.terminalView(for: paneID) else { return false }
 
-        if !terminalView.acceptsTerminalKeyboardInput {
-            _ = ghosttyManager?.focusPane(paneID)
-        }
+        ghosttyManager?.ensurePaneFocused(paneID)
         return terminalView.handleMonitoredKeyDown(event)
     }
 }
