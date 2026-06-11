@@ -15,6 +15,7 @@ class TerminalNSView: NSView {
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
     private var lastSyncedBackingSize: CGSize?
+    private var resizeDebounceWork: DispatchWorkItem?
     /// Whether the host (TerminalScrollView) considers this surface visible.
     /// Used by viewDidMoveToWindow to avoid briefly un-hiding a paused surface.
     private var hostVisible = true
@@ -304,6 +305,21 @@ class TerminalNSView: NSView {
     /// their last usable PTY size; when they become visible again, callers force a
     /// resync against the settled bounds.
     func syncSurfaceSize(reason: String, force: Bool = false) {
+        if force {
+            resizeDebounceWork?.cancel()
+            resizeDebounceWork = nil
+            commitSurfaceSize(reason: reason)
+        } else {
+            resizeDebounceWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                self?.commitSurfaceSize(reason: reason)
+            }
+            resizeDebounceWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.032, execute: work)
+        }
+    }
+
+    private func commitSurfaceSize(reason: String) {
         guard let surface else { return }
         let paneTag = paneID.uuidString.prefix(8) as CVarArg
         func logSkip(_ detail: String) {
@@ -323,7 +339,7 @@ class TerminalNSView: NSView {
         }
 
         let backingSize = CGSize(width: floor(fbSize.width), height: floor(fbSize.height))
-        guard force || backingSize != lastSyncedBackingSize else { return }
+        guard backingSize != lastSyncedBackingSize else { return }
 
         ghostty_surface_set_size(surface, UInt32(backingSize.width), UInt32(backingSize.height))
         lastSyncedBackingSize = backingSize
