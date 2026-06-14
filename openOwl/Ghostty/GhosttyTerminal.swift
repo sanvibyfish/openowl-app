@@ -236,18 +236,27 @@ class TerminalNSView: NSView {
     }
 
     @objc func paste(_ sender: Any?) {
-        guard let surface else { return }
-        let action = "paste_from_clipboard"
-        if !ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
-            NSLog("openOwl: binding action failed action=%@", action)
-        }
+        pasteFromClipboard()
     }
 
     @objc func pasteAsPlainText(_ sender: Any?) {
+        pasteFromClipboard()
+    }
+
+    private func pasteFromClipboard() {
         guard let surface else { return }
-        let action = "paste_from_clipboard"
-        if !ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
-            NSLog("openOwl: binding action failed action=%@", action)
+        let pb = NSPasteboard.general
+        let value: String
+        if let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL], !urls.isEmpty {
+            value = urls
+                .map { $0.isFileURL ? Self.shellEscapedPath($0.path) : $0.absoluteString }
+                .joined(separator: " ")
+        } else {
+            value = pb.string(forType: .string) ?? ""
+        }
+        guard !value.isEmpty else { return }
+        value.withCString { ptr in
+            ghostty_surface_text(surface, ptr, UInt(value.utf8.count))
         }
     }
 
@@ -458,10 +467,12 @@ class TerminalNSView: NSView {
             return true
         }
 
-        // Intercept Cmd+V (paste) — use binding action for bracketed paste support
+        // Intercept Cmd+V (paste) — direct text injection via ghostty_surface_text.
+        // ghostty_surface_binding_action("paste_from_clipboard") requires an async
+        // callback chain through read_clipboard_cb that depends on activeSurface
+        // being set correctly; direct injection is more reliable.
         if flags == .command, event.charactersIgnoringModifiers == "v" {
-            let action = "paste_from_clipboard"
-            ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
+            pasteFromClipboard()
             return true
         }
 
