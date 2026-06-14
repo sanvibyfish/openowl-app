@@ -119,10 +119,8 @@ final class GhosttyAppManager {
             // ghostty_surface_key → paste binding → read_clipboard_cb →
             // ghostty_surface_complete_clipboard_request would crash if synchronous.
             DispatchQueue.main.async {
-                // Skip if the triggering surface was freed (pane closed) before
-                // this block ran — `state` is now invalid.
                 guard manager.isSurfaceAlive(triggeringSurface) else { return }
-                let value = NSPasteboard.general.string(forType: .string) ?? ""
+                let value = GhosttyAppManager.readPasteboardContent()
                 value.withCString { ptr in
                     ghostty_surface_complete_clipboard_request(triggeringSurface, ptr, state, false)
                 }
@@ -491,6 +489,25 @@ private final class WeakTerminalView {
 }
 
 private extension GhosttyAppManager {
+    static let shellEscapeCharacters = "\\ ()[]{}<>\"'`!#$&;|*?\t"
+
+    static func readPasteboardContent() -> String {
+        let pb = NSPasteboard.general
+        if let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL], !urls.isEmpty {
+            return urls
+                .map { url -> String in
+                    guard url.isFileURL else { return url.absoluteString }
+                    var result = url.path
+                    for char in shellEscapeCharacters {
+                        result = result.replacingOccurrences(of: String(char), with: "\\\(char)")
+                    }
+                    return result
+                }
+                .joined(separator: " ")
+        }
+        return pb.string(forType: .string) ?? ""
+    }
+
     static func detectFallbackShell() -> String {
         if let envShell = ProcessInfo.processInfo.environment["SHELL"], isExecutableFile(envShell) {
             return envShell

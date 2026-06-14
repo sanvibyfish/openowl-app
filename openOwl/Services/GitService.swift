@@ -403,7 +403,17 @@ final class GitService {
     }
 
     func removeWorktree(path: String) async throws {
-        _ = try await runGit(["worktree", "remove", path, "--force"])
+        do {
+            _ = try await runGit(["worktree", "remove", path, "--force"])
+        } catch {
+            // macOS leaves .DS_Store in the directory, causing "Directory not empty".
+            // Fall back to manual cleanup + prune.
+            let url = URL(fileURLWithPath: path)
+            if FileManager.default.fileExists(atPath: path) {
+                try FileManager.default.removeItem(at: url)
+            }
+            _ = try await runGit(["worktree", "prune"])
+        }
     }
 
     func renameBranch(from oldName: String, to newName: String) async throws {

@@ -15,6 +15,7 @@ class TerminalNSView: NSView {
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
     private var lastSyncedBackingSize: CGSize?
+    private var lastSyncedScale: CGFloat = 0
     private var resizeDebounceWork: DispatchWorkItem?
     /// Whether the host (TerminalScrollView) considers this surface visible.
     /// Used by viewDidMoveToWindow to avoid briefly un-hiding a paused surface.
@@ -90,6 +91,7 @@ class TerminalNSView: NSView {
         // Reattached to a window with an existing surface (SwiftUI recreated the wrapper).
         // Restore scale/size/focus — the surface and shell process are still alive.
         if let surface {
+            lastSyncedScale = window.backingScaleFactor
             metalLayer.contentsScale = window.backingScaleFactor
             ghostty_surface_set_content_scale(surface, Double(window.backingScaleFactor), Double(window.backingScaleFactor))
             let fbSize = convertToBacking(bounds.size)
@@ -111,6 +113,7 @@ class TerminalNSView: NSView {
 
         // First time — create a new surface.
 
+        lastSyncedScale = window.backingScaleFactor
         metalLayer.contentsScale = window.backingScaleFactor
 
         var surfaceConfig = ghostty_surface_config_new()
@@ -233,11 +236,19 @@ class TerminalNSView: NSView {
     }
 
     @objc func paste(_ sender: Any?) {
-        pasteFromClipboard()
+        guard let surface else { return }
+        let action = "paste_from_clipboard"
+        if !ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
+            NSLog("openOwl: binding action failed action=%@", action)
+        }
     }
 
     @objc func pasteAsPlainText(_ sender: Any?) {
-        pasteFromClipboard()
+        guard let surface else { return }
+        let action = "paste_from_clipboard"
+        if !ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
+            NSLog("openOwl: binding action failed action=%@", action)
+        }
     }
 
     @objc override func selectAll(_ sender: Any?) {
@@ -245,28 +256,6 @@ class TerminalNSView: NSView {
         let action = "select_all"
         if !ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
             NSLog("openOwl: binding action failed action=%@", action)
-        }
-    }
-
-    private func pasteFromClipboard() {
-        guard let surface else { return }
-        ghostty_surface_set_focus(surface, true)
-
-        let pb = NSPasteboard.general
-        let value: String
-        // Check for file URLs first (e.g. Cmd+C on a file in Finder),
-        // then fall back to plain string — matches Ghostty's getOpinionatedStringContents.
-        if let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL], !urls.isEmpty {
-            value = urls
-                .map { $0.isFileURL ? Self.shellEscapedPath($0.path) : $0.absoluteString }
-                .joined(separator: " ")
-        } else {
-            value = pb.string(forType: .string) ?? ""
-        }
-
-        guard !value.isEmpty else { return }
-        value.withCString { ptr in
-            ghostty_surface_text(surface, ptr, UInt(value.utf8.count))
         }
     }
 
@@ -356,11 +345,14 @@ class TerminalNSView: NSView {
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         guard let window, let surface else { return }
-        metalLayer?.contentsScale = window.backingScaleFactor
+        let newScale = window.backingScaleFactor
+        guard newScale != lastSyncedScale else { return }
+        lastSyncedScale = newScale
+        metalLayer?.contentsScale = newScale
         ghostty_surface_set_content_scale(
             surface,
-            Double(window.backingScaleFactor),
-            Double(window.backingScaleFactor)
+            Double(newScale),
+            Double(newScale)
         )
         syncSurfaceSize(reason: "backing-change", force: true)
     }
@@ -451,29 +443,25 @@ class TerminalNSView: NSView {
         guard event.type == .keyDown, let surface else { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-        // performKeyEquivalent traverses every TerminalNSView in the window,
-        // including inactive tabs hidden via SwiftUI opacity. Only the active,
-        // visible pane may claim terminal shortcuts.
-        guard acceptsTerminalKeyboardInput else { return false }
-
-        // Only handle if this view is the actual first responder.
-        // performKeyEquivalent traverses ALL NSViews in the window —
-        // without this guard, Cmd+V/C get stolen from TextFields
-        // (QuickOpen, commit message, etc.) even when the terminal
-        // doesn't have focus.
+        // performKeyEquivalent traverses ALL NSViews in the window.
+        // Only the first responder should claim terminal shortcuts —
+        // this prevents stealing Cmd+V/C from TextFields.
         guard window?.firstResponder === self else { return false }
 
-        // Intercept Escape — NavigationSplitView consumes ESC in performKeyEquivalent
-        // (to collapse the sidebar) before keyDown reaches this view. Claim it here so
-        // ghostty receives it via keyDown.
+        // Intercept Escape — NavigationSplitView consumes ESC before keyDown
+        // reaches this view. Use the stricter acceptsTerminalKeyboardInput
+        // guard because ESC directly invokes keyDown, which must only run on
+        // the active, visible pane.
         if event.keyCode == 53, flags.isEmpty || flags == .shift {
+            guard acceptsTerminalKeyboardInput else { return false }
             keyDown(with: event)
             return true
         }
 
-        // Intercept Cmd+V (paste)
+        // Intercept Cmd+V (paste) — use binding action for bracketed paste support
         if flags == .command, event.charactersIgnoringModifiers == "v" {
-            pasteFromClipboard()
+            let action = "paste_from_clipboard"
+            ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
             return true
         }
 
