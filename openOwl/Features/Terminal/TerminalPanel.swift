@@ -41,7 +41,7 @@ struct TerminalPanel: NSViewRepresentable {
 
     func updateNSView(_ nsView: TerminalScrollView, context: Context) {
         nsView.terminalView.onFocus = onFocus
-        nsView.freezeTerminalWidth = rightDockStore.isExpanded && !rightDockStore.isFullscreen
+        nsView.freezeTerminalWidth = rightDockStore.isAnimatingDockResize && !rightDockStore.isFullscreen
         nsView.setTerminalVisibility(isVisible)
     }
 }
