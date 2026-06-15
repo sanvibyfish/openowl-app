@@ -91,7 +91,6 @@ final class RightDockStore {
         self.gitShowsDiff = defaults.object(forKey: Self.keyGitShowsDiff) as? Bool ?? true
         if !filesShowsTree && !filesShowsEditor {
             filesShowsTree = true
-            defaults.set(true, forKey: Self.keyFilesShowsTree)
         }
     }
 

@@ -488,26 +488,19 @@ private final class WeakTerminalView {
     }
 }
 
-private extension GhosttyAppManager {
-    static let shellEscapeCharacters = "\\ ()[]{}<>\"'`!#$&;|*?\t"
-
+extension GhosttyAppManager {
     static func readPasteboardContent() -> String {
         let pb = NSPasteboard.general
         if let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL], !urls.isEmpty {
             return urls
-                .map { url -> String in
-                    guard url.isFileURL else { return url.absoluteString }
-                    var result = url.path
-                    for char in shellEscapeCharacters {
-                        result = result.replacingOccurrences(of: String(char), with: "\\\(char)")
-                    }
-                    return result
-                }
+                .map { $0.isFileURL ? TerminalNSView.shellEscapedPath($0.path) : $0.absoluteString }
                 .joined(separator: " ")
         }
         return pb.string(forType: .string) ?? ""
     }
+}
 
+private extension GhosttyAppManager {
     static func detectFallbackShell() -> String {
         if let envShell = ProcessInfo.processInfo.environment["SHELL"], isExecutableFile(envShell) {
             return envShell

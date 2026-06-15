@@ -408,6 +408,11 @@ final class GitService {
         } catch {
             // macOS leaves .DS_Store in the directory, causing "Directory not empty".
             // Fall back to manual cleanup + prune.
+            let errorMsg = String(describing: error)
+            guard errorMsg.contains("not empty") || errorMsg.contains("is not empty") else {
+                throw error
+            }
+            NSLog("openOwl: worktree remove hit non-empty dir (likely .DS_Store), manual cleanup: %@", path)
             let url = URL(fileURLWithPath: path)
             if FileManager.default.fileExists(atPath: path) {
                 try FileManager.default.removeItem(at: url)

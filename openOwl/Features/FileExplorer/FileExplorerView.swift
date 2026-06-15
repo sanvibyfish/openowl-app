@@ -102,7 +102,13 @@ enum FileEditorSessionPersistence {
 
     private static func loadAll(defaults: UserDefaults) -> [String: FileEditorSession] {
         guard let data = defaults.data(forKey: defaultsKey) else { return [:] }
-        return (try? JSONDecoder().decode([String: FileEditorSession].self, from: data)) ?? [:]
+        do {
+            return try JSONDecoder().decode([String: FileEditorSession].self, from: data)
+        } catch {
+            AppLogger.log("file-editor-state", "decode-failed error=%@ dataSize=%d", String(describing: error), data.count)
+            defaults.set(data, forKey: defaultsKey + ".corrupt-backup")
+            return [:]
+        }
     }
 
     private static func saveAll(_ sessions: [String: FileEditorSession], defaults: UserDefaults) {
@@ -110,8 +116,12 @@ enum FileEditorSessionPersistence {
             defaults.removeObject(forKey: defaultsKey)
             return
         }
-        guard let data = try? JSONEncoder().encode(sessions) else { return }
-        defaults.set(data, forKey: defaultsKey)
+        do {
+            let data = try JSONEncoder().encode(sessions)
+            defaults.set(data, forKey: defaultsKey)
+        } catch {
+            AppLogger.log("file-editor-state", "encode-failed error=%@ sessionCount=%d", String(describing: error), sessions.count)
+        }
     }
 }
 

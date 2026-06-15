@@ -245,15 +245,7 @@ class TerminalNSView: NSView {
 
     private func pasteFromClipboard() {
         guard let surface else { return }
-        let pb = NSPasteboard.general
-        let value: String
-        if let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL], !urls.isEmpty {
-            value = urls
-                .map { $0.isFileURL ? Self.shellEscapedPath($0.path) : $0.absoluteString }
-                .joined(separator: " ")
-        } else {
-            value = pb.string(forType: .string) ?? ""
-        }
+        let value = GhosttyAppManager.readPasteboardContent()
         guard !value.isEmpty else { return }
         value.withCString { ptr in
             ghostty_surface_text(surface, ptr, UInt(value.utf8.count))
@@ -369,7 +361,10 @@ class TerminalNSView: NSView {
     // MARK: - Keyboard Input
 
     override func keyDown(with event: NSEvent) {
-        guard acceptsTerminalKeyboardInput else { return }
+        guard acceptsTerminalKeyboardInput else {
+            super.keyDown(with: event)
+            return
+        }
         guard let surface else {
             interpretKeyEvents([event])
             return
