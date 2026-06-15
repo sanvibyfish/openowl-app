@@ -220,8 +220,8 @@ struct FileExplorerView: View {
     private static let imageMaxBytes: Int = 50_000_000
 
     private var isActiveTabImage: Bool {
-        guard let ext = activeTabURL?.pathExtension.lowercased() else { return false }
-        return Self.imageExtensions.contains(ext)
+        guard let url = activeTabURL else { return false }
+        return isImageURL(url)
     }
 
     @State private var treePanelWidth: CGFloat = 240
@@ -450,7 +450,25 @@ struct FileExplorerView: View {
 
             PanelDivider()
 
-            editorContentArea
+            ZStack {
+                editorContentArea
+
+                if let text = heavyProgressText {
+                    Color.black.opacity(0.25)
+                        .overlay {
+                            VStack(spacing: 8) {
+                                ProgressView()
+                                    .controlSize(.large)
+                                Text(text)
+                                    .font(AppFonts.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(20)
+                            .background(.regularMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                }
+            }
         }
     }
 
@@ -608,10 +626,10 @@ struct FileExplorerView: View {
             return
         }
 
-        let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+        let fileSize = fileSize(for: url)
 
         let isImage = isImageURL(url)
-        let needsLargeMode = shouldOpenInLargeMode(url)
+        let needsLargeMode = !isImage && fileSize >= Self.largeFileThreshold
 
         // Huge files (>= 50 MB) require explicit confirmation. Skip the prompt
         // for images — NSImage handles its own decoding cost and we cap them
@@ -796,7 +814,17 @@ struct FileExplorerView: View {
 
         let isLargeMode = largeModeTabs.contains(url)
         Task.detached(priority: .userInitiated) {
-            let content = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            let content: String
+            do {
+                content = try String(contentsOf: url, encoding: .utf8)
+            } catch {
+                AppLogger.log("file-editor-state", "restore-read-failed path=%@ error=%@", url.path, error.localizedDescription)
+                await MainActor.run {
+                    openTabs.removeAll { $0.url == url }
+                    persistEditorSession(reason: "restore-read-failed")
+                }
+                return
+            }
             let storage = NSTextStorage(string: content)
 
             if isLargeMode {
@@ -923,8 +951,7 @@ struct FileExplorerView: View {
         editorState = SourceEditorState()
         persistEditorSession(reason: "switch-tab")
 
-        let ext = url.pathExtension.lowercased()
-        let isImage = Self.imageExtensions.contains(ext)
+        let isImage = isImageURL(url)
 
         if isImage {
             previewImage = tabImageCache[url]
@@ -993,8 +1020,7 @@ struct FileExplorerView: View {
                 activeTabURL = newURL
                 editorState = SourceEditorState()
 
-                let ext = newURL.pathExtension.lowercased()
-                if Self.imageExtensions.contains(ext) {
+                if isImageURL(newURL) {
                     previewImage = tabImageCache[newURL]
                     isEditorLoading = false
                 } else {

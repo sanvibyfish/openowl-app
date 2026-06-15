@@ -244,7 +244,10 @@ class TerminalNSView: NSView {
     }
 
     private func pasteFromClipboard() {
-        guard let surface else { return }
+        guard let surface else {
+            NSLog("openOwl: paste skipped — surface is nil for pane %@", paneID.uuidString.prefix(8) as CVarArg)
+            return
+        }
         let value = GhosttyAppManager.readPasteboardContent()
         guard !value.isEmpty else { return }
         value.withCString { ptr in
@@ -300,6 +303,10 @@ class TerminalNSView: NSView {
             resizeDebounceWork = nil
             commitSurfaceSize(reason: reason)
         } else {
+            let fb = convertToBacking(bounds.size)
+            let candidate = CGSize(width: floor(fb.width), height: floor(fb.height))
+            if candidate == lastSyncedBackingSize { return }
+
             resizeDebounceWork?.cancel()
             let work = DispatchWorkItem { [weak self] in
                 self?.commitSurfaceSize(reason: reason)
@@ -467,6 +474,7 @@ class TerminalNSView: NSView {
         // callback chain through read_clipboard_cb that depends on activeSurface
         // being set correctly; direct injection is more reliable.
         if flags == .command, event.charactersIgnoringModifiers == "v" {
+            guard surface != nil else { return false }
             pasteFromClipboard()
             return true
         }

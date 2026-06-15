@@ -121,14 +121,6 @@ final class RightDockStore {
         }
     }
 
-    /// True if the active tab's list/tree panel is currently visible.
-    var showsListForActiveTab: Bool {
-        switch activeTab {
-        case .files: return filesShowsTree
-        case .git: return true
-        }
-    }
-
     /// Width the dock panel actually occupies, given fullscreen state and
     /// whether the active tab is showing its detail pane. The host passes its
     /// own width so fullscreen can stretch to fill the space minus the rail.

@@ -509,7 +509,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                terminalResponder.acceptsTerminalKeyboardInput {
                 return false
             }
-            if firstResponder is NSTextView || firstResponder is NSTextField || firstResponder is NSOutlineView {
+            if firstResponder !== window && !(firstResponder is TerminalNSView) {
                 return false
             }
         }
