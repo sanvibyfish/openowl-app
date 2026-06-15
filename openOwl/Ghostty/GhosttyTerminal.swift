@@ -31,8 +31,8 @@ class TerminalNSView: NSView {
     /// Whether Metal is currently rendering (layer not hidden).
     var isRenderingActive: Bool { !(metalLayer?.isHidden ?? true) }
     var acceptsTerminalKeyboardInput: Bool {
-        guard let surface else { return false }
-        return appManager?.activeSurface == surface && isEffectivelyVisible
+        guard surface != nil else { return false }
+        return window?.firstResponder === self && isEffectivelyVisible
     }
 
     init(ghosttyApp: ghostty_app_t, paneID: UUID) {
@@ -306,7 +306,7 @@ class TerminalNSView: NSView {
                 self?.commitSurfaceSize(reason: reason)
             }
             resizeDebounceWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.032, execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
         }
     }
 

@@ -55,6 +55,7 @@ struct FileEditorSession: Codable, Equatable {
 
 enum FileEditorSessionPersistence {
     private static let defaultsKey = "openowl.fileExplorer.editorSessions.v1"
+    private static var cache: [String: FileEditorSession]?
 
     static func projectKey(for projectURL: URL?) -> String? {
         projectURL?.standardizedFileURL.path
@@ -62,19 +63,20 @@ enum FileEditorSessionPersistence {
 
     static func load(forProjectKey projectKey: String?, defaults: UserDefaults = .standard) -> FileEditorSession? {
         guard let projectKey else { return nil }
-        return loadAll(defaults: defaults)[projectKey]
+        return ensureLoaded(defaults: defaults)[projectKey]
     }
 
     static func save(_ session: FileEditorSession, forProjectKey projectKey: String?, defaults: UserDefaults = .standard) {
         guard let projectKey else { return }
-        var all = loadAll(defaults: defaults)
+        var all = ensureLoaded(defaults: defaults)
         let normalized = normalize(session)
         if normalized.openFilePaths.isEmpty {
             all.removeValue(forKey: projectKey)
         } else {
             all[projectKey] = normalized
         }
-        saveAll(all, defaults: defaults)
+        cache = all
+        flush(all, defaults: defaults)
     }
 
     static func normalize(_ session: FileEditorSession) -> FileEditorSession {
@@ -93,18 +95,25 @@ enum FileEditorSessionPersistence {
         )
     }
 
-    private static func loadAll(defaults: UserDefaults) -> [String: FileEditorSession] {
-        guard let data = defaults.data(forKey: defaultsKey) else { return [:] }
+    private static func ensureLoaded(defaults: UserDefaults) -> [String: FileEditorSession] {
+        if let cache { return cache }
+        guard let data = defaults.data(forKey: defaultsKey) else {
+            cache = [:]
+            return [:]
+        }
         do {
-            return try JSONDecoder().decode([String: FileEditorSession].self, from: data)
+            let decoded = try JSONDecoder().decode([String: FileEditorSession].self, from: data)
+            cache = decoded
+            return decoded
         } catch {
             AppLogger.log("file-editor-state", "decode-failed error=%@ dataSize=%d", String(describing: error), data.count)
             defaults.set(data, forKey: defaultsKey + ".corrupt-backup")
+            cache = [:]
             return [:]
         }
     }
 
-    private static func saveAll(_ sessions: [String: FileEditorSession], defaults: UserDefaults) {
+    private static func flush(_ sessions: [String: FileEditorSession], defaults: UserDefaults) {
         if sessions.isEmpty {
             defaults.removeObject(forKey: defaultsKey)
             return
