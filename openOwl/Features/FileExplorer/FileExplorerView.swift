@@ -77,13 +77,6 @@ enum FileEditorSessionPersistence {
         saveAll(all, defaults: defaults)
     }
 
-    static func clear(forProjectKey projectKey: String?, defaults: UserDefaults = .standard) {
-        guard let projectKey else { return }
-        var all = loadAll(defaults: defaults)
-        all.removeValue(forKey: projectKey)
-        saveAll(all, defaults: defaults)
-    }
-
     static func normalize(_ session: FileEditorSession) -> FileEditorSession {
         var seen = Set<String>()
         let paths = session.openFilePaths.compactMap { path -> String? in
@@ -96,7 +89,7 @@ enum FileEditorSessionPersistence {
         }
         return FileEditorSession(
             openFilePaths: paths,
-            activeFilePath: active.flatMap { paths.contains($0) ? $0 : nil } ?? paths.last
+            activeFilePath: active.flatMap(paths.contains) == true ? active : paths.last
         )
     }
 
@@ -721,7 +714,7 @@ struct FileExplorerView: View {
 
     private func restoreEditorSession(for projectURL: URL?, reason: String) {
         let projectKey = FileEditorSessionPersistence.projectKey(for: projectURL)
-        guard editorSessionProjectKey != projectKey || openTabs.isEmpty else {
+        if editorSessionProjectKey == projectKey, !openTabs.isEmpty {
             AppLogger.log("file-editor-state", "restore-skip reason=already-loaded project=%@",
                           projectKey ?? "nil")
             return
@@ -741,7 +734,7 @@ struct FileExplorerView: View {
 
         let urls = restorableURLs(from: session, projectKey: projectKey)
         guard !urls.isEmpty else {
-            FileEditorSessionPersistence.clear(forProjectKey: projectKey)
+            FileEditorSessionPersistence.save(FileEditorSession(openFilePaths: [], activeFilePath: nil), forProjectKey: projectKey)
             AppLogger.log("file-editor-state", "restore-empty-after-filter project=%@", projectKey)
             return
         }
@@ -801,11 +794,17 @@ struct FileExplorerView: View {
                 let image = NSImage(contentsOf: url)
                 await MainActor.run {
                     guard openTabs.contains(where: { $0.url == url }) else { return }
-                    tabImageCache[url] = image
-                    if activeTabURL == url {
-                        previewImage = image
-                        loadingFileURL = nil
-                        isEditorLoading = false
+                    if let image {
+                        tabImageCache[url] = image
+                        if activeTabURL == url {
+                            previewImage = image
+                            loadingFileURL = nil
+                            isEditorLoading = false
+                        }
+                    } else {
+                        AppLogger.log("file-editor-state", "restore-image-failed path=%@", url.path)
+                        openTabs.removeAll { $0.url == url }
+                        persistEditorSession(reason: "restore-image-failed")
                     }
                 }
             }

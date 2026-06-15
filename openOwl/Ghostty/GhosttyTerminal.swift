@@ -94,10 +94,7 @@ class TerminalNSView: NSView {
             lastSyncedScale = window.backingScaleFactor
             metalLayer.contentsScale = window.backingScaleFactor
             ghostty_surface_set_content_scale(surface, Double(window.backingScaleFactor), Double(window.backingScaleFactor))
-            let fbSize = convertToBacking(bounds.size)
-            if fbSize.width > 0 && fbSize.height > 0 {
-                syncSurfaceSize(reason: "reattach", force: true)
-            }
+            syncSurfaceSize(reason: "reattach", force: true)
             setupTrackingArea()
             // Only restore focus if the host considers this surface visible.
             // Hidden panes (background tab, maximized sibling) must not grab
@@ -178,10 +175,7 @@ class TerminalNSView: NSView {
             return
         }
 
-        let fbSize = convertToBacking(bounds.size)
-        if fbSize.width > 0 && fbSize.height > 0 {
-            syncSurfaceSize(reason: "create", force: true)
-        }
+        syncSurfaceSize(reason: "create", force: true)
         ghostty_surface_set_content_scale(surface, Double(window.backingScaleFactor), Double(window.backingScaleFactor))
 
         if let surface {

@@ -288,10 +288,7 @@ final class GhosttyAppManager {
         if activeSurface != surface {
             activeSurface = surface
         }
-        if let view = paneViewMap[paneID]?.value,
-           view.window?.firstResponder !== view {
-            _ = view.window?.makeFirstResponder(view)
-        }
+        _ = focusPane(paneID)
     }
 
     /// Surface stats for debug display: (total retained, currently rendering).
