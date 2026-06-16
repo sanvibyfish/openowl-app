@@ -240,8 +240,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func menuTerminalSearch() {
         guard let workspaceStore else { return }
-        if let tab = workspaceStore.tabs.first(where: { $0.id == workspaceStore.activeTabID }),
-           let paneID = tab.focusedPaneID ?? tab.splitTree.firstPaneID {
+        if let paneID = workspaceStore.activeFocusedPaneID {
             workspaceStore.startSearch(paneID: paneID)
         }
     }
@@ -359,8 +358,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Return/Shift+Return (navigate) only when the search text field is focused —
         // if TerminalNSView has focus, the user is typing in the terminal and Return
         // must reach the shell (e.g. IME confirmation, command execution).
-        if let tab = workspaceStore.tabs.first(where: { $0.id == workspaceStore.activeTabID }),
-           let paneID = tab.focusedPaneID ?? tab.splitTree.firstPaneID,
+        if let paneID = workspaceStore.activeFocusedPaneID,
            let searchState = workspaceStore.paneSearchStates[paneID],
            searchState.isSearching {
             switch event.keyCode {
@@ -486,8 +484,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return true
         case "f":
             guard !flags.contains(.shift) else { return false }
-            if let tab = workspaceStore.tabs.first(where: { $0.id == workspaceStore.activeTabID }),
-               let paneID = tab.focusedPaneID ?? tab.splitTree.firstPaneID {
+            if let paneID = workspaceStore.activeFocusedPaneID {
                 workspaceStore.startSearch(paneID: paneID)
             }
             return true
@@ -497,11 +494,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func routeTerminalFallbackKeyDown(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
-        guard !(rightDockStore?.isFullscreen ?? false) else { return false }
-
         let isEscape = event.keyCode == 53 && (flags.isEmpty || flags == [.shift])
         let isControlC = flags == [.control] && event.charactersIgnoringModifiers?.lowercased() == "c"
         guard isEscape || isControlC else { return false }
+
+        guard !(rightDockStore?.isFullscreen ?? false) else { return false }
 
         guard let window = NSApp.keyWindow else { return false }
         if let firstResponder = window.firstResponder {
@@ -509,14 +506,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                terminalResponder.acceptsTerminalKeyboardInput {
                 return false
             }
-            if firstResponder is NSTextView || firstResponder is NSTextField || firstResponder is NSOutlineView {
+            if firstResponder !== window && !(firstResponder is TerminalNSView) {
                 return false
             }
         }
 
         guard let workspaceStore else { return false }
-        guard let tab = workspaceStore.tabs.first(where: { $0.id == workspaceStore.activeTabID }),
-              let paneID = tab.focusedPaneID ?? tab.splitTree.firstPaneID,
+        guard let paneID = workspaceStore.activeFocusedPaneID,
               let terminalView = ghosttyManager?.terminalView(for: paneID) else { return false }
 
         ghosttyManager?.ensurePaneFocused(paneID)

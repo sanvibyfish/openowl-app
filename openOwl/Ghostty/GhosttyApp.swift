@@ -119,10 +119,8 @@ final class GhosttyAppManager {
             // ghostty_surface_key → paste binding → read_clipboard_cb →
             // ghostty_surface_complete_clipboard_request would crash if synchronous.
             DispatchQueue.main.async {
-                // Skip if the triggering surface was freed (pane closed) before
-                // this block ran — `state` is now invalid.
                 guard manager.isSurfaceAlive(triggeringSurface) else { return }
-                let value = NSPasteboard.general.string(forType: .string) ?? ""
+                let value = GhosttyAppManager.readPasteboardContent()
                 value.withCString { ptr in
                     ghostty_surface_complete_clipboard_request(triggeringSurface, ptr, state, false)
                 }
@@ -290,10 +288,7 @@ final class GhosttyAppManager {
         if activeSurface != surface {
             activeSurface = surface
         }
-        if let view = paneViewMap[paneID]?.value,
-           view.window?.firstResponder !== view {
-            _ = view.window?.makeFirstResponder(view)
-        }
+        _ = focusPane(paneID)
     }
 
     /// Surface stats for debug display: (total retained, currently rendering).
@@ -487,6 +482,18 @@ private final class WeakTerminalView {
 
     init(_ value: TerminalNSView?) {
         self.value = value
+    }
+}
+
+extension GhosttyAppManager {
+    static func readPasteboardContent() -> String {
+        let pb = NSPasteboard.general
+        if let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL], !urls.isEmpty {
+            return urls
+                .map { $0.isFileURL ? TerminalNSView.shellEscapedPath($0.path) : $0.absoluteString }
+                .joined(separator: " ")
+        }
+        return pb.string(forType: .string) ?? ""
     }
 }
 

@@ -336,6 +336,11 @@ final class TerminalWorkspaceStore {
     private(set) var tabs: [TerminalTabState] = []
     var activeTabID: UUID?
 
+    var activeFocusedPaneID: UUID? {
+        guard let tab = tabs.first(where: { $0.id == activeTabID }) else { return nil }
+        return tab.focusedPaneID ?? tab.splitTree.firstPaneID
+    }
+
     /// Set by the host app to request first responder hand-off to a pane's NSView.
     var focusPaneHandler: ((UUID) -> Void)?
 

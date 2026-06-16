@@ -43,6 +43,7 @@ final class RightDockStore {
         didSet {
             UserDefaults.standard.set(isExpanded, forKey: Self.keyExpanded)
             if !isExpanded { isFullscreen = false }
+            startDockResizeAnimation()
         }
     }
 
@@ -55,7 +56,15 @@ final class RightDockStore {
     }
 
     /// Fullscreen is session-scoped — not persisted across launches.
-    var isFullscreen: Bool = false
+    var isFullscreen: Bool = false {
+        didSet { startDockResizeAnimation() }
+    }
+
+    /// True only during the ~400ms window after the dock starts expanding/collapsing.
+    /// Used by TerminalPanel to freeze terminal width during the animation to prevent
+    /// destructive PTY reflow, then auto-releases so the terminal can resize normally.
+    private(set) var isAnimatingDockResize: Bool = false
+    private var dockResizeTimer: DispatchWorkItem?
 
     /// File explorer: false hides the editor pane, leaving only the tree.
     var filesShowsEditor: Bool {
@@ -91,8 +100,17 @@ final class RightDockStore {
         self.gitShowsDiff = defaults.object(forKey: Self.keyGitShowsDiff) as? Bool ?? true
         if !filesShowsTree && !filesShowsEditor {
             filesShowsTree = true
-            defaults.set(true, forKey: Self.keyFilesShowsTree)
         }
+    }
+
+    func startDockResizeAnimation() {
+        dockResizeTimer?.cancel()
+        isAnimatingDockResize = true
+        let work = DispatchWorkItem { [weak self] in
+            self?.isAnimatingDockResize = false
+        }
+        dockResizeTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 
     /// True if the active tab's detail panel (editor / diff) is currently visible.
@@ -100,14 +118,6 @@ final class RightDockStore {
         switch activeTab {
         case .files: return filesShowsEditor
         case .git: return gitShowsDiff
-        }
-    }
-
-    /// True if the active tab's list/tree panel is currently visible.
-    var showsListForActiveTab: Bool {
-        switch activeTab {
-        case .files: return filesShowsTree
-        case .git: return true
         }
     }
 

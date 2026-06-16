@@ -15,6 +15,8 @@ class TerminalNSView: NSView {
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
     private var lastSyncedBackingSize: CGSize?
+    private var lastSyncedScale: CGFloat = 0
+    private var resizeDebounceWork: DispatchWorkItem?
     /// Whether the host (TerminalScrollView) considers this surface visible.
     /// Used by viewDidMoveToWindow to avoid briefly un-hiding a paused surface.
     private var hostVisible = true
@@ -29,8 +31,8 @@ class TerminalNSView: NSView {
     /// Whether Metal is currently rendering (layer not hidden).
     var isRenderingActive: Bool { !(metalLayer?.isHidden ?? true) }
     var acceptsTerminalKeyboardInput: Bool {
-        guard let surface else { return false }
-        return appManager?.activeSurface == surface && isEffectivelyVisible
+        guard surface != nil else { return false }
+        return window?.firstResponder === self && isEffectivelyVisible
     }
 
     init(ghosttyApp: ghostty_app_t, paneID: UUID) {
@@ -89,12 +91,10 @@ class TerminalNSView: NSView {
         // Reattached to a window with an existing surface (SwiftUI recreated the wrapper).
         // Restore scale/size/focus — the surface and shell process are still alive.
         if let surface {
+            lastSyncedScale = window.backingScaleFactor
             metalLayer.contentsScale = window.backingScaleFactor
             ghostty_surface_set_content_scale(surface, Double(window.backingScaleFactor), Double(window.backingScaleFactor))
-            let fbSize = convertToBacking(bounds.size)
-            if fbSize.width > 0 && fbSize.height > 0 {
-                syncSurfaceSize(reason: "reattach", force: true)
-            }
+            syncSurfaceSize(reason: "reattach", force: true)
             setupTrackingArea()
             // Only restore focus if the host considers this surface visible.
             // Hidden panes (background tab, maximized sibling) must not grab
@@ -110,6 +110,7 @@ class TerminalNSView: NSView {
 
         // First time — create a new surface.
 
+        lastSyncedScale = window.backingScaleFactor
         metalLayer.contentsScale = window.backingScaleFactor
 
         var surfaceConfig = ghostty_surface_config_new()
@@ -174,10 +175,7 @@ class TerminalNSView: NSView {
             return
         }
 
-        let fbSize = convertToBacking(bounds.size)
-        if fbSize.width > 0 && fbSize.height > 0 {
-            syncSurfaceSize(reason: "create", force: true)
-        }
+        syncSurfaceSize(reason: "create", force: true)
         ghostty_surface_set_content_scale(surface, Double(window.backingScaleFactor), Double(window.backingScaleFactor))
 
         if let surface {
@@ -239,33 +237,23 @@ class TerminalNSView: NSView {
         pasteFromClipboard()
     }
 
+    private func pasteFromClipboard() {
+        guard let surface else {
+            NSLog("openOwl: paste skipped — surface is nil for pane %@", paneID.uuidString.prefix(8) as CVarArg)
+            return
+        }
+        let value = GhosttyAppManager.readPasteboardContent()
+        guard !value.isEmpty else { return }
+        value.withCString { ptr in
+            ghostty_surface_text(surface, ptr, UInt(value.utf8.count))
+        }
+    }
+
     @objc override func selectAll(_ sender: Any?) {
         guard let surface else { return }
         let action = "select_all"
         if !ghostty_surface_binding_action(surface, action, UInt(action.utf8.count)) {
             NSLog("openOwl: binding action failed action=%@", action)
-        }
-    }
-
-    private func pasteFromClipboard() {
-        guard let surface else { return }
-        ghostty_surface_set_focus(surface, true)
-
-        let pb = NSPasteboard.general
-        let value: String
-        // Check for file URLs first (e.g. Cmd+C on a file in Finder),
-        // then fall back to plain string — matches Ghostty's getOpinionatedStringContents.
-        if let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL], !urls.isEmpty {
-            value = urls
-                .map { $0.isFileURL ? Self.shellEscapedPath($0.path) : $0.absoluteString }
-                .joined(separator: " ")
-        } else {
-            value = pb.string(forType: .string) ?? ""
-        }
-
-        guard !value.isEmpty else { return }
-        value.withCString { ptr in
-            ghostty_surface_text(surface, ptr, UInt(value.utf8.count))
         }
     }
 
@@ -304,6 +292,25 @@ class TerminalNSView: NSView {
     /// their last usable PTY size; when they become visible again, callers force a
     /// resync against the settled bounds.
     func syncSurfaceSize(reason: String, force: Bool = false) {
+        if force {
+            resizeDebounceWork?.cancel()
+            resizeDebounceWork = nil
+            commitSurfaceSize(reason: reason)
+        } else {
+            let fb = convertToBacking(bounds.size)
+            let candidate = CGSize(width: floor(fb.width), height: floor(fb.height))
+            if candidate == lastSyncedBackingSize { return }
+
+            resizeDebounceWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                self?.commitSurfaceSize(reason: reason)
+            }
+            resizeDebounceWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
+        }
+    }
+
+    private func commitSurfaceSize(reason: String) {
         guard let surface else { return }
         let paneTag = paneID.uuidString.prefix(8) as CVarArg
         func logSkip(_ detail: String) {
@@ -323,7 +330,7 @@ class TerminalNSView: NSView {
         }
 
         let backingSize = CGSize(width: floor(fbSize.width), height: floor(fbSize.height))
-        guard force || backingSize != lastSyncedBackingSize else { return }
+        guard backingSize != lastSyncedBackingSize else { return }
 
         ghostty_surface_set_size(surface, UInt32(backingSize.width), UInt32(backingSize.height))
         lastSyncedBackingSize = backingSize
@@ -340,11 +347,14 @@ class TerminalNSView: NSView {
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         guard let window, let surface else { return }
-        metalLayer?.contentsScale = window.backingScaleFactor
+        let newScale = window.backingScaleFactor
+        guard newScale != lastSyncedScale else { return }
+        lastSyncedScale = newScale
+        metalLayer?.contentsScale = newScale
         ghostty_surface_set_content_scale(
             surface,
-            Double(window.backingScaleFactor),
-            Double(window.backingScaleFactor)
+            Double(newScale),
+            Double(newScale)
         )
         syncSurfaceSize(reason: "backing-change", force: true)
     }
@@ -352,7 +362,10 @@ class TerminalNSView: NSView {
     // MARK: - Keyboard Input
 
     override func keyDown(with event: NSEvent) {
-        guard acceptsTerminalKeyboardInput else { return }
+        guard acceptsTerminalKeyboardInput else {
+            super.keyDown(with: event)
+            return
+        }
         guard let surface else {
             interpretKeyEvents([event])
             return
@@ -435,28 +448,27 @@ class TerminalNSView: NSView {
         guard event.type == .keyDown, let surface else { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-        // performKeyEquivalent traverses every TerminalNSView in the window,
-        // including inactive tabs hidden via SwiftUI opacity. Only the active,
-        // visible pane may claim terminal shortcuts.
-        guard acceptsTerminalKeyboardInput else { return false }
-
-        // Only handle if this view is the actual first responder.
-        // performKeyEquivalent traverses ALL NSViews in the window —
-        // without this guard, Cmd+V/C get stolen from TextFields
-        // (QuickOpen, commit message, etc.) even when the terminal
-        // doesn't have focus.
+        // performKeyEquivalent traverses ALL NSViews in the window.
+        // Only the first responder should claim terminal shortcuts —
+        // this prevents stealing Cmd+V/C from TextFields.
         guard window?.firstResponder === self else { return false }
 
-        // Intercept Escape — NavigationSplitView consumes ESC in performKeyEquivalent
-        // (to collapse the sidebar) before keyDown reaches this view. Claim it here so
-        // ghostty receives it via keyDown.
+        // Intercept Escape — NavigationSplitView consumes ESC before keyDown
+        // reaches this view. Use the stricter acceptsTerminalKeyboardInput
+        // guard because ESC directly invokes keyDown, which must only run on
+        // the active, visible pane.
         if event.keyCode == 53, flags.isEmpty || flags == .shift {
+            guard acceptsTerminalKeyboardInput else { return false }
             keyDown(with: event)
             return true
         }
 
-        // Intercept Cmd+V (paste)
+        // Intercept Cmd+V (paste) — direct text injection via ghostty_surface_text.
+        // ghostty_surface_binding_action("paste_from_clipboard") requires an async
+        // callback chain through read_clipboard_cb that depends on activeSurface
+        // being set correctly; direct injection is more reliable.
         if flags == .command, event.charactersIgnoringModifiers == "v" {
+            guard surface != nil else { return false }
             pasteFromClipboard()
             return true
         }

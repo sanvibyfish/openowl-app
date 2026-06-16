@@ -9,6 +9,7 @@ struct TerminalPanel: NSViewRepresentable {
     var workingDirectory: String? = nil
     var onFocus: (() -> Void)? = nil
     @Environment(GhosttyAppManager.self) var appManager
+    @Environment(RightDockStore.self) var rightDockStore
 
     func makeNSView(context: Context) -> TerminalScrollView {
         // Reuse an existing TerminalScrollView if SwiftUI dismantled a previous
@@ -40,11 +41,7 @@ struct TerminalPanel: NSViewRepresentable {
 
     func updateNSView(_ nsView: TerminalScrollView, context: Context) {
         nsView.terminalView.onFocus = onFocus
+        nsView.freezeTerminalWidth = rightDockStore.isAnimatingDockResize && !rightDockStore.isFullscreen
         nsView.setTerminalVisibility(isVisible)
-        AppLogger.log("resize-diag", "TerminalPanel.updateNSView pane=%@ scrollFrame=%.1fx%.1f termFrame=%.1fx%.1f isVisible=%@",
-                      paneID.uuidString.prefix(8) as CVarArg,
-                      nsView.frame.width, nsView.frame.height,
-                      nsView.terminalView.frame.width, nsView.terminalView.frame.height,
-                      isVisible ? "y" : "n")
     }
 }

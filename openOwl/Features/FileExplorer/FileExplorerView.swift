@@ -55,6 +55,7 @@ struct FileEditorSession: Codable, Equatable {
 
 enum FileEditorSessionPersistence {
     private static let defaultsKey = "openowl.fileExplorer.editorSessions.v1"
+    private static var cache: [String: FileEditorSession]?
 
     static func projectKey(for projectURL: URL?) -> String? {
         projectURL?.standardizedFileURL.path
@@ -62,26 +63,20 @@ enum FileEditorSessionPersistence {
 
     static func load(forProjectKey projectKey: String?, defaults: UserDefaults = .standard) -> FileEditorSession? {
         guard let projectKey else { return nil }
-        return loadAll(defaults: defaults)[projectKey]
+        return ensureLoaded(defaults: defaults)[projectKey]
     }
 
     static func save(_ session: FileEditorSession, forProjectKey projectKey: String?, defaults: UserDefaults = .standard) {
         guard let projectKey else { return }
-        var all = loadAll(defaults: defaults)
+        var all = ensureLoaded(defaults: defaults)
         let normalized = normalize(session)
         if normalized.openFilePaths.isEmpty {
             all.removeValue(forKey: projectKey)
         } else {
             all[projectKey] = normalized
         }
-        saveAll(all, defaults: defaults)
-    }
-
-    static func clear(forProjectKey projectKey: String?, defaults: UserDefaults = .standard) {
-        guard let projectKey else { return }
-        var all = loadAll(defaults: defaults)
-        all.removeValue(forKey: projectKey)
-        saveAll(all, defaults: defaults)
+        cache = all
+        flush(all, defaults: defaults)
     }
 
     static func normalize(_ session: FileEditorSession) -> FileEditorSession {
@@ -96,22 +91,39 @@ enum FileEditorSessionPersistence {
         }
         return FileEditorSession(
             openFilePaths: paths,
-            activeFilePath: active.flatMap { paths.contains($0) ? $0 : nil } ?? paths.last
+            activeFilePath: active.flatMap(paths.contains) == true ? active : paths.last
         )
     }
 
-    private static func loadAll(defaults: UserDefaults) -> [String: FileEditorSession] {
-        guard let data = defaults.data(forKey: defaultsKey) else { return [:] }
-        return (try? JSONDecoder().decode([String: FileEditorSession].self, from: data)) ?? [:]
+    private static func ensureLoaded(defaults: UserDefaults) -> [String: FileEditorSession] {
+        if let cache { return cache }
+        guard let data = defaults.data(forKey: defaultsKey) else {
+            cache = [:]
+            return [:]
+        }
+        do {
+            let decoded = try JSONDecoder().decode([String: FileEditorSession].self, from: data)
+            cache = decoded
+            return decoded
+        } catch {
+            AppLogger.log("file-editor-state", "decode-failed error=%@ dataSize=%d", String(describing: error), data.count)
+            defaults.set(data, forKey: defaultsKey + ".corrupt-backup")
+            cache = [:]
+            return [:]
+        }
     }
 
-    private static func saveAll(_ sessions: [String: FileEditorSession], defaults: UserDefaults) {
+    private static func flush(_ sessions: [String: FileEditorSession], defaults: UserDefaults) {
         if sessions.isEmpty {
             defaults.removeObject(forKey: defaultsKey)
             return
         }
-        guard let data = try? JSONEncoder().encode(sessions) else { return }
-        defaults.set(data, forKey: defaultsKey)
+        do {
+            let data = try JSONEncoder().encode(sessions)
+            defaults.set(data, forKey: defaultsKey)
+        } catch {
+            AppLogger.log("file-editor-state", "encode-failed error=%@ sessionCount=%d", String(describing: error), sessions.count)
+        }
     }
 }
 
@@ -210,8 +222,8 @@ struct FileExplorerView: View {
     private static let imageMaxBytes: Int = 50_000_000
 
     private var isActiveTabImage: Bool {
-        guard let ext = activeTabURL?.pathExtension.lowercased() else { return false }
-        return Self.imageExtensions.contains(ext)
+        guard let url = activeTabURL else { return false }
+        return isImageURL(url)
     }
 
     @State private var treePanelWidth: CGFloat = 240
@@ -440,7 +452,25 @@ struct FileExplorerView: View {
 
             PanelDivider()
 
-            editorContentArea
+            ZStack {
+                editorContentArea
+
+                if let text = heavyProgressText {
+                    Color.black.opacity(0.25)
+                        .overlay {
+                            VStack(spacing: 8) {
+                                ProgressView()
+                                    .controlSize(.large)
+                                Text(text)
+                                    .font(AppFonts.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(20)
+                            .background(.regularMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                }
+            }
         }
     }
 
@@ -598,10 +628,10 @@ struct FileExplorerView: View {
             return
         }
 
-        let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+        let fileSize = fileSize(for: url)
 
         let isImage = isImageURL(url)
-        let needsLargeMode = shouldOpenInLargeMode(url)
+        let needsLargeMode = !isImage && fileSize >= Self.largeFileThreshold
 
         // Huge files (>= 50 MB) require explicit confirmation. Skip the prompt
         // for images — NSImage handles its own decoding cost and we cap them
@@ -693,7 +723,7 @@ struct FileExplorerView: View {
 
     private func restoreEditorSession(for projectURL: URL?, reason: String) {
         let projectKey = FileEditorSessionPersistence.projectKey(for: projectURL)
-        guard editorSessionProjectKey != projectKey || openTabs.isEmpty else {
+        if editorSessionProjectKey == projectKey, !openTabs.isEmpty {
             AppLogger.log("file-editor-state", "restore-skip reason=already-loaded project=%@",
                           projectKey ?? "nil")
             return
@@ -713,7 +743,7 @@ struct FileExplorerView: View {
 
         let urls = restorableURLs(from: session, projectKey: projectKey)
         guard !urls.isEmpty else {
-            FileEditorSessionPersistence.clear(forProjectKey: projectKey)
+            FileEditorSessionPersistence.save(FileEditorSession(openFilePaths: [], activeFilePath: nil), forProjectKey: projectKey)
             AppLogger.log("file-editor-state", "restore-empty-after-filter project=%@", projectKey)
             return
         }
@@ -773,11 +803,17 @@ struct FileExplorerView: View {
                 let image = NSImage(contentsOf: url)
                 await MainActor.run {
                     guard openTabs.contains(where: { $0.url == url }) else { return }
-                    tabImageCache[url] = image
-                    if activeTabURL == url {
-                        previewImage = image
-                        loadingFileURL = nil
-                        isEditorLoading = false
+                    if let image {
+                        tabImageCache[url] = image
+                        if activeTabURL == url {
+                            previewImage = image
+                            loadingFileURL = nil
+                            isEditorLoading = false
+                        }
+                    } else {
+                        AppLogger.log("file-editor-state", "restore-image-failed path=%@", url.path)
+                        openTabs.removeAll { $0.url == url }
+                        persistEditorSession(reason: "restore-image-failed")
                     }
                 }
             }
@@ -786,7 +822,17 @@ struct FileExplorerView: View {
 
         let isLargeMode = largeModeTabs.contains(url)
         Task.detached(priority: .userInitiated) {
-            let content = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            let content: String
+            do {
+                content = try String(contentsOf: url, encoding: .utf8)
+            } catch {
+                AppLogger.log("file-editor-state", "restore-read-failed path=%@ error=%@", url.path, error.localizedDescription)
+                await MainActor.run {
+                    openTabs.removeAll { $0.url == url }
+                    persistEditorSession(reason: "restore-read-failed")
+                }
+                return
+            }
             let storage = NSTextStorage(string: content)
 
             if isLargeMode {
@@ -913,8 +959,7 @@ struct FileExplorerView: View {
         editorState = SourceEditorState()
         persistEditorSession(reason: "switch-tab")
 
-        let ext = url.pathExtension.lowercased()
-        let isImage = Self.imageExtensions.contains(ext)
+        let isImage = isImageURL(url)
 
         if isImage {
             previewImage = tabImageCache[url]
@@ -983,8 +1028,7 @@ struct FileExplorerView: View {
                 activeTabURL = newURL
                 editorState = SourceEditorState()
 
-                let ext = newURL.pathExtension.lowercased()
-                if Self.imageExtensions.contains(ext) {
+                if isImageURL(newURL) {
                     previewImage = tabImageCache[newURL]
                     isEditorLoading = false
                 } else {

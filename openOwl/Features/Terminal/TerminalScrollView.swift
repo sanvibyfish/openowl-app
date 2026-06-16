@@ -16,6 +16,11 @@ class TerminalScrollView: NSView {
     private let scroller: ScrollIndicatorView
     private var terminalShouldBeVisible = true
 
+    /// When true, the terminal view keeps its current frame width even if the
+    /// host shrinks (e.g. Right Dock opening). Prevents destructive PTY reflow
+    /// of scrollback content. The overflow is clipped by masksToBounds.
+    var freezeTerminalWidth = false
+
     /// Current scrollbar state from ghostty core
     var scrollbarState: TerminalScrollbarState?
 
@@ -28,6 +33,8 @@ class TerminalScrollView: NSView {
         scroller = ScrollIndicatorView()
 
         super.init(frame: .zero)
+        wantsLayer = true
+        layer?.masksToBounds = true
         addSubview(terminalView)
         addSubview(scroller)
 
@@ -56,8 +63,14 @@ class TerminalScrollView: NSView {
     override func layout() {
         super.layout()
         let prev = terminalView.frame
-        terminalView.frame = bounds
+
+        if freezeTerminalWidth && bounds.width < prev.width {
+            terminalView.frame = CGRect(x: 0, y: 0, width: prev.width, height: bounds.height)
+        } else {
+            terminalView.frame = bounds
+        }
         terminalView.syncSurfaceSize(reason: "scroll-layout")
+
         let indicatorWidth: CGFloat = 8
         let margin: CGFloat = 2
         scroller.frame = CGRect(
@@ -66,10 +79,11 @@ class TerminalScrollView: NSView {
             width: indicatorWidth,
             height: bounds.height - margin * 2
         )
-        AppLogger.log("resize-diag", "ScrollView.layout pane=%@ bounds=%.1fx%.1f prevTermFrame=%.1fx%.1f changed=%@",
+        AppLogger.log("resize-diag", "ScrollView.layout pane=%@ bounds=%.1fx%.1f prevTermFrame=%.1fx%.1f frozen=%@ changed=%@",
                       terminalView.paneIdentifier.uuidString.prefix(8) as CVarArg,
                       bounds.width, bounds.height,
                       prev.width, prev.height,
+                      freezeTerminalWidth ? "y" : "n",
                       prev.size == bounds.size ? "no" : "YES")
     }
 
@@ -143,17 +157,11 @@ class TerminalScrollView: NSView {
         let changed = terminalShouldBeVisible != isVisible
         terminalShouldBeVisible = isVisible
         terminalView.setSurfaceVisibility(isVisible)
-        guard isVisible else { return }
+        guard isVisible, changed else { return }
 
         needsLayout = true
         layoutSubtreeIfNeeded()
-        terminalView.syncSurfaceSize(reason: changed ? "visibility-restored" : "visibility-update", force: changed)
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.terminalShouldBeVisible else { return }
-            self.layoutSubtreeIfNeeded()
-            self.terminalView.syncSurfaceSize(reason: "visibility-async")
-        }
+        terminalView.syncSurfaceSize(reason: "visibility-restored", force: true)
     }
 
     // MARK: - Drag & Drop (forwarded to terminalView)
