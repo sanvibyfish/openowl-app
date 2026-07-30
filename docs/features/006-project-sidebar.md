@@ -74,6 +74,8 @@ Worktree 目录统一存放在 `~/.openowl/workspace/projects/` 下。
 - 路径已经不存在：直接清理侧边栏中的失效记录
 - 路径存在但未登记：不再调用 `git worktree remove`；提示用户选择将残留目录移到废纸篓或保留
 
+Project Rail popover 与 Project Session List 的归档入口共享 `ProjectStore` 中按 worktree ID 记录的 in-flight guard。相同 worktree 的重复归档会在业务入口拒绝，菜单显示 `Archiving...` 并禁用；不同 worktree 可独立归档。成功、失败或用户取消后都会释放 guard，允许后续重试。
+
 只有 Git 删除成功、路径确认不存在，或用户明确将残留目录移到废纸篓后，才会从 openOwl 项目列表移除。失败或选择保留时继续保留侧边栏条目，避免界面状态与磁盘/Git 状态不一致。
 
 ### 3.4 分支前缀
@@ -149,3 +151,4 @@ openOwl/Features/Sidebar/
 | 2026-07-24 | 归档前校验 Git worktree 登记状态；失效残留目录需确认后才移到废纸篓 |
 | 2026-07-28 | UI 改为 Muxy 风格 `ProjectRail`（48pt）；宽 `SidebarView` 下线；worktree 经 popover/右键管理 |
 | 2026-07-29 | Project Rail 切回项目时恢复该 root 最近选择的 main/worktree |
+| 2026-07-30 | Project Rail 与 Project Session List 共用按 worktree ID 的归档 in-flight guard，阻止同一 worktree 重复归档 |
