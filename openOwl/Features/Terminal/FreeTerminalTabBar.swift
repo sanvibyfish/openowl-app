@@ -41,7 +41,7 @@ struct FreeTerminalTabBar: View {
         .background(AppPalette.elevated)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(RailChrome.hairline)
+                .fill(AppPalette.border)
                 .frame(height: 1)
         }
     }
@@ -106,7 +106,7 @@ private struct FreeTerminalTabButton: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(isActive ? RailChrome.hairline : Color.clear, lineWidth: 1)
+                .strokeBorder(isActive ? AppPalette.border : Color.clear, lineWidth: 1)
         )
         .contentShape(Rectangle())
         .onTapGesture {

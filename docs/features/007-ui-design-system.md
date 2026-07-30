@@ -193,7 +193,7 @@ VStack(spacing: 12) {
 |------|------|---------|------|
 | **P1-1** | AppPalette 调色盘 | Constants.swift | 小 |
 | **P1-2** | 分区标题 tracking + textTertiary | 所有面板 header | 小 |
-| **P1-3** | 侧边栏选中竖条 | SidebarView.swift | 中 |
+| **P1-3** | 侧边栏选中竖条 | ProjectRail.swift | 中 |
 | **P2-1** | Tab 栏下划线 + matchedGeometryEffect | ContentView.swift | 中 |
 | **P2-2** | 面板内边距统一 32px header + 26px 行高 | 所有面板 | 中 |
 | **P2-3** | 内容区背景层次 (surface vs base) | ContentView.swift | 小 |
@@ -220,3 +220,4 @@ VStack(spacing: 12) {
 |------|------|
 | 2026-03-16 | 创建设计方案 |
 | 2026-07-28 | 信息架构对齐 Muxy：左栏改为 `ProjectRail`（见 FEAT-006）；调色盘/选中竖条等 Phase 1 token 部分落地 |
+| 2026-07-31 | `RailChrome.hairline` / `RailChrome.background` 并入 `AppPalette.border` / `AppPalette.elevated`——两者取值相同，保留两个 token 会在调色时漂移；`RailChrome` 只保留尺寸常量 |

@@ -122,10 +122,10 @@ struct GitChangesView: View {
         }
         .padding(.horizontal, 6)
         .frame(height: AppSpacing.headerHeight)
-        .background(RailChrome.background)
+        .background(AppPalette.elevated)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(RailChrome.hairline)
+                .fill(AppPalette.border)
                 .frame(height: 1)
         }
     }

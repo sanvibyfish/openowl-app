@@ -18,7 +18,6 @@ struct ProjectRail: View {
     static let width: CGFloat = RailChrome.leftWidth
 
     @State private var popoverProjectID: String?
-    @State private var creatingWorktreeFor: String?
     @State private var showAddMenu = false
 
     var body: some View {
@@ -62,12 +61,12 @@ struct ProjectRail: View {
         .padding(.vertical, 6)
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
-        .background(RailChrome.background)
+        .background(AppPalette.elevated)
         .overlay(alignment: .trailing) {
             // Only draw hairline when session list is hidden (list has its own edge)
             if !isSessionListVisible {
                 Rectangle()
-                    .fill(RailChrome.hairline)
+                    .fill(AppPalette.border)
                     .frame(width: 1)
             }
         }
@@ -104,7 +103,7 @@ struct ProjectRail: View {
     /// Only roots that already have open tabs, plus the currently selected root.
     /// Inactive projects stay off the rail (open via + menu).
     private var railProjects: [ProjectItem] {
-        let selectedRootID = selectedRootProjectID
+        let selectedRootID = projectStore.activeRootProject?.id
         return projectStore.rootProjects.filter { project in
             if project.id == selectedRootID { return true }
             return isProjectActive(project)
@@ -116,14 +115,6 @@ struct ProjectRail: View {
         return projectStore.rootProjects.filter { !shown.contains($0.id) }
     }
 
-    private var selectedRootProjectID: String? {
-        guard let activeID = projectStore.activeProjectID,
-              let active = projectStore.projects.first(where: { $0.id == activeID }) else {
-            return nil
-        }
-        return active.worktreeOf ?? active.id
-    }
-
     private func isProjectActive(_ project: ProjectItem) -> Bool {
         if workspace.hasTabs(for: .project(project.id)) { return true }
         return projectStore.worktrees(for: project.id).contains {
@@ -132,12 +123,7 @@ struct ProjectRail: View {
     }
 
     private func isProjectSelected(_ project: ProjectItem) -> Bool {
-        guard let activeID = projectStore.activeProjectID,
-              let active = projectStore.projects.first(where: { $0.id == activeID }) else {
-            return false
-        }
-        if active.id == project.id { return true }
-        return active.worktreeOf == project.id
+        projectStore.activeRootProject?.id == project.id
     }
 
     private func projectUnread(_ project: ProjectItem) -> Int {
@@ -168,7 +154,7 @@ struct ProjectRail: View {
         ), arrowEdge: .trailing) {
             ProjectRailPopover(
                 project: project,
-                creatingWorktree: creatingWorktreeFor == project.id,
+                creatingWorktree: projectStore.isCreatingWorktree(rootID: project.id),
                 onActivateMain: {
                     projectStore.activateProject(id: project.id)
                     popoverProjectID = nil
@@ -225,9 +211,13 @@ struct ProjectRail: View {
             }
         }
 
+        // No prefix yet means branch-prefix detection has not finished (or the
+        // repo has no remote to read it from) — offering the action would only
+        // produce a failure alert.
         Button("Create Worktree") {
             Task { await createWorktree(for: project) }
         }
+        .disabled(project.branchPrefix == nil)
 
         Divider()
 
@@ -241,30 +231,8 @@ struct ProjectRail: View {
     }
 
     private func createWorktree(for project: ProjectItem) async {
-        creatingWorktreeFor = project.id
-        defer { creatingWorktreeFor = nil }
-
-        // Use this root's stored prefix (not activeProject's) so create works
-        // from the rail even when another project is selected.
-        let prefix = project.branchPrefix ?? "dev"
-        let generated = BranchNameGenerator.generate(prefix: prefix)
-        let git = GitService(workingDirectory: project.url)
-
-        do {
-            let worktreePath = try await git.addWorktree(
-                branch: generated.branchName,
-                dirName: generated.dirName
-            )
-            let newProject = projectStore.addWorktreeProject(
-                parentID: project.id,
-                path: worktreePath,
-                branch: generated.branchName
-            )
-            projectStore.activateProject(id: newProject.id)
-            popoverProjectID = nil
-        } catch {
-            NSLog("openOwl: [ProjectRail] Failed to create worktree: %@", error.localizedDescription)
-        }
+        await createWorktreeReportingFailure(for: project, in: projectStore)
+        popoverProjectID = nil
     }
 
     // MARK: - Add / Claude
@@ -323,7 +291,7 @@ struct ProjectRail: View {
 
     private var railDivider: some View {
         Rectangle()
-            .fill(RailChrome.hairline)
+            .fill(AppPalette.border)
             .frame(height: 1)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
@@ -357,7 +325,7 @@ private struct AddProjectPopover: View {
 
             if !inactiveProjects.isEmpty {
                 Rectangle()
-                    .fill(RailChrome.hairline)
+                    .fill(AppPalette.border)
                     .frame(height: 1)
                     .padding(.vertical, 2)
 
@@ -552,7 +520,7 @@ private struct ProjectRailPopover: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(creatingWorktree)
+            .disabled(creatingWorktree || project.branchPrefix == nil)
 
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([project.url])
@@ -653,7 +621,7 @@ enum WorktreeArchive {
 
         guard let parentID = wt.worktreeOf,
               let parent = projectStore.projects.first(where: { $0.id == parentID }) else {
-            presentAlert(
+            WorktreeAlert.present(
                 title: "Archive failed",
                 message: "Could not archive \"\(wt.worktreeBranch ?? wt.name)\" because its parent project is missing."
             )
@@ -663,24 +631,45 @@ enum WorktreeArchive {
         let parentGit = GitService(workingDirectory: parent.url)
         do {
             if try await parentGit.isRegisteredWorktree(path: wt.path) {
+                let dirty: Bool
                 do {
-                    let dirty = try await GitService.hasUncommittedChanges(at: wt.url)
-                    if dirty {
-                        let proceed = confirm(
-                            title: "Archive worktree?",
-                            message: "\"\(wt.worktreeBranch ?? wt.name)\" has uncommitted changes.\n\nArchive this worktree anyway?",
-                            primary: "Archive"
-                        )
-                        guard proceed else { return }
-                    }
+                    dirty = try await GitService.hasUncommittedChanges(at: wt.url)
                 } catch {
-                    NSLog("openOwl: [ProjectRail] Failed to check uncommitted changes: %@", error.localizedDescription)
+                    // Fail closed. `removeWorktree` runs `git worktree remove
+                    // --force`, so proceeding without knowing whether the tree
+                    // is dirty deletes uncommitted work with no confirmation
+                    // and no way to recover it.
+                    AppLogger.log(
+                        "worktree",
+                        "uncommitted-changes check failed path=%@ error=%@",
+                        wt.path,
+                        error.localizedDescription
+                    )
+                    WorktreeAlert.present(
+                        title: "Archive cancelled",
+                        message: """
+                        Could not check whether "\(wt.worktreeBranch ?? wt.name)" has uncommitted changes.
+
+                        \(error.localizedDescription)
+
+                        Archiving was cancelled so nothing is lost.
+                        """
+                    )
+                    return
+                }
+                if dirty {
+                    let proceed = WorktreeAlert.confirm(
+                        title: "Archive worktree?",
+                        message: "\"\(wt.worktreeBranch ?? wt.name)\" has uncommitted changes.\n\nArchive this worktree anyway?",
+                        primary: "Archive"
+                    )
+                    guard proceed else { return }
                 }
             }
 
             let outcome = try await parentGit.removeWorktree(path: wt.path)
             if outcome == .unregisteredPath {
-                let shouldTrash = confirm(
+                let shouldTrash = WorktreeAlert.confirm(
                     title: "Worktree registration missing",
                     message: "\"\(wt.worktreeBranch ?? wt.name)\" is no longer registered as a Git worktree, but its folder still exists and may contain files.\n\nMove the folder to Trash and remove it from OpenOwl?",
                     primary: "Move to Trash"
@@ -696,7 +685,7 @@ enum WorktreeArchive {
                 }.value
             }
         } catch {
-            presentAlert(
+            WorktreeAlert.present(
                 title: "Archive failed",
                 message: "Could not archive \"\(wt.worktreeBranch ?? wt.name)\".\n\n\(error.localizedDescription)"
             )
@@ -709,7 +698,13 @@ enum WorktreeArchive {
         projectStore.removeWorktreeProject(id: wt.id)
     }
 
-    private static func presentAlert(title: String, message: String) {
+}
+
+/// Modal helpers shared by the worktree flows (create / archive / rename) from
+/// both the rail and the session list.
+@MainActor
+enum WorktreeAlert {
+    static func present(title: String, message: String) {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
@@ -718,7 +713,7 @@ enum WorktreeArchive {
         alert.runModal()
     }
 
-    private static func confirm(title: String, message: String, primary: String) -> Bool {
+    static func confirm(title: String, message: String, primary: String) -> Bool {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
@@ -726,5 +721,25 @@ enum WorktreeArchive {
         alert.addButton(withTitle: primary)
         alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn
+    }
+}
+
+/// Runs a worktree creation and surfaces failure — the action is offered from
+/// two places, so the reporting lives next to the flow rather than in a View.
+@MainActor
+func createWorktreeReportingFailure(for project: ProjectItem, in projectStore: ProjectStore) async {
+    do {
+        try await projectStore.createWorktree(for: project)
+    } catch {
+        AppLogger.log(
+            "worktree",
+            "create failed root=%@ error=%@",
+            project.displayName,
+            error.localizedDescription
+        )
+        WorktreeAlert.present(
+            title: "New worktree failed",
+            message: "Could not create a worktree for \"\(project.displayName)\".\n\n\(error.localizedDescription)"
+        )
     }
 }

@@ -15,16 +15,12 @@
 		1B8510A1B037F58C77A70E55 /* TerminalNamespaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D9C4F6213AD81E8DDF041EE /* TerminalNamespaceTests.swift */; };
 		1BD4F2C33F69F3A58B4049E9 /* TerminalSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C041C1F34801BF486A888B46 /* TerminalSearchTests.swift */; };
 		23E85236BE44285F65D1E92F /* FileIconsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F84090706181BCE2FB1AF47 /* FileIconsTests.swift */; };
-		2477D7FE75BD5CC5BBF1B758 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66514ED81AF24BE4D7AF7529 /* SidebarView.swift */; };
 		253B536A97052112FD46B3FF /* GitChangesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C7B0DBA130E23B413EA3A8 /* GitChangesView.swift */; };
 		25638B8C67FB225663CCE5A1 /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6892EC597E859C6C89747657 /* BookmarkStore.swift */; };
 		2F7B5276A453883804B6D37C /* GitCommitParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0940CC16A5382882D30EBAFD /* GitCommitParsingTests.swift */; };
 		300A0C58F3CD4221DD347BEA /* RightDockStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EB4866085EB54B9C129F121 /* RightDockStoreTests.swift */; };
 		3140A88752300CC5AE03A433 /* FileExplorerGitPropagationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC7E472A3BF6DAE6E5623511 /* FileExplorerGitPropagationTests.swift */; };
-		33FF877148D2498B9A3FB172 /* ProjectsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05A571771804F2219768F464 /* ProjectsSection.swift */; };
 		353D99F512065C7E8FD7EDFB /* GhosttyInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DE94F3F69D57F740DD9C966 /* GhosttyInput.swift */; };
-		38A6E6284838785F9ABDE4C2 /* SidebarExpandCollapseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A3DEDA992E14DF88D81FA8 /* SidebarExpandCollapseTests.swift */; };
-		3C621A4533C9ACBA98FD8CE5 /* TerminalsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E5F0ECBA1E89045CB48F752 /* TerminalsSection.swift */; };
 		3D99003D3AD31CD33007EFFC /* IconButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 552C03468C64C29EEA14DE99 /* IconButtonStyle.swift */; };
 		4637838D393C5D4F441A50E0 /* FileExplorerParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC6E1BF43BA95A17177F2788 /* FileExplorerParsingTests.swift */; };
 		465C4C06EEE907C3154E2329 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F692AB2575EE0D90EDAE529 /* StatusBarView.swift */; };
@@ -109,7 +105,6 @@
 		00AF40C4BACE1CDD1ECD6157 /* GitServiceParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitServiceParsingTests.swift; sourceTree = "<group>"; };
 		00D2782FE44356BA1DC6F8B8 /* RailChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RailChrome.swift; sourceTree = "<group>"; };
 		00DAEBF29B433B2E5D08B1FB /* ResourceMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMonitorTests.swift; sourceTree = "<group>"; };
-		05A571771804F2219768F464 /* ProjectsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsSection.swift; sourceTree = "<group>"; };
 		0940CC16A5382882D30EBAFD /* GitCommitParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitCommitParsingTests.swift; sourceTree = "<group>"; };
 		0C4F7D15DDB411EB83184BAD /* TerminalPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalPanel.swift; sourceTree = "<group>"; };
 		0E2D9613652657E157701AE6 /* CommitMessageTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitMessageTextView.swift; sourceTree = "<group>"; };
@@ -142,7 +137,6 @@
 		61C1A374304AF8134D201B42 /* GitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitService.swift; sourceTree = "<group>"; };
 		6480B1CA3B59F9639172E4B9 /* OutlineTreeCellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutlineTreeCellView.swift; sourceTree = "<group>"; };
 		6607398740E9040BA756684C /* CommitMessageGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitMessageGenerator.swift; sourceTree = "<group>"; };
-		66514ED81AF24BE4D7AF7529 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		6892EC597E859C6C89747657 /* BookmarkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkStore.swift; sourceTree = "<group>"; };
 		6D5539E778AB8B17DC618C39 /* ProjectStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStore.swift; sourceTree = "<group>"; };
 		7275948704BB7EA41DA98E21 /* ProjectStoreHelpersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStoreHelpersTests.swift; sourceTree = "<group>"; };
@@ -152,7 +146,6 @@
 		7C602586627CCE3EB2977A5E /* GitChangesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitChangesStore.swift; sourceTree = "<group>"; };
 		7D8EB9056F0398E50CA36087 /* ProjectStoreFreeTerminalsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectStoreFreeTerminalsTests.swift; sourceTree = "<group>"; };
 		7D9C4F6213AD81E8DDF041EE /* TerminalNamespaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalNamespaceTests.swift; sourceTree = "<group>"; };
-		7E5F0ECBA1E89045CB48F752 /* TerminalsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalsSection.swift; sourceTree = "<group>"; };
 		8DE94F3F69D57F740DD9C966 /* GhosttyInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyInput.swift; sourceTree = "<group>"; };
 		8EB4866085EB54B9C129F121 /* RightDockStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RightDockStoreTests.swift; sourceTree = "<group>"; };
 		938F89967F54EF40EA4AE7FE /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
@@ -175,7 +168,6 @@
 		C39D7120D769F3D4DF10E3C6 /* SplitDiffByFileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitDiffByFileTests.swift; sourceTree = "<group>"; };
 		C4E0BCEA1E40509CACA5F04D /* TerminalWorkspaceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceStore.swift; sourceTree = "<group>"; };
 		C85221AB69D1FBEA8FB4B809 /* FileExplorerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileExplorerView.swift; sourceTree = "<group>"; };
-		D0A3DEDA992E14DF88D81FA8 /* SidebarExpandCollapseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarExpandCollapseTests.swift; sourceTree = "<group>"; };
 		D143F488B97B650DE80654CB /* RightDockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RightDockView.swift; sourceTree = "<group>"; };
 		D3F88A4C649AE808F422E1D1 /* SectionTitle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionTitle.swift; sourceTree = "<group>"; };
 		DB671E763D87E90D400A8ED9 /* TerminalSearchOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSearchOverlay.swift; sourceTree = "<group>"; };
@@ -228,7 +220,6 @@
 				00DAEBF29B433B2E5D08B1FB /* ResourceMonitorTests.swift */,
 				8EB4866085EB54B9C129F121 /* RightDockStoreTests.swift */,
 				FE6FF0B33095CC35D7533713 /* ScrollIndicatorTests.swift */,
-				D0A3DEDA992E14DF88D81FA8 /* SidebarExpandCollapseTests.swift */,
 				C39D7120D769F3D4DF10E3C6 /* SplitDiffByFileTests.swift */,
 				56EC8F9FC165C061D79F5952 /* TerminalKeyboardRoutingTests.swift */,
 				7D9C4F6213AD81E8DDF041EE /* TerminalNamespaceTests.swift */,
@@ -337,10 +328,7 @@
 				6892EC597E859C6C89747657 /* BookmarkStore.swift */,
 				E20D59796FBA02BB2C2D2CB5 /* ProjectRail.swift */,
 				154F9C01C1F87B15DA5F1AC3 /* ProjectSessionList.swift */,
-				05A571771804F2219768F464 /* ProjectsSection.swift */,
 				6D5539E778AB8B17DC618C39 /* ProjectStore.swift */,
-				66514ED81AF24BE4D7AF7529 /* SidebarView.swift */,
-				7E5F0ECBA1E89045CB48F752 /* TerminalsSection.swift */,
 			);
 			path = Sidebar;
 			sourceTree = "<group>";
@@ -540,7 +528,6 @@
 				C519F9EA87A6C9634B6330C5 /* ResourceMonitorTests.swift in Sources */,
 				300A0C58F3CD4221DD347BEA /* RightDockStoreTests.swift in Sources */,
 				882EAAE1592A1A4FCB1A169A /* ScrollIndicatorTests.swift in Sources */,
-				38A6E6284838785F9ABDE4C2 /* SidebarExpandCollapseTests.swift in Sources */,
 				58B0B6ED8636B72C527AE508 /* SplitDiffByFileTests.swift in Sources */,
 				84210C57D43532E520A69243 /* TerminalKeyboardRoutingTests.swift in Sources */,
 				1B8510A1B037F58C77A70E55 /* TerminalNamespaceTests.swift in Sources */,
@@ -587,7 +574,6 @@
 				8F5B22333611B8EB7B1D3000 /* ProjectRail.swift in Sources */,
 				6BB859A04E634B0BEF110C32 /* ProjectSessionList.swift in Sources */,
 				E41F0715FF1A9ACFD20554F2 /* ProjectStore.swift in Sources */,
-				33FF877148D2498B9A3FB172 /* ProjectsSection.swift in Sources */,
 				BF6B6B2E42E2713F6F298006 /* QuickOpenSheet.swift in Sources */,
 				56817570CF5E2439B48889EF /* RailChrome.swift in Sources */,
 				51578B805F1E2D6511363059 /* ResourceMonitor.swift in Sources */,
@@ -596,7 +582,6 @@
 				8542D038455206037150C4FE /* RightDockView.swift in Sources */,
 				F043F631A3AD286B260541AB /* SectionTitle.swift in Sources */,
 				521860E4905A1AFE5052874D /* SettingsView.swift in Sources */,
-				2477D7FE75BD5CC5BBF1B758 /* SidebarView.swift in Sources */,
 				6BBD6B72F4001B15A9D35F94 /* SpinningIcon.swift in Sources */,
 				465C4C06EEE907C3154E2329 /* StatusBarView.swift in Sources */,
 				E26D6EB03ADF4440FEECCD35 /* TerminalPanel.swift in Sources */,
@@ -605,7 +590,6 @@
 				CD05B57A6A79E3908340A545 /* TerminalSearchState.swift in Sources */,
 				56806FF59B6993BEC6BC294E /* TerminalWorkspaceStore.swift in Sources */,
 				502E0FCB5AEF997F4C45E298 /* TerminalWorkspaceView.swift in Sources */,
-				3C621A4533C9ACBA98FD8CE5 /* TerminalsSection.swift in Sources */,
 				F00CD343673CE3309A16B710 /* UpdateAlertView.swift in Sources */,
 				BE0A87CA4D3EE71346E578CF /* UpdateChecker.swift in Sources */,
 				788F25C370B576583C54F299 /* WindowAccessor.swift in Sources */,

@@ -111,39 +111,6 @@ enum FileEditorReloadCommitPolicy {
     }
 }
 
-enum FileEditorStorageUpdater {
-    static func update(_ storage: NSTextStorage?, with content: String) -> NSTextStorage {
-        guard let storage else { return NSTextStorage(string: content) }
-        storage.replaceCharacters(
-            in: NSRange(location: 0, length: storage.length),
-            with: content
-        )
-        return storage
-    }
-}
-
-enum FileEditorLoadingSuppression {
-    static func perform<T>(
-        previousValue: Bool,
-        setValue: (Bool) -> Void,
-        operation: () -> T
-    ) -> T {
-        setValue(true)
-        defer { setValue(previousValue) }
-        return operation()
-    }
-}
-
-enum FileEditorPendingActivationPolicy {
-    static func isCurrent(_ url: URL, pendingURL: URL?) -> Bool {
-        pendingURL == url
-    }
-
-    static func clearing(_ url: URL, from pendingURL: URL?) -> URL? {
-        isCurrent(url, pendingURL: pendingURL) ? nil : pendingURL
-    }
-}
-
 enum FileEditorSessionPersistence {
     private static let defaultsKey = "openowl.fileExplorer.editorSessions.v1"
     private static var cache: [String: FileEditorSession]?
@@ -345,9 +312,16 @@ struct FileExplorerView: View {
             restoreEditorSession(for: projectStore.activeProjectURL, reason: "appear")
         }
         .onChange(of: projectStore.activeProjectID) { _, _ in
-            saveAllDirtyTabs()
+            let saveFailures = saveAllDirtyTabs()
             flushEditorSession(reason: "project-switch-out")
             store.setProject(projectStore.activeProjectURL)
+            // Unsaved work outranks a consistent editor: `clearEditorTabs`
+            // releases every storage, so running it after a failed save is what
+            // turned "could not write" into "edits gone".
+            guard saveFailures.isEmpty else {
+                presentSaveFailureAlert(saveFailures)
+                return
+            }
             clearEditorTabs(reason: "project-switch", persist: false)
             restoreEditorSession(for: projectStore.activeProjectURL, reason: "project-switch-in")
         }
@@ -458,7 +432,7 @@ struct FileExplorerView: View {
             .background(AppPalette.base)
             .overlay(alignment: .bottom) {
                 Rectangle()
-                    .fill(RailChrome.hairline)
+                    .fill(AppPalette.border)
                     .frame(height: 1)
             }
 
@@ -646,7 +620,7 @@ struct FileExplorerView: View {
                         state: $editorState,
                         coordinators: [editTracker]
                     )
-                    .id(url)
+                    .id(editorIdentity(for: url))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
                 }
@@ -709,10 +683,10 @@ struct FileExplorerView: View {
             .padding(.horizontal, 6)
         }
         .frame(height: AppSpacing.editorTabBarHeight)
-        .background(RailChrome.background)
+        .background(AppPalette.elevated)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(RailChrome.hairline)
+                .fill(AppPalette.border)
                 .frame(height: 1)
         }
     }
@@ -797,10 +771,7 @@ struct FileExplorerView: View {
         signature: FileEditorDiskSignature? = nil
     ) {
         guard let request = beginFileRead(for: url, signature: signature) else {
-            pendingActivationURL = FileEditorPendingActivationPolicy.clearing(
-                url,
-                from: pendingActivationURL
-            )
+            if pendingActivationURL == url { pendingActivationURL = nil }
             isEditorLoading = false
             return
         }
@@ -813,10 +784,7 @@ struct FileExplorerView: View {
                     let currentSignature = FileEditorDiskSignatureProvider.signature(for: url)
                     guard FileEditorReloadCommitPolicy.shouldCommit(
                         isTabOpen: openTabs.contains(where: { $0.url == url })
-                            && FileEditorPendingActivationPolicy.isCurrent(
-                                url,
-                                pendingURL: pendingActivationURL
-                            ),
+                            && pendingActivationURL == url,
                         isDirty: dirtyTabs.contains(url),
                         request: request,
                         currentRequestID: fileReadRequestIDs[url],
@@ -827,10 +795,7 @@ struct FileExplorerView: View {
                             url,
                             request: request,
                             currentDiskSignature: currentSignature,
-                            isEligible: FileEditorPendingActivationPolicy.isCurrent(
-                                url,
-                                pendingURL: pendingActivationURL
-                            ),
+                            isEligible: pendingActivationURL == url,
                             retry: { latestSignature in
                                 startOpeningFileContent(
                                     url,
@@ -839,10 +804,7 @@ struct FileExplorerView: View {
                                 )
                             },
                             onReject: {
-                                pendingActivationURL = FileEditorPendingActivationPolicy.clearing(
-                                    url,
-                                    from: pendingActivationURL
-                                )
+                                if pendingActivationURL == url { pendingActivationURL = nil }
                                 isEditorLoading = false
                             }
                         )
@@ -853,16 +815,42 @@ struct FileExplorerView: View {
                     fileReadRequestIDs.removeValue(forKey: url)
                     previewImage = image
                     activeTabURL = url
-                    pendingActivationURL = FileEditorPendingActivationPolicy.clearing(
-                        url,
-                        from: pendingActivationURL
-                    )
+                    if pendingActivationURL == url { pendingActivationURL = nil }
                     isEditorLoading = false
                 }
             }
         } else {
             Task.detached(priority: .userInitiated) {
-                let content = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+                let content: String
+                do {
+                    content = try String(contentsOf: url, encoding: .utf8)
+                } catch {
+                    // Never substitute an empty buffer here. The tab would
+                    // commit, the signature check would still pass (the file on
+                    // disk never changed), and the first ⌘S would truncate the
+                    // real file to whatever the user typed into what looks like
+                    // an empty document. Permission denied, a file deleted
+                    // between stat and read, and non-UTF-8 content all land here.
+                    AppLogger.log(
+                        "file-editor-state",
+                        "open-read-failed path=%@ error=%@",
+                        url.path,
+                        error.localizedDescription
+                    )
+                    await MainActor.run {
+                        guard isCurrentFileRead(request, for: url) else { return }
+                        fileReadRequestIDs.removeValue(forKey: url)
+                        openTabs.removeAll { $0.url == url }
+                        tabDiskSignatures.removeValue(forKey: url)
+                        largeModeTabs.remove(url)
+                        if pendingActivationURL == url { pendingActivationURL = nil }
+                        isEditorLoading = false
+                        store.errorMessage =
+                            "Could not open \(url.lastPathComponent): \(error.localizedDescription)"
+                        persistEditorSession(reason: "open-read-failed")
+                    }
+                    return
+                }
                 let storage = NSTextStorage(string: content)
 
                 // Show the progress overlay BEFORE committing the new tab —
@@ -883,10 +871,7 @@ struct FileExplorerView: View {
                     let currentSignature = FileEditorDiskSignatureProvider.signature(for: url)
                     guard FileEditorReloadCommitPolicy.shouldCommit(
                         isTabOpen: openTabs.contains(where: { $0.url == url })
-                            && FileEditorPendingActivationPolicy.isCurrent(
-                                url,
-                                pendingURL: pendingActivationURL
-                            ),
+                            && pendingActivationURL == url,
                         isDirty: dirtyTabs.contains(url),
                         request: request,
                         currentRequestID: fileReadRequestIDs[url],
@@ -897,10 +882,7 @@ struct FileExplorerView: View {
                             url,
                             request: request,
                             currentDiskSignature: currentSignature,
-                            isEligible: FileEditorPendingActivationPolicy.isCurrent(
-                                url,
-                                pendingURL: pendingActivationURL
-                            ),
+                            isEligible: pendingActivationURL == url,
                             retry: { latestSignature in
                                 startOpeningFileContent(
                                     url,
@@ -910,10 +892,7 @@ struct FileExplorerView: View {
                             },
                             onReject: {
                                 clearHeavyProgress(for: url)
-                                pendingActivationURL = FileEditorPendingActivationPolicy.clearing(
-                                    url,
-                                    from: pendingActivationURL
-                                )
+                                if pendingActivationURL == url { pendingActivationURL = nil }
                                 isEditorLoading = false
                             }
                         )
@@ -925,10 +904,7 @@ struct FileExplorerView: View {
                     previewImage = nil
                     editorState = SourceEditorState()
                     activeTabURL = url
-                    pendingActivationURL = FileEditorPendingActivationPolicy.clearing(
-                        url,
-                        from: pendingActivationURL
-                    )
+                    if pendingActivationURL == url { pendingActivationURL = nil }
                     if needsLargeMode {
                         clearHeavyProgress(for: url)
                     }
@@ -1237,6 +1213,36 @@ struct FileExplorerView: View {
         return true
     }
 
+    /// Identity for the editor view. The disk signature is part of it so a
+    /// reload swaps in the fresh `NSTextStorage`: `SourceEditor` does not
+    /// re-apply its text on update, so a stable id would keep the old buffer
+    /// on screen.
+    private func editorIdentity(for url: URL) -> String {
+        guard let signature = tabDiskSignatures[url] else { return url.path }
+        let modified = signature.modifiedAt?.timeIntervalSince1970 ?? 0
+        return "\(url.path)|\(signature.fileIdentifier ?? 0)|\(signature.fileSize)|\(modified)"
+    }
+
+    /// Carries the caret across a reload, clamped to the new buffer — a file
+    /// that shrank on disk leaves the old selection pointing past the end.
+    private func clampedCursorPositions(
+        _ positions: [CursorPosition]?,
+        toLength length: Int
+    ) -> [CursorPosition]? {
+        guard let positions else { return nil }
+        let clamped = positions.compactMap { position -> CursorPosition? in
+            guard position.range.location != NSNotFound else { return nil }
+            let location = min(position.range.location, length)
+            return CursorPosition(
+                range: NSRange(
+                    location: location,
+                    length: min(position.range.length, length - location)
+                )
+            )
+        }
+        return clamped.isEmpty ? nil : clamped
+    }
+
     private func reloadOpenTabFromDisk(_ url: URL, signature: FileEditorDiskSignature, reason: String) {
         guard let request = beginFileRead(for: url, signature: signature) else { return }
 
@@ -1328,14 +1334,18 @@ struct FileExplorerView: View {
                     )
                     return
                 }
-                let previousLoading = isEditorLoading
-                FileEditorLoadingSuppression.perform(
-                    previousValue: previousLoading,
-                    setValue: { isEditorLoading = $0 }
-                ) {
-                    tabStorages[url] = FileEditorStorageUpdater.update(
-                        tabStorages[url],
-                        with: content
+                // Publish a fresh storage rather than mutating the one the editor
+                // owns. `NSTextStorage.replaceCharacters` bypasses
+                // `TextView.replaceCharacters`, so CEUndoManager keeps its
+                // mutations pointing at the pre-reload content and a later undo
+                // replays an out-of-bounds range — an NSRangeException Swift
+                // cannot catch. `editorIdentity(for:)` folds the new signature
+                // into the view id so SwiftUI rebuilds around this storage.
+                tabStorages[url] = NSTextStorage(string: content)
+                if activeTabURL == url {
+                    editorState.cursorPositions = clampedCursorPositions(
+                        editorState.cursorPositions,
+                        toLength: (content as NSString).length
                     )
                 }
                 tabDiskSignatures[url] = request.signature
@@ -1560,17 +1570,53 @@ struct FileExplorerView: View {
         }
     }
 
-    private func saveAllDirtyTabs() {
+    /// Saves every dirty tab and returns the ones that could not be written.
+    ///
+    /// A failed tab keeps its dirty flag: clearing it unconditionally made the
+    /// UI claim the edits were saved, and the `clearEditorTabs` that follows a
+    /// project switch then dropped them for good.
+    @discardableResult
+    private func saveAllDirtyTabs() -> [(url: URL, message: String)] {
+        var failures: [(url: URL, message: String)] = []
         for url in dirtyTabs {
-            guard let storage = tabStorages[url] else { continue }
+            guard let storage = tabStorages[url] else {
+                // A dirty tab with no storage means eviction raced the edit —
+                // internal inconsistency, not "nothing to save".
+                AppLogger.log("file-editor-state", "save-failed reason=storage-missing path=%@", url.path)
+                failures.append((url, "The edits are no longer held in memory."))
+                continue
+            }
             do {
                 try storage.string.write(to: url, atomically: true, encoding: .utf8)
                 tabDiskSignatures[url] = FileEditorDiskSignatureProvider.signature(for: url)
+                dirtyTabs.remove(url)
             } catch {
-                NSLog("openOwl: Failed to save %@: %@", url.lastPathComponent, error.localizedDescription)
+                AppLogger.log(
+                    "file-editor-state",
+                    "save-failed path=%@ error=%@",
+                    url.path,
+                    error.localizedDescription
+                )
+                failures.append((url, error.localizedDescription))
             }
         }
-        dirtyTabs.removeAll()
+        return failures
+    }
+
+    private func presentSaveFailureAlert(_ failures: [(url: URL, message: String)]) {
+        let detail = failures
+            .map { "• \($0.url.lastPathComponent) — \($0.message)" }
+            .joined(separator: "\n")
+        let alert = NSAlert()
+        alert.messageText = "Some edits could not be saved"
+        alert.informativeText = """
+        \(detail)
+
+        These tabs stay open with your changes so nothing is lost. Fix the problem and press ⌘S again.
+        """
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     // MARK: - Git Actions
@@ -1651,7 +1697,7 @@ private struct EditorTabButton: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(isActive ? RailChrome.hairline : Color.clear, lineWidth: 1)
+                .strokeBorder(isActive ? AppPalette.border : Color.clear, lineWidth: 1)
         )
         .padding(.vertical, 4)
         .onHover { isHovering = $0 }

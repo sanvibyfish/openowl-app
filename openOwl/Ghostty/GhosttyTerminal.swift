@@ -330,11 +330,9 @@ class TerminalNSView: NSView {
         guard let surface else { return }
         let paneTag = paneID.uuidString.prefix(8) as CVarArg
 
-        // Expected skips (hidden / zero-size during SwiftUI layout) are silent.
-        // Verbose path is opt-in via log.resizeDiag.
-        let verbose = UserDefaults.standard.bool(forKey: "log.resizeDiag")
+        // Expected skips (hidden / zero-size during SwiftUI layout) are silent
+        // unless the resize-diag tag is switched on — AppLogger owns that switch.
         func logSkip(_ detail: String) {
-            guard verbose else { return }
             AppLogger.log("resize-diag", "syncSurfaceSize skipped pane=%@ reason=%@ %@", paneTag, reason, detail)
         }
 
@@ -357,21 +355,21 @@ class TerminalNSView: NSView {
         lastSyncedBackingSize = backingSize
         let after = ghostty_surface_size(surface)
 
-        // Milestone reasons always log (short tag "resize"); frame spam stays opt-in.
+        // Milestones always log under "resize"; every other frame goes to the
+        // opt-in "resize-diag" tag. A reason keeps the same tag whether or not
+        // the verbose switch is on, so grepping the log by tag stays reliable.
         let milestoneReasons: Set<String> = [
             "create", "reattach", "live-resize-ended", "resize-freeze-ended",
             "visibility-restored", "backing-change"
         ]
-        if milestoneReasons.contains(reason) || verbose {
-            let tag = verbose ? "resize-diag" : "resize"
-            AppLogger.log(tag, "syncSurfaceSize pane=%@ reason=%@ pts=%.1fx%.1f px=%.0fx%.0f cols=%d rows=%d window=%@",
-                          paneID.uuidString.prefix(8) as CVarArg,
-                          reason,
-                          pointSize.width, pointSize.height,
-                          backingSize.width, backingSize.height,
-                          Int(after.columns), Int(after.rows),
-                          window == nil ? "nil" : "set")
-        }
+        AppLogger.log(milestoneReasons.contains(reason) ? "resize" : "resize-diag",
+                      "syncSurfaceSize pane=%@ reason=%@ pts=%.1fx%.1f px=%.0fx%.0f cols=%d rows=%d window=%@",
+                      paneTag,
+                      reason,
+                      pointSize.width, pointSize.height,
+                      backingSize.width, backingSize.height,
+                      Int(after.columns), Int(after.rows),
+                      window == nil ? "nil" : "set")
     }
 
     override func viewDidChangeBackingProperties() {

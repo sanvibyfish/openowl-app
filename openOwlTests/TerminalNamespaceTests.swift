@@ -192,14 +192,16 @@ struct TerminalNamespaceTests {
         #expect(focusRequests.isEmpty)
     }
 
-    @Test @MainActor func selectPane_requestsFirstResponderExactlyOnce() {
+    @Test @MainActor func selectPane_inActiveNamespace_requestsFirstResponderExactlyOnce() {
         let store = TerminalWorkspaceStore()
-        store.ensureInitialTab()
-        let paneID = store.activeFocusedPaneID!
+        let namespace: TerminalNamespace = .project("proj-A")
+        let tabID = store.newTab(for: namespace)
+        store.switchNamespace(namespace)
+        let paneID = store.tabs.first(where: { $0.id == tabID })!.splitTree.firstPaneID!
         var focusRequests: [UUID] = []
         store.focusPaneHandler = { focusRequests.append($0) }
 
-        store.selectPane(paneID)
+        store.selectPane(paneID, in: namespace)
 
         #expect(store.activeFocusedPaneID == paneID)
         #expect(focusRequests == [paneID])

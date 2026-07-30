@@ -10,8 +10,6 @@ enum AppConstants {
     static let ghosttyResourcesDirEnv = "GHOSTTY_RESOURCES_DIR"
 
     // Layout
-    static let sidebarWidth: CGFloat = 250 // legacy; left chrome is RailChrome.leftWidth
-    static let projectRailWidth: CGFloat = RailChrome.leftWidth
     static let contentMinWidth: CGFloat = 400
     static let windowMinWidth: CGFloat = 800
     static let windowMinHeight: CGFloat = 500

@@ -309,11 +309,19 @@ final class ResourceMonitor {
 
         monitoringTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.sampleAndNotify()
+                guard let self else { return }
+                await self.sampleAndNotify()
                 do {
-                    try await Task.sleep(for: self?.samplingInterval ?? .seconds(60))
+                    try await Task.sleep(for: self.samplingInterval)
+                } catch is CancellationError {
+                    return
                 } catch {
-                    break
+                    // Release the handle on the way out, otherwise `start()`'s
+                    // `monitoringTask == nil` guard makes the monitor
+                    // unrevivable and nothing says why it went quiet.
+                    AppLogger.log("resource-monitor", "sampling loop aborted: \(error)")
+                    self.monitoringTask = nil
+                    return
                 }
             }
         }

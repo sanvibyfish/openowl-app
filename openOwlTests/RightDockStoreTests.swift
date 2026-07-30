@@ -329,7 +329,7 @@ struct RightDockStoreTests {
         store.gitShowsDiff = true
         store.width = 480
 
-        let w = store.effectiveWidth(hostWidth: 1200, railWidth: 28)
+        let w = store.effectiveWidth(hostWidth: 1200)
         #expect(w == 480)
         Self.clearDefaults()
     }
@@ -341,8 +341,8 @@ struct RightDockStoreTests {
         store.gitShowsDiff = true
         store.width = 1000
 
-        let w = store.effectiveWidth(hostWidth: 900, railWidth: 28)
-        #expect(w == CGFloat(436))
+        let w = store.effectiveWidth(hostWidth: 900)
+        #expect(w == CGFloat(450))
         Self.clearDefaults()
     }
 
@@ -353,7 +353,7 @@ struct RightDockStoreTests {
         store.filesShowsEditor = false
         store.width = 480
 
-        let w = store.effectiveWidth(hostWidth: 1200, railWidth: 28)
+        let w = store.effectiveWidth(hostWidth: 1200)
         #expect(w == RightDockStore.listOnlyWidth)
         Self.clearDefaults()
     }
@@ -364,8 +364,8 @@ struct RightDockStoreTests {
         store.activeTab = .files
         store.filesShowsEditor = false
 
-        let w = store.effectiveWidth(hostWidth: 420, railWidth: 28)
-        #expect(w == CGFloat(196))
+        let w = store.effectiveWidth(hostWidth: 420)
+        #expect(w == CGFloat(210))
         Self.clearDefaults()
     }
 
@@ -375,8 +375,8 @@ struct RightDockStoreTests {
         store.toggle(tab: .git)
         store.toggleFullscreen()
 
-        let w = store.effectiveWidth(hostWidth: 1000, railWidth: 28)
-        #expect(w == CGFloat(972))
+        let w = store.effectiveWidth(hostWidth: 1000)
+        #expect(w == CGFloat(1000))
         Self.clearDefaults()
     }
 

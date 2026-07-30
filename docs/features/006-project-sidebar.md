@@ -70,7 +70,7 @@ Worktree 目录统一存放在 `~/.openowl/workspace/projects/` 下。
 
 归档 worktree 会先进入进度态并禁用重复点击。openOwl 先以父仓库的 `git worktree list --porcelain` 判断当前登记状态：
 
-- 仍登记为 worktree：检查未提交修改，再执行 `git worktree remove --force`
+- 仍登记为 worktree：检查未提交修改，再执行 `git worktree remove --force`。**未提交检查本身失败时 fail-closed** —— 提示用户并取消归档，绝不在「不知道有没有脏改动」的状态下走 `--force`（git 超时、`index.lock` 被占用、仓库损坏都会走到这条路径）
 - 路径已经不存在：直接清理侧边栏中的失效记录
 - 路径存在但未登记：不再调用 `git worktree remove`；提示用户选择将残留目录移到废纸篓或保留
 
@@ -105,13 +105,13 @@ Project Rail popover 与 Project Session List 的归档入口共享 `ProjectStor
 
 ```
 openOwl/Features/Sidebar/
-├── ProjectRail.swift      # 窄 rail UI（主入口）
-├── ProjectStore.swift     # 数据 / 持久化
-├── BookmarkStore.swift
-├── SidebarView.swift      # 旧宽侧边栏（已下线，暂保留参考）
-├── ProjectsSection.swift
-└── TerminalsSection.swift
+├── ProjectRail.swift        # 窄 rail UI（主入口）+ WorktreeArchive / WorktreeAlert
+├── ProjectSessionList.swift # 当前项目的分支 / worktree / pane 列表
+├── ProjectStore.swift       # 数据 / 持久化 + worktree 创建与归档的进行中状态
+└── BookmarkStore.swift
 ```
+
+worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session list 只调用它 —— 两处都提供同一操作，各自持有进行中状态会让并发的 `git worktree add` 撞上 `index.lock`。
 
 窗口结构（`ContentView`）：
 
@@ -133,7 +133,6 @@ openOwl/Features/Sidebar/
 
 - 项目顺序：root 保持 `ProjectStore` 持久化顺序；rail 仅把「本 session 有 tab 的 root」提到前面
 - 从 Project Rail 切回某个 root 时，恢复该 root 最近一次选中的 main/worktree；用户明确切回 main 后，后续继续保持 main
-- `collapsedProjectIDs` 仅旧宽侧边栏使用，rail 不再依赖展开/折叠树
 - 删除根项目时同时移除所有子 worktree
 
 ## 5. 相关需求
@@ -152,3 +151,5 @@ openOwl/Features/Sidebar/
 | 2026-07-28 | UI 改为 Muxy 风格 `ProjectRail`（48pt）；宽 `SidebarView` 下线；worktree 经 popover/右键管理 |
 | 2026-07-29 | Project Rail 切回项目时恢复该 root 最近选择的 main/worktree |
 | 2026-07-30 | Project Rail 与 Project Session List 共用按 worktree ID 的归档 in-flight guard，阻止同一 worktree 重复归档 |
+| 2026-07-31 | worktree 创建上移 `ProjectStore.createWorktree`（rail / session list 共用同一 in-flight guard 与失败弹窗）；`branchPrefix` 缺失时禁用入口而非回落 `dev`；删除已下线的 `SidebarView` / `ProjectsSection` / `TerminalsSection`；分支行与 worktree 行合并为单个 `SessionRow` |
+| 2026-07-31 | 归档 worktree 时未提交检查失败改为 fail-closed（取消归档并提示），不再在未知状态下执行 `git worktree remove --force` |

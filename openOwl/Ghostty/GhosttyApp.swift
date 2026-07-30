@@ -265,31 +265,6 @@ final class GhosttyAppManager {
         unregisterPane(paneID)
     }
 
-    /// Re-hide Metal layers for panes that are not the focused surface.
-    /// Call under memory pressure; does not kill shell processes / scrollback.
-    /// Soft reclaim under memory pressure. Does **not** hide sibling panes in
-    /// a visible split (that would blank half the workspace). Only forces Metal
-    /// off for views already detached from a window, and dumps counts for the log.
-    func reclaimHiddenSurfaces() {
-        var detachedHidden = 0
-        var rendering = 0
-        for (_, view) in retainedTerminalViews {
-            if view.isRenderingActive { rendering += 1 }
-            // Detached wrappers should never composite.
-            if view.window == nil {
-                view.setSurfaceVisibility(false)
-                detachedHidden += 1
-            }
-        }
-        AppLogger.log(
-            "resource-monitor",
-            "reclaimHiddenSurfaces retained=%d rendering=%d detachedForcedHidden=%d",
-            retainedTerminalViews.count,
-            rendering,
-            detachedHidden
-        )
-    }
-
     func terminalView(for paneID: UUID) -> TerminalNSView? {
         paneViewMap[paneID]?.value
     }

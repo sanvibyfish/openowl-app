@@ -36,12 +36,7 @@ struct ContentView: View {
                         softVerticalDivider
 
                         RightDockView(hostWidth: hostWidth)
-                            .frame(
-                                width: rightDockStore.effectiveWidth(
-                                    hostWidth: hostWidth,
-                                    railWidth: 0
-                                )
-                            )
+                            .frame(width: rightDockStore.effectiveWidth(hostWidth: hostWidth))
                             .frame(maxHeight: .infinity)
                     }
 
@@ -96,7 +91,7 @@ struct ContentView: View {
 
     private var softVerticalDivider: some View {
         Rectangle()
-            .fill(RailChrome.hairline)
+            .fill(AppPalette.border)
             .frame(width: 1)
             .frame(maxHeight: .infinity)
     }

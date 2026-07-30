@@ -12,26 +12,12 @@ struct ProjectSessionList: View {
     @Environment(ProjectStore.self) private var projectStore
     @Environment(TerminalWorkspaceStore.self) private var workspace
 
-    @State private var creatingWorktreeFor: String?
-
     private var shortcutMap: [String: Int] {
         var map: [String: Int] = [:]
         for (index, item) in projectStore.orderedProjectTabs.enumerated() where index < 9 {
             map[item.id] = index + 1
         }
         return map
-    }
-
-    /// Root project of the current selection (nil when free terminal is active).
-    private var selectedRoot: ProjectItem? {
-        guard let activeID = projectStore.activeProjectID,
-              let active = projectStore.projects.first(where: { $0.id == activeID }) else {
-            return nil
-        }
-        if let parentID = active.worktreeOf {
-            return projectStore.projects.first(where: { $0.id == parentID })
-        }
-        return active
     }
 
     var body: some View {
@@ -42,7 +28,7 @@ struct ProjectSessionList: View {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     if projectStore.activeFreeTerminalID != nil {
                         freeTerminalContent
-                    } else if let project = selectedRoot {
+                    } else if let project = projectStore.activeRootProject {
                         projectContent(project)
                     } else {
                         Text("Pick a project on the left rail")
@@ -57,10 +43,10 @@ struct ProjectSessionList: View {
         }
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
-        .background(RailChrome.background)
+        .background(AppPalette.elevated)
         .overlay(alignment: .trailing) {
             Rectangle()
-                .fill(RailChrome.hairline)
+                .fill(AppPalette.border)
                 .frame(width: 1)
         }
     }
@@ -72,14 +58,14 @@ struct ProjectSessionList: View {
                     .font(AppFonts.sectionHeader)
                     .tracking(AppFonts.sectionTracking)
                     .foregroundStyle(AppPalette.textTertiary)
-            } else if let project = selectedRoot {
+            } else if let project = projectStore.activeRootProject {
                 Text(project.displayName)
                     .font(AppFonts.sectionHeader)
                     .tracking(0.5)
                     .foregroundStyle(AppPalette.textSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                if creatingWorktreeFor == project.id {
+                if projectStore.isCreatingWorktree(rootID: project.id) {
                     ProgressView()
                         .controlSize(.mini)
                         .frame(width: 12, height: 12)
@@ -92,6 +78,7 @@ struct ProjectSessionList: View {
                             .foregroundStyle(AppPalette.textTertiary)
                     }
                     .buttonStyle(.plain)
+                    .disabled(project.branchPrefix == nil)
                     .help("Create worktree")
                     .accessibilityLabel("Create worktree")
                 }
@@ -107,7 +94,7 @@ struct ProjectSessionList: View {
         .padding(.vertical, 8)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(RailChrome.hairline)
+                .fill(AppPalette.border)
                 .frame(height: 1)
         }
     }
@@ -145,14 +132,14 @@ struct ProjectSessionList: View {
         let mainSelected = projectStore.activeProjectID == project.id
         let shortcuts = shortcutMap
 
-        SessionBranchRow(
+        SessionRow(
             title: project.lastBranch ?? "main",
-            subtitle: "main",
             path: project.path,
             isSelected: mainSelected,
             unread: workspace.bellCount(for: project.id),
             shortcutNumber: shortcuts[project.id],
-            onSelect: { projectStore.activateProject(id: project.id) }
+            onSelect: { projectStore.activateProject(id: project.id) },
+            extraMenuItems: { EmptyView() }
         )
 
         ForEach(workspace.paneInfos(for: project.id)) { info in
@@ -165,13 +152,22 @@ struct ProjectSessionList: View {
 
         ForEach(worktrees) { wt in
             let wtSelected = projectStore.activeProjectID == wt.id
-            SessionWorktreeRow(
-                wt: wt,
+            let isArchiving = projectStore.isArchivingWorktree(id: wt.id)
+            SessionRow(
+                title: wt.worktreeBranch ?? wt.name,
+                path: wt.path,
                 isSelected: wtSelected,
                 unread: workspace.bellCount(for: wt.id),
                 shortcutNumber: shortcuts[wt.id],
                 onSelect: { projectStore.activateProject(id: wt.id) },
-                onRename: { promptRename(wt: wt) }
+                extraMenuItems: {
+                    Button("Rename Branch…") { promptRename(wt: wt) }
+                    Divider()
+                    Button(isArchiving ? "Archiving..." : "Archive Worktree", role: .destructive) {
+                        Task { await WorktreeArchive.archive(wt: wt, projectStore: projectStore) }
+                    }
+                    .disabled(isArchiving)
+                }
             )
 
             ForEach(workspace.paneInfos(for: wt.id)) { info in
@@ -185,27 +181,7 @@ struct ProjectSessionList: View {
     }
 
     private func createWorktree(for project: ProjectItem) async {
-        creatingWorktreeFor = project.id
-        defer { creatingWorktreeFor = nil }
-
-        let prefix = project.branchPrefix ?? "dev"
-        let generated = BranchNameGenerator.generate(prefix: prefix)
-        let git = GitService(workingDirectory: project.url)
-
-        do {
-            let worktreePath = try await git.addWorktree(
-                branch: generated.branchName,
-                dirName: generated.dirName
-            )
-            let newProject = projectStore.addWorktreeProject(
-                parentID: project.id,
-                path: worktreePath,
-                branch: generated.branchName
-            )
-            projectStore.activateProject(id: newProject.id)
-        } catch {
-            NSLog("openOwl: [ProjectSessionList] Failed to create worktree: %@", error.localizedDescription)
-        }
+        await createWorktreeReportingFailure(for: project, in: projectStore)
     }
 
     private func promptRename(wt: ProjectItem) {
@@ -229,12 +205,8 @@ struct ProjectSessionList: View {
             do {
                 try await projectStore.renameWorktreeProject(id: wt.id, newBranch: trimmed)
             } catch {
-                let fail = NSAlert()
-                fail.messageText = "Rename failed"
-                fail.informativeText = error.localizedDescription
-                fail.alertStyle = .critical
-                fail.addButton(withTitle: "OK")
-                fail.runModal()
+                AppLogger.log("worktree", "rename failed id=%@ error=%@", wt.id, error.localizedDescription)
+                WorktreeAlert.present(title: "Rename failed", message: error.localizedDescription)
             }
         }
     }
@@ -242,14 +214,16 @@ struct ProjectSessionList: View {
 
 // MARK: - Rows
 
-private struct SessionBranchRow: View {
+/// One branch row — the project's main branch and each worktree render
+/// identically. Worktree-only actions come in through `extraMenuItems`.
+private struct SessionRow<ExtraMenu: View>: View {
     let title: String
-    let subtitle: String
     let path: String
     let isSelected: Bool
     let unread: Int
     var shortcutNumber: Int?
     let onSelect: () -> Void
+    @ViewBuilder let extraMenuItems: () -> ExtraMenu
 
     @State private var hovering = false
 
@@ -268,6 +242,7 @@ private struct SessionBranchRow: View {
             Button("Reveal in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
             }
+            extraMenuItems()
         }
     }
 
@@ -317,88 +292,6 @@ private struct SessionBranchRow: View {
             }
         }
         .contentShape(Rectangle())
-    }
-}
-
-private struct SessionWorktreeRow: View {
-    let wt: ProjectItem
-    let isSelected: Bool
-    let unread: Int
-    var shortcutNumber: Int?
-    let onSelect: () -> Void
-    let onRename: () -> Void
-
-    @Environment(ProjectStore.self) private var projectStore
-    @State private var hovering = false
-
-    var body: some View {
-        let isArchiving = projectStore.isArchivingWorktree(id: wt.id)
-
-        Button(action: onSelect) {
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 11))
-                    .foregroundStyle(isSelected ? AppPalette.accent : AppPalette.textTertiary)
-                    .frame(width: 14)
-
-                Text(wt.worktreeBranch ?? wt.name)
-                    .font(AppFonts.body.weight(isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? AppPalette.textPrimary : AppPalette.textSecondary)
-                    .lineLimit(1)
-
-                Spacer(minLength: 2)
-
-                if unread > 0 {
-                    Text("\(unread)")
-                        .font(AppFonts.badge)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(AppPalette.accent))
-                }
-
-                if let n = shortcutNumber {
-                    Text("\u{2318}\(n)")
-                        .font(AppFonts.badge)
-                        .foregroundStyle(AppPalette.textTertiary)
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isSelected
-                          ? AppPalette.accent.opacity(0.12)
-                          : (hovering ? AppPalette.surface : Color.clear))
-            )
-            .overlay(alignment: .leading) {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(AppPalette.accent)
-                        .frame(width: 2, height: 14)
-                        .padding(.leading, 2)
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help(wt.path)
-        .contextMenu {
-            Button("Rename Branch…", action: onRename)
-            Button("Copy Path") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(wt.path, forType: .string)
-            }
-            Button("Reveal in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([wt.url])
-            }
-            Divider()
-            Button(isArchiving ? "Archiving..." : "Archive Worktree", role: .destructive) {
-                Task { await WorktreeArchive.archive(wt: wt, projectStore: projectStore) }
-            }
-            .disabled(isArchiving)
-        }
     }
 }
 

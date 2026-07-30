@@ -16,7 +16,6 @@ struct RightDockRail: View {
                     width: Self.width,
                     isSelected: false, // collapsed rail is entry-only; nothing "active" until expanded
                     help: tab.title,
-                    accentOnTrailing: true,
                     action: { dock.expand(tab: tab) }
                 ) {
                     Image(systemName: tab.systemImage)
@@ -29,10 +28,10 @@ struct RightDockRail: View {
         .padding(.vertical, 6)
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
-        .background(RailChrome.background)
+        .background(AppPalette.elevated)
         .overlay(alignment: .leading) {
             Rectangle()
-                .fill(RailChrome.hairline)
+                .fill(AppPalette.border)
                 .frame(width: 1)
         }
     }

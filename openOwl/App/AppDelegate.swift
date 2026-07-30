@@ -144,36 +144,47 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         installDebugMenu()
         #endif
         requestNotificationPermission()
+        startResourceMonitor()
+    }
+
+    /// Sampling is independent of notification permission — keep the two apart
+    /// so the monitor does not wait on (or get skipped by) the auth callback.
+    private func startResourceMonitor() {
+        resourceMonitor.onSelfProcessAlert = { [weak self] _ in
+            guard let self else { return }
+            if let dump = self.ghosttyManager?.diagnosticDump() {
+                AppLogger.log("resource-monitor", "openOwl self-alert dump:\n%@", dump)
+            }
+            if let workspace = self.workspaceStore {
+                AppLogger.log(
+                    "resource-monitor",
+                    "workspace tabs=%d visible=%d namespace=%@",
+                    workspace.tabs.count,
+                    workspace.visibleTabs.count,
+                    String(describing: workspace.activeNamespace)
+                )
+            }
+        }
+        resourceMonitor.start()
     }
 
     private func requestNotificationPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-            NSLog("openOwl: [Notification] permission granted=%d error=%@",
-                  granted ? 1 : 0, error?.localizedDescription ?? "nil")
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.resourceMonitor.onSelfProcessAlert = { [weak self] alert in
-                    guard let self else { return }
-                    if let dump = self.ghosttyManager?.diagnosticDump() {
-                        AppLogger.log("resource-monitor", "openOwl self-alert dump:\n%@", dump)
-                    }
-                    if let workspace = self.workspaceStore {
-                        let tabCount = workspace.tabs.count
-                        let visible = workspace.visibleTabs.count
-                        AppLogger.log(
-                            "resource-monitor",
-                            "workspace tabs=%d visible=%d namespace=%@",
-                            tabCount,
-                            visible,
-                            String(describing: workspace.activeNamespace)
-                        )
-                    }
-                    // Soft reclaim: hide Metal on every non-focused pane again
-                    // (belt-and-suspenders if visibility flags drifted).
-                    self.ghosttyManager?.reclaimHiddenSurfaces()
-                }
-                self.resourceMonitor.start()
+            if let error {
+                AppLogger.log("notification", "authorization failed: %@", error.localizedDescription)
+                return
             }
+            guard granted else {
+                // Resource alerts are delivered as user notifications, so a
+                // denial silences the whole alerting path. Say so explicitly —
+                // "no alerts" must not read as "nothing is wrong".
+                AppLogger.log(
+                    "notification",
+                    "permission denied — resource alerts cannot be delivered"
+                )
+                return
+            }
+            AppLogger.log("notification", "permission granted")
         }
     }
 

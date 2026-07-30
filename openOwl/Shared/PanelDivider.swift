@@ -5,7 +5,7 @@ import SwiftUI
 struct PanelDivider: View {
     var body: some View {
         Rectangle()
-            .fill(RailChrome.hairline)
+            .fill(AppPalette.border)
             .frame(height: 1)
             .frame(maxWidth: .infinity)
     }

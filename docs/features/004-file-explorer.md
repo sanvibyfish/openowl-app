@@ -84,9 +84,12 @@ classifyGitState: GitFileChange → FileGitState
 - 内容：最多 10 个打开文件路径 + active file path
 - 恢复：过滤不存在路径、目录、超过图片解码上限的图片；普通大文件按 large-file mode 恢复
 - 已打开 tab 记录磁盘签名（mtime + size + inode/fileIdentifier）；重复打开或切回 tab 时，非 dirty tab 会按磁盘当前内容刷新，dirty tab 不覆盖用户未保存编辑
+- **打开失败不落地空缓冲区**：权限被拒、文件在 stat 后被删、内容非 UTF-8 都会关闭该 tab 并在面板顶部报错。若代之以空字符串，磁盘签名校验仍会通过（磁盘没变），用户会看到一个可编辑的空文档，首次 ⌘S 就把原文件截断
+- **切项目时保存失败不清脏标记**：只有写盘成功的 tab 才移除 dirty 标记；存在失败时跳过 `clearEditorTabs`，保留 tab 与内容并弹窗列出失败文件，避免「看起来保存成功、实际编辑被丢弃」
+- 磁盘 reload 提交的是**新的** `NSTextStorage`，不改写编辑器持有的那个：直接 `replaceCharacters` 会绕过 `TextView.replaceCharacters`，让 `CEUndoManager` 保留指向旧内容的 range，后续 undo 会重放越界 range 抛出无法 catch 的 `NSRangeException`。编辑器 identity 因此把磁盘签名折进 `.id()`，光标位置跨 reload 夹取后恢复
 - 每个 URL 的异步读取使用独立 request identity，并携带 project session generation 与读取前磁盘签名；提交结果前再次核验 request、session 与磁盘签名，过期读取不会覆盖较新内容
 - 打开/恢复/reload 的 pending activation 与读取身份分离；一个文件的 reload 完成不会清除另一个文件的待激活状态
-- 活动编辑器刷新时原地更新现有 `NSTextStorage`，不重建 `SourceEditorState`，保留光标、selection、scroll 与 focus
+- 活动编辑器刷新时重建编辑器视图（identity 含磁盘签名），光标位置按新 buffer 长度夹取后恢复；scroll 与 focus 不跨 reload 保留 —— 这是不触发 undo 越界崩溃的代价
 - 日志：`[file-editor-state]` 记录 `persist` / `restore` / `restore-skip` / `clear`
 
 ## 4. 注意事项
@@ -105,6 +108,7 @@ classifyGitState: GitFileChange → FileGitState
 
 | 日期 | 说明 |
 |------|------|
+| 2026-07-31 | 打开失败不再折叠成空缓冲区（避免 ⌘S 截断原文件）；切项目保存失败时保留脏标记与 tab 并弹窗；磁盘 reload 改为提交新 `NSTextStorage` + 签名折进编辑器 identity，修复 undo 越界崩溃并保留光标 |
 | 2026-07-30 | 编辑器异步读取增加 request/session/磁盘签名提交门禁，隔离 pending activation，并以原地刷新保留编辑器交互状态 |
 | 2026-06-25 | 已打开 editor tab 增加磁盘签名刷新，修复外部修改后内容不更新 |
 | 2026-06-05 | 新增按项目 editor tab session 持久化与 file-editor-state 日志 |

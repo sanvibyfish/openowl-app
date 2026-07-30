@@ -30,10 +30,7 @@ struct RightDockView: View {
                     onResize: { proposed in
                         dock.setWidth(
                             proposed,
-                            maxWidth: RightDockStore.maxNormalWidth(
-                                hostWidth: hostWidth,
-                                railWidth: 0
-                            )
+                            maxWidth: RightDockStore.maxNormalWidth(hostWidth: hostWidth)
                         )
                     },
                     onResizeEnd: {
@@ -143,7 +140,7 @@ struct RightDockView: View {
         .background(AppPalette.base)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(RailChrome.hairline)
+                .fill(AppPalette.border)
                 .frame(height: 1)
         }
     }
@@ -154,10 +151,7 @@ struct RightDockView: View {
     }
 
     private func abbreviatedPath(_ url: URL) -> String {
-        let path = url.standardizedFileURL.path
-        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
-        guard path == home || path.hasPrefix(home + "/") else { return path }
-        return "~" + String(path.dropFirst(home.count))
+        (url.standardizedFileURL.path as NSString).abbreviatingWithTildeInPath
     }
 
     private var contentArea: some View {

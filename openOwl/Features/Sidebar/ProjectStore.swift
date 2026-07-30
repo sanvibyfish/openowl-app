@@ -50,12 +50,24 @@ struct FreeTerminalItem: Identifiable, Equatable {
     }
 }
 
+enum WorktreeCreationError: LocalizedError {
+    case missingBranchPrefix
+
+    var errorDescription: String? {
+        switch self {
+        case .missingBranchPrefix:
+            return "This project has no branch prefix yet — openOwl reads it from the repository's git config."
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class ProjectStore {
     private(set) var projects: [ProjectItem] = []
     private var lastActiveProjectIDByRoot: [String: String] = [:]
     private var archivingWorktreeIDs: Set<String> = []
+    private var creatingWorktreeRootIDs: Set<String> = []
 
     /// Setting `activeProjectID` to a non-nil value implicitly clears any active
     /// free terminal (project selection takes priority over free-terminal selection).
@@ -74,8 +86,6 @@ final class ProjectStore {
     /// The currently selected free terminal, if any. Mutually exclusive with activeProjectID.
     /// Setter exposed for @testable test access; production code should use `activate(_:)`.
     var activeFreeTerminalID: UUID?
-
-    var collapsedProjectIDs: Set<String> = []
 
     let bookmarkStore = BookmarkStore()
 
@@ -125,23 +135,23 @@ final class ProjectStore {
         return projects.first(where: { $0.id == activeProjectID })?.url
     }
 
+    /// Root project the current selection belongs to — a worktree resolves to
+    /// its parent. nil when a free terminal is active. Single source for "which
+    /// project is selected" so the rail and the session list cannot disagree.
+    var activeRootProject: ProjectItem? {
+        guard let activeProjectID,
+              let active = projects.first(where: { $0.id == activeProjectID }) else {
+            return nil
+        }
+        guard let parentID = active.worktreeOf else { return active }
+        return projects.first(where: { $0.id == parentID })
+    }
+
     /// Computed view of the active selection. nil only during early init.
     var activeKind: ActiveKind? {
         if let id = activeProjectID { return .project(id) }
         if let id = activeFreeTerminalID { return .freeTerminal(id) }
         return nil
-    }
-
-    func isExpanded(_ projectID: String) -> Bool {
-        !collapsedProjectIDs.contains(projectID)
-    }
-
-    func toggleExpanded(_ projectID: String) {
-        if collapsedProjectIDs.contains(projectID) {
-            collapsedProjectIDs.remove(projectID)
-        } else {
-            collapsedProjectIDs.insert(projectID)
-        }
     }
 
     func isArchivingWorktree(id: String) -> Bool {
@@ -155,6 +165,40 @@ final class ProjectStore {
 
     func endArchivingWorktree(id: String) {
         archivingWorktreeIDs.remove(id)
+    }
+
+    func isCreatingWorktree(rootID: String) -> Bool {
+        creatingWorktreeRootIDs.contains(rootID)
+    }
+
+    /// Creates a worktree off `project` and activates it.
+    ///
+    /// Lives here rather than in the rail / session list because both offer the
+    /// action against the same repository: two concurrent `git worktree add`
+    /// runs collide on `index.lock`, and per-view in-flight state cannot see
+    /// the other view's request.
+    func createWorktree(for project: ProjectItem) async throws {
+        guard creatingWorktreeRootIDs.insert(project.id).inserted else { return }
+        defer { creatingWorktreeRootIDs.remove(project.id) }
+
+        // Read this root's own prefix, not the active project's, so create works
+        // from the rail while a different project is selected.
+        guard let prefix = project.branchPrefix else {
+            throw WorktreeCreationError.missingBranchPrefix
+        }
+        let generated = BranchNameGenerator.generate(prefix: prefix)
+        let git = GitService(workingDirectory: project.url)
+
+        let worktreePath = try await git.addWorktree(
+            branch: generated.branchName,
+            dirName: generated.dirName
+        )
+        let newProject = addWorktreeProject(
+            parentID: project.id,
+            path: worktreePath,
+            branch: generated.branchName
+        )
+        activateProject(id: newProject.id)
     }
 
     // MARK: - Init

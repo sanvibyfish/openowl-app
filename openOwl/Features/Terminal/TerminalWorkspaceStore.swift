@@ -788,16 +788,11 @@ final class TerminalWorkspaceStore {
         }
     }
 
-    /// Selects a pane from UI outside the terminal and hands first responder to it once.
-    func selectPane(_ paneID: UUID) {
-        focusPane(paneID)
-        requestFocus(for: paneID)
-    }
-
     /// Selects a pane from the sidebar, switching its namespace before focus is handed off.
     func selectPane(_ paneID: UUID, in namespace: TerminalNamespace) {
         switchNamespace(namespace)
-        selectPane(paneID)
+        focusPane(paneID)
+        requestFocus(for: paneID)
     }
 
     // MARK: - Drag

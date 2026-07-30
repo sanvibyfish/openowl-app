@@ -35,7 +35,7 @@ struct StatusBarView: View {
         .background(AppPalette.elevated)
         .overlay(alignment: .top) {
             Rectangle()
-                .fill(RailChrome.hairline)
+                .fill(AppPalette.border)
                 .frame(height: 1)
         }
     }
@@ -52,10 +52,7 @@ struct StatusBarView: View {
             }
             return nil
         }
-        return url.path.replacingOccurrences(
-            of: FileManager.default.homeDirectoryForCurrentUser.path,
-            with: "~"
-        )
+        return (url.standardizedFileURL.path as NSString).abbreviatingWithTildeInPath
     }
 
     private var visibleArea: StatusBarVisibleArea {

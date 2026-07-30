@@ -41,10 +41,9 @@ openOwl/
 ├── App/
 │   └── RightDockStore.swift        # 管理 dock 状态
 └── Features/
-    ├── RightDock/
-    │   └── RightDockView.swift     # tab bar + 内容 + 全屏/折叠/拖宽
-    └── Sidebar/
-        └── TerminalsSection.swift  # "TERMINALS" 区段视图
+    └── RightDock/
+        ├── RightDockView.swift     # tab bar + 内容 + 全屏/折叠/拖宽
+        └── RightDockRail.swift     # 折叠态窄图标条
 ```
 
 ### 3.2 数据模型
@@ -120,7 +119,7 @@ GeometryReader { geo in
             if dock.isExpanded {
                 Divider()
                 RightDockView(hostWidth: geo.size.width)
-                    .frame(width: dock.effectiveWidth(hostWidth: geo.size.width, railWidth: 0))
+                    .frame(width: dock.effectiveWidth(hostWidth: geo.size.width))
             } else {
                 Divider()
                 RightDockRail()
@@ -132,7 +131,7 @@ GeometryReader { geo in
 }
 ```
 
-`hostWidth` 通过 GeometryReader 读取 detail 区当前宽度。`RightDockStore.effectiveWidth(hostWidth:railWidth:)` 会在每次布局时按当前窗口重新 clamp：普通 dock 不超过可用宽度的 50%，避免持久化宽度或窗口缩窄把 Terminal 挤成极窄列；展开态不显示 rail，因此全屏 dock 可占满 detail 区。
+`hostWidth` 通过 GeometryReader 读取 detail 区当前宽度。`RightDockStore.effectiveWidth(hostWidth:)` 会在每次布局时按当前窗口重新 clamp：普通 dock 不超过可用宽度的 50%，避免持久化宽度或窗口缩窄把 Terminal 挤成极窄列；展开态不显示 rail，因此全屏 dock 可占满 detail 区。
 
 **四、Inspector 外壳。** 原 `ViewTabBar`（中央 4-tab）删除。dock 折叠时只显示 36pt 右侧 rail，作为重新打开 Files / Git 的入口；rail 使用 15pt 图标和 2pt 活动色条标识上次选中的 tab。展开后 rail 隐藏，由 `RightDockView` 的 28pt 平面 tab header 承担切换，active tab 以背景色阶和 2pt 底边标识。
 
@@ -180,3 +179,4 @@ GeometryReader { geo in
 | 2026-06-04 | 补充 Terminal 隐藏期间保留 PTY 尺寸、恢复显示时强制重同步的规则 | Codex |
 | 2026-05-07 | 初稿 + 实现完成 | Lead |
 | 2026-05-10 | Right Dock 展开时隐藏 toolbar 入口，避免与 header tab 重复 | Lead |
+| 2026-07-31 | `effectiveWidth` / `maxNormalWidth` 去掉恒为 0 的 `railWidth` 参数（展开态不显示 rail，该参数在生产环境无效果） |

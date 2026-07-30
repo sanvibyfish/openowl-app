@@ -141,15 +141,15 @@ final class RightDockStore {
 
     /// Width the dock panel actually occupies, given fullscreen state and
     /// whether the active tab is showing its detail pane. The host passes its
-    /// own width so fullscreen can stretch to fill the space minus the rail.
-    func effectiveWidth(hostWidth: CGFloat, railWidth: CGFloat) -> CGFloat {
-        if isFullscreen { return max(0, hostWidth - railWidth) }
+    /// own width so fullscreen can stretch to fill it.
+    func effectiveWidth(hostWidth: CGFloat) -> CGFloat {
+        if isFullscreen { return max(0, hostWidth) }
         let candidate = showsDetailForActiveTab ? width : Self.listOnlyWidth
-        return min(candidate, Self.maxNormalWidth(hostWidth: hostWidth, railWidth: railWidth))
+        return min(candidate, Self.maxNormalWidth(hostWidth: hostWidth))
     }
 
-    static func maxNormalWidth(hostWidth: CGFloat, railWidth: CGFloat) -> CGFloat {
-        max(0, (hostWidth - railWidth) * maxWidthFraction)
+    static func maxNormalWidth(hostWidth: CGFloat) -> CGFloat {
+        max(0, hostWidth * maxWidthFraction)
     }
 
     /// Toolbar button behavior:

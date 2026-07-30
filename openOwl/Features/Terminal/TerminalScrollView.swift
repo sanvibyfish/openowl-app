@@ -71,8 +71,7 @@ class TerminalScrollView: NSView {
 
     override func layout() {
         super.layout()
-        let prev = terminalView.frame
-        let sizeChanged = prev.size != bounds.size
+        let sizeChanged = terminalView.frame.size != bounds.size
 
         terminalView.suppressFrameSizeSync = freezeTerminalWidth
         terminalView.frame = bounds
@@ -90,10 +89,6 @@ class TerminalScrollView: NSView {
             width: indicatorWidth,
             height: bounds.height - margin * 2
         )
-        // Per-frame layout logging removed — enable with:
-        //   defaults write com.openowl.app log.resizeDiag -bool YES
-        // and re-add AppLogger.log("resize-diag", ...) when debugging resize.
-        _ = prev
     }
 
     // MARK: - Public API

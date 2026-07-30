@@ -27,39 +27,32 @@ enum AppLogger {
         logDir.appendingPathComponent("openowl.log")
     }()
 
-    /// Tags that only write when explicitly enabled via UserDefaults.
-    private static let optInTags: Set<String> = ["resize-diag"]
+    /// Tags that only write when their UserDefaults switch is on.
+    /// Every other tag is always on.
+    static let optInTags: [String: String] = ["resize-diag": "log.resizeDiag"]
 
-    private static func isEnabled(_ tag: String) -> Bool {
-        guard optInTags.contains(tag) else { return true }
-        switch tag {
-        case "resize-diag":
-            return UserDefaults.standard.bool(forKey: "log.resizeDiag")
-        default:
-            return true
-        }
+    static func isEnabled(_ tag: String) -> Bool {
+        guard let key = optInTags[tag] else { return true }
+        return UserDefaults.standard.bool(forKey: key)
     }
 
     static func log(_ tag: String, _ message: String) {
         guard isEnabled(tag) else { return }
+        emit(tag, message)
+    }
+
+    static func log(_ tag: String, _ format: String, _ args: CVarArg...) {
+        guard isEnabled(tag) else { return }
+        emit(tag, String(format: format, arguments: args))
+    }
+
+    private static func emit(_ tag: String, _ message: String) {
         let timestamp = dateFormatter.string(from: Date())
         let line = "\(timestamp) [\(tag)] \(message)\n"
         NSLog("openOwl: [%@] %@", tag, message)
         queue.async {
             writeToFile(line)
         }
-    }
-
-    static func log(_ tag: String, _ format: String, _ args: CVarArg...) {
-        guard isEnabled(tag) else { return }
-        let message = String(format: format, arguments: args)
-        log(tag, message)
-    }
-
-    /// Always-on log for important resize milestones (dock toggles, force sync).
-    /// Bypasses the resize-diag opt-in so ops events still appear.
-    static func logResizeEvent(_ message: String) {
-        log("resize", message)
     }
 
     private static func writeToFile(_ line: String) {
