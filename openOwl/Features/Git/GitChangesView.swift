@@ -1551,6 +1551,7 @@ private struct CommitRow: View {
                 ForEach(parseBadges(), id: \.label) { badge in
                     Text(badge.label)
                         .font(AppFonts.badge)
+                        .lineLimit(1)
                         .padding(.horizontal, 3)
                         .padding(.vertical, 1)
                         .background(badge.color.opacity(0.15))
