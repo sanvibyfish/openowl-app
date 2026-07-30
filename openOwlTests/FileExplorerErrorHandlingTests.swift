@@ -416,6 +416,29 @@ struct FileExplorerErrorHandlingTests {
         #expect(isLoading)
     }
 
+    @Test func fileEditorPendingActivation_reloadACompletionDoesNotClearOpenB() {
+        let reloadA = URL(fileURLWithPath: "/project/a.swift")
+        let openB = URL(fileURLWithPath: "/project/b.swift")
+        let pendingOpen = openB
+
+        #expect(!FileEditorPendingActivationPolicy.isCurrent(
+            reloadA,
+            pendingURL: pendingOpen
+        ))
+        #expect(FileEditorPendingActivationPolicy.clearing(
+            reloadA,
+            from: pendingOpen
+        ) == openB)
+        #expect(FileEditorPendingActivationPolicy.isCurrent(
+            openB,
+            pendingURL: pendingOpen
+        ))
+        #expect(FileEditorPendingActivationPolicy.clearing(
+            openB,
+            from: pendingOpen
+        ) == nil)
+    }
+
     private var defaultsSuiteName: String {
         "openowl.file-editor-session.tests"
     }

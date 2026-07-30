@@ -332,6 +332,8 @@ private struct SessionWorktreeRow: View {
     @State private var hovering = false
 
     var body: some View {
+        let isArchiving = projectStore.isArchivingWorktree(id: wt.id)
+
         Button(action: onSelect) {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.triangle.branch")
@@ -392,9 +394,10 @@ private struct SessionWorktreeRow: View {
                 NSWorkspace.shared.activateFileViewerSelecting([wt.url])
             }
             Divider()
-            Button("Archive Worktree", role: .destructive) {
+            Button(isArchiving ? "Archiving..." : "Archive Worktree", role: .destructive) {
                 Task { await WorktreeArchive.archive(wt: wt, projectStore: projectStore) }
             }
+            .disabled(isArchiving)
         }
     }
 }

@@ -502,6 +502,7 @@ private struct ProjectRailPopover: View {
                     .padding(.bottom, 4)
 
                 ForEach(worktrees) { wt in
+                    let isArchiving = projectStore.isArchivingWorktree(id: wt.id)
                     popoverRow(
                         title: wt.worktreeBranch ?? wt.name,
                         subtitle: nil,
@@ -519,9 +520,10 @@ private struct ProjectRailPopover: View {
                             NSWorkspace.shared.activateFileViewerSelecting([wt.url])
                         }
                         Divider()
-                        Button("Archive Worktree", role: .destructive) {
+                        Button(isArchiving ? "Archiving..." : "Archive Worktree", role: .destructive) {
                             Task { await WorktreeArchive.archive(wt: wt, projectStore: projectStore) }
                         }
+                        .disabled(isArchiving)
                     }
                 }
             }
@@ -646,6 +648,9 @@ private struct ProjectRailPopover: View {
 @MainActor
 enum WorktreeArchive {
     static func archive(wt: ProjectItem, projectStore: ProjectStore) async {
+        guard projectStore.beginArchivingWorktree(id: wt.id) else { return }
+        defer { projectStore.endArchivingWorktree(id: wt.id) }
+
         guard let parentID = wt.worktreeOf,
               let parent = projectStore.projects.first(where: { $0.id == parentID }) else {
             presentAlert(

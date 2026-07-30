@@ -134,6 +134,16 @@ enum FileEditorLoadingSuppression {
     }
 }
 
+enum FileEditorPendingActivationPolicy {
+    static func isCurrent(_ url: URL, pendingURL: URL?) -> Bool {
+        pendingURL == url
+    }
+
+    static func clearing(_ url: URL, from pendingURL: URL?) -> URL? {
+        isCurrent(url, pendingURL: pendingURL) ? nil : pendingURL
+    }
+}
+
 enum FileEditorSessionPersistence {
     private static let defaultsKey = "openowl.fileExplorer.editorSessions.v1"
     private static var cache: [String: FileEditorSession]?
@@ -277,7 +287,7 @@ struct FileExplorerView: View {
     @State private var editorState = SourceEditorState()
     @State private var previewImage: NSImage?
     @State private var isEditorLoading = false
-    @State private var loadingFileURL: URL?
+    @State private var pendingActivationURL: URL?
 
     // Dirty tracking coordinator (shared across tab switches)
     @State private var editTracker = EditTracker()
@@ -770,7 +780,7 @@ struct FileExplorerView: View {
 
         // Add new tab
         openTabs.append(EditorTab(url: url))
-        loadingFileURL = url
+        pendingActivationURL = url
         isEditorLoading = true
         if needsLargeMode {
             largeModeTabs.insert(url)
@@ -787,11 +797,14 @@ struct FileExplorerView: View {
         signature: FileEditorDiskSignature? = nil
     ) {
         guard let request = beginFileRead(for: url, signature: signature) else {
-            loadingFileURL = nil
+            pendingActivationURL = FileEditorPendingActivationPolicy.clearing(
+                url,
+                from: pendingActivationURL
+            )
             isEditorLoading = false
             return
         }
-        loadingFileURL = url
+        pendingActivationURL = url
 
         if isImageURL(url) {
             Task.detached(priority: .userInitiated) {
@@ -800,7 +813,10 @@ struct FileExplorerView: View {
                     let currentSignature = FileEditorDiskSignatureProvider.signature(for: url)
                     guard FileEditorReloadCommitPolicy.shouldCommit(
                         isTabOpen: openTabs.contains(where: { $0.url == url })
-                            && loadingFileURL == url,
+                            && FileEditorPendingActivationPolicy.isCurrent(
+                                url,
+                                pendingURL: pendingActivationURL
+                            ),
                         isDirty: dirtyTabs.contains(url),
                         request: request,
                         currentRequestID: fileReadRequestIDs[url],
@@ -811,7 +827,10 @@ struct FileExplorerView: View {
                             url,
                             request: request,
                             currentDiskSignature: currentSignature,
-                            isEligible: loadingFileURL == url,
+                            isEligible: FileEditorPendingActivationPolicy.isCurrent(
+                                url,
+                                pendingURL: pendingActivationURL
+                            ),
                             retry: { latestSignature in
                                 startOpeningFileContent(
                                     url,
@@ -820,9 +839,10 @@ struct FileExplorerView: View {
                                 )
                             },
                             onReject: {
-                                if loadingFileURL == url {
-                                    loadingFileURL = nil
-                                }
+                                pendingActivationURL = FileEditorPendingActivationPolicy.clearing(
+                                    url,
+                                    from: pendingActivationURL
+                                )
                                 isEditorLoading = false
                             }
                         )
@@ -833,7 +853,10 @@ struct FileExplorerView: View {
                     fileReadRequestIDs.removeValue(forKey: url)
                     previewImage = image
                     activeTabURL = url
-                    loadingFileURL = nil
+                    pendingActivationURL = FileEditorPendingActivationPolicy.clearing(
+                        url,
+                        from: pendingActivationURL
+                    )
                     isEditorLoading = false
                 }
             }
@@ -860,7 +883,10 @@ struct FileExplorerView: View {
                     let currentSignature = FileEditorDiskSignatureProvider.signature(for: url)
                     guard FileEditorReloadCommitPolicy.shouldCommit(
                         isTabOpen: openTabs.contains(where: { $0.url == url })
-                            && loadingFileURL == url,
+                            && FileEditorPendingActivationPolicy.isCurrent(
+                                url,
+                                pendingURL: pendingActivationURL
+                            ),
                         isDirty: dirtyTabs.contains(url),
                         request: request,
                         currentRequestID: fileReadRequestIDs[url],
@@ -871,7 +897,10 @@ struct FileExplorerView: View {
                             url,
                             request: request,
                             currentDiskSignature: currentSignature,
-                            isEligible: loadingFileURL == url,
+                            isEligible: FileEditorPendingActivationPolicy.isCurrent(
+                                url,
+                                pendingURL: pendingActivationURL
+                            ),
                             retry: { latestSignature in
                                 startOpeningFileContent(
                                     url,
@@ -881,9 +910,10 @@ struct FileExplorerView: View {
                             },
                             onReject: {
                                 clearHeavyProgress(for: url)
-                                if loadingFileURL == url {
-                                    loadingFileURL = nil
-                                }
+                                pendingActivationURL = FileEditorPendingActivationPolicy.clearing(
+                                    url,
+                                    from: pendingActivationURL
+                                )
                                 isEditorLoading = false
                             }
                         )
@@ -895,7 +925,10 @@ struct FileExplorerView: View {
                     previewImage = nil
                     editorState = SourceEditorState()
                     activeTabURL = url
-                    loadingFileURL = nil
+                    pendingActivationURL = FileEditorPendingActivationPolicy.clearing(
+                        url,
+                        from: pendingActivationURL
+                    )
                     if needsLargeMode {
                         clearHeavyProgress(for: url)
                     }
@@ -904,7 +937,7 @@ struct FileExplorerView: View {
                 await MainActor.run {
                     guard editorSessionGeneration == request.sessionGeneration,
                           activeTabURL == url,
-                          loadingFileURL == nil else { return }
+                          pendingActivationURL == nil else { return }
                     isEditorLoading = false
                 }
             }
@@ -943,7 +976,6 @@ struct FileExplorerView: View {
         let activePath = session.activeFilePath
         let activeURL = urls.first { $0.standardizedFileURL.path == activePath } ?? urls.last
         activeTabURL = activeURL
-        loadingFileURL = activeURL
         isEditorLoading = activeURL != nil
         previewImage = nil
         editorState = SourceEditorState()
@@ -1015,7 +1047,6 @@ struct FileExplorerView: View {
                             },
                             onReject: {
                                 if activeTabURL == url {
-                                    loadingFileURL = nil
                                     isEditorLoading = false
                                 }
                             }
@@ -1028,7 +1059,6 @@ struct FileExplorerView: View {
                         fileReadRequestIDs.removeValue(forKey: url)
                         if activeTabURL == url {
                             previewImage = image
-                            loadingFileURL = nil
                             isEditorLoading = false
                         }
                     } else {
@@ -1090,7 +1120,6 @@ struct FileExplorerView: View {
                         onReject: {
                             clearHeavyProgress(for: url)
                             if activeTabURL == url {
-                                loadingFileURL = nil
                                 isEditorLoading = false
                             }
                         }
@@ -1103,7 +1132,6 @@ struct FileExplorerView: View {
                 if activeTabURL == url {
                     previewImage = nil
                     editorState = SourceEditorState()
-                    loadingFileURL = nil
                     if isLargeMode {
                         clearHeavyProgress(for: url)
                     }
@@ -1112,8 +1140,7 @@ struct FileExplorerView: View {
             try? await Task.sleep(for: .milliseconds(50))
             await MainActor.run {
                 guard editorSessionGeneration == request.sessionGeneration,
-                      activeTabURL == url,
-                      loadingFileURL == nil else { return }
+                      activeTabURL == url else { return }
                 isEditorLoading = false
             }
         }
@@ -1130,7 +1157,7 @@ struct FileExplorerView: View {
         dirtyTabs.removeAll()
         largeModeTabs.removeAll()
         previewImage = nil
-        loadingFileURL = nil
+        pendingActivationURL = nil
         isEditorLoading = false
         setHeavyProgress(nil, for: nil)
         if persist {
@@ -1212,7 +1239,6 @@ struct FileExplorerView: View {
 
     private func reloadOpenTabFromDisk(_ url: URL, signature: FileEditorDiskSignature, reason: String) {
         guard let request = beginFileRead(for: url, signature: signature) else { return }
-        loadingFileURL = url
 
         if isImageURL(url) {
             Task.detached(priority: .userInitiated) {
@@ -1246,7 +1272,6 @@ struct FileExplorerView: View {
                     fileReadRequestIDs.removeValue(forKey: url)
                     if activeTabURL == url {
                         previewImage = image
-                        loadingFileURL = nil
                         isEditorLoading = false
                     }
                     AppLogger.log("file-editor-state", "reload-image trigger=%@ path=%@", reason, url.path)
@@ -1264,9 +1289,6 @@ struct FileExplorerView: View {
                 await MainActor.run {
                     guard isCurrentFileRead(request, for: url) else { return }
                     fileReadRequestIDs.removeValue(forKey: url)
-                    if loadingFileURL == url {
-                        loadingFileURL = nil
-                    }
                     store.errorMessage = "Failed to reload \(url.lastPathComponent): \(error.localizedDescription)"
                 }
                 return
@@ -1325,7 +1347,6 @@ struct FileExplorerView: View {
                 }
                 if activeTabURL == url {
                     previewImage = nil
-                    loadingFileURL = nil
                 }
                 AppLogger.log("file-editor-state", "reload-text trigger=%@ path=%@", reason, url.path)
             }
@@ -1349,9 +1370,6 @@ struct FileExplorerView: View {
             currentSessionGeneration: editorSessionGeneration,
             currentDiskSignature: currentDiskSignature
         )
-        if loadingFileURL == url {
-            loadingFileURL = nil
-        }
         fileReadRequestIDs.removeValue(forKey: url)
 
         if shouldRetry, let currentDiskSignature {

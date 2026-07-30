@@ -55,6 +55,7 @@ struct FreeTerminalItem: Identifiable, Equatable {
 final class ProjectStore {
     private(set) var projects: [ProjectItem] = []
     private var lastActiveProjectIDByRoot: [String: String] = [:]
+    private var archivingWorktreeIDs: Set<String> = []
 
     /// Setting `activeProjectID` to a non-nil value implicitly clears any active
     /// free terminal (project selection takes priority over free-terminal selection).
@@ -141,6 +142,19 @@ final class ProjectStore {
         } else {
             collapsedProjectIDs.insert(projectID)
         }
+    }
+
+    func isArchivingWorktree(id: String) -> Bool {
+        archivingWorktreeIDs.contains(id)
+    }
+
+    @discardableResult
+    func beginArchivingWorktree(id: String) -> Bool {
+        archivingWorktreeIDs.insert(id).inserted
+    }
+
+    func endArchivingWorktree(id: String) {
+        archivingWorktreeIDs.remove(id)
     }
 
     // MARK: - Init

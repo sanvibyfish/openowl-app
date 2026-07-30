@@ -139,6 +139,35 @@ struct OrderedProjectTabsTests {
         #expect(thisRootTabs.count == 3)  // 1 root + 2 worktrees
     }
 
+    // MARK: - Worktree archive progress
+
+    @Test @MainActor func beginArchivingWorktree_rejectsDuplicateWorktree() {
+        let store = ProjectStore()
+
+        #expect(store.beginArchivingWorktree(id: "worktree-a"))
+        #expect(!store.beginArchivingWorktree(id: "worktree-a"))
+        #expect(store.isArchivingWorktree(id: "worktree-a"))
+    }
+
+    @Test @MainActor func beginArchivingWorktree_allowsDifferentWorktrees() {
+        let store = ProjectStore()
+
+        #expect(store.beginArchivingWorktree(id: "worktree-a"))
+        #expect(store.beginArchivingWorktree(id: "worktree-b"))
+        #expect(store.isArchivingWorktree(id: "worktree-a"))
+        #expect(store.isArchivingWorktree(id: "worktree-b"))
+    }
+
+    @Test @MainActor func endArchivingWorktree_allowsRetry() {
+        let store = ProjectStore()
+
+        #expect(store.beginArchivingWorktree(id: "worktree-a"))
+        store.endArchivingWorktree(id: "worktree-a")
+
+        #expect(!store.isArchivingWorktree(id: "worktree-a"))
+        #expect(store.beginArchivingWorktree(id: "worktree-a"))
+    }
+
     // MARK: - Project Rail selection restoration
 
     @Test @MainActor func activateLastProject_restoresPreviouslySelectedWorktree() {
