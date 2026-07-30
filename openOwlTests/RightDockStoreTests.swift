@@ -8,6 +8,7 @@ struct RightDockStoreTests {
     private static let keyActiveTab = "openowl.rightDock.activeTab"
     private static let keyWidth = "openowl.rightDock.width"
     private static let keyFilesShowsEditor = "openowl.rightDock.files.showsEditor"
+    private static let keyFilesShowsTree = "openowl.rightDock.files.showsTree"
     private static let keyGitShowsDiff = "openowl.rightDock.git.showsDiff"
 
     private static func clearDefaults() {
@@ -15,6 +16,7 @@ struct RightDockStoreTests {
         UserDefaults.standard.removeObject(forKey: keyActiveTab)
         UserDefaults.standard.removeObject(forKey: keyWidth)
         UserDefaults.standard.removeObject(forKey: keyFilesShowsEditor)
+        UserDefaults.standard.removeObject(forKey: keyFilesShowsTree)
         UserDefaults.standard.removeObject(forKey: keyGitShowsDiff)
     }
 
@@ -332,6 +334,18 @@ struct RightDockStoreTests {
         Self.clearDefaults()
     }
 
+    @Test @MainActor func effectiveWidth_normalClampsPersistedWidthToCurrentHost() {
+        Self.clearDefaults()
+        let store = RightDockStore()
+        store.activeTab = .git
+        store.gitShowsDiff = true
+        store.width = 1000
+
+        let w = store.effectiveWidth(hostWidth: 900, railWidth: 28)
+        #expect(w == CGFloat(436))
+        Self.clearDefaults()
+    }
+
     @Test @MainActor func effectiveWidth_listOnlyReturnsListOnlyWidth() {
         Self.clearDefaults()
         let store = RightDockStore()
@@ -344,6 +358,17 @@ struct RightDockStoreTests {
         Self.clearDefaults()
     }
 
+    @Test @MainActor func effectiveWidth_listOnlyClampsForNarrowHost() {
+        Self.clearDefaults()
+        let store = RightDockStore()
+        store.activeTab = .files
+        store.filesShowsEditor = false
+
+        let w = store.effectiveWidth(hostWidth: 420, railWidth: 28)
+        #expect(w == CGFloat(196))
+        Self.clearDefaults()
+    }
+
     @Test @MainActor func effectiveWidth_fullscreenFillsAvailable() {
         Self.clearDefaults()
         let store = RightDockStore()
@@ -352,6 +377,18 @@ struct RightDockStoreTests {
 
         let w = store.effectiveWidth(hostWidth: 1000, railWidth: 28)
         #expect(w == CGFloat(972))
+        Self.clearDefaults()
+    }
+
+    @Test @MainActor func interactiveResizeFreezesTerminalResizeUntilEnded() {
+        Self.clearDefaults()
+        let store = RightDockStore()
+
+        #expect(!store.shouldFreezeTerminalResize)
+        store.beginInteractiveResize()
+        #expect(store.shouldFreezeTerminalResize)
+        store.endInteractiveResize()
+        #expect(!store.shouldFreezeTerminalResize)
         Self.clearDefaults()
     }
 }

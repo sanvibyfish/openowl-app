@@ -83,6 +83,7 @@ classifyGitState: GitFileChange → FileGitState
 - 命名空间：项目根目录标准化绝对路径
 - 内容：最多 10 个打开文件路径 + active file path
 - 恢复：过滤不存在路径、目录、超过图片解码上限的图片；普通大文件按 large-file mode 恢复
+- 已打开 tab 记录磁盘签名（mtime + size）；重复打开或切回 tab 时，非 dirty tab 会按磁盘当前内容刷新，dirty tab 不覆盖用户未保存编辑
 - 日志：`[file-editor-state]` 记录 `persist` / `restore` / `restore-skip` / `clear`
 
 ## 4. 注意事项
@@ -91,7 +92,7 @@ classifyGitState: GitFileChange → FileGitState
 - 文件预览限制 160KB，检测二进制文件（null byte 检测）
 - 剪切操作通过 UserDefaults flag 标记，粘贴时判断是复制还是移动
 - 目录树变更通过 FileWatcher 自动刷新
-- Editor tab session 只保存路径和 active tab，不保存文件内容本身
+- Editor tab session 只保存路径和 active tab，不持久化文件内容本身；内存中的 tab 内容通过磁盘签名判断是否需要刷新
 
 ## 5. 相关需求
 
@@ -101,6 +102,7 @@ classifyGitState: GitFileChange → FileGitState
 
 | 日期 | 说明 |
 |------|------|
+| 2026-06-25 | 已打开 editor tab 增加磁盘签名刷新，修复外部修改后内容不更新 |
 | 2026-06-05 | 新增按项目 editor tab session 持久化与 file-editor-state 日志 |
 | 2026-05-07 | 全量扫描新增嵌套 repo 与依赖/构建目录懒加载边界，避免 workspace 级目录占用 GB 级内存 |
 | 2026-03-16 | 创建文档 |

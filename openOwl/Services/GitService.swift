@@ -67,6 +67,12 @@ enum GitServiceError: LocalizedError {
     }
 }
 
+enum WorktreeRemovalOutcome: Equatable {
+    case removed
+    case alreadyAbsent
+    case unregisteredPath
+}
+
 final class GitService {
     let workingDirectory: URL
 
@@ -402,7 +408,20 @@ final class GitService {
         return worktrees
     }
 
-    func removeWorktree(path: String) async throws {
+    func isRegisteredWorktree(path: String) async throws -> Bool {
+        let targetPath = normalizedWorktreePath(path)
+        return try await listWorktrees().contains {
+            normalizedWorktreePath($0.path) == targetPath
+        }
+    }
+
+    func removeWorktree(path: String) async throws -> WorktreeRemovalOutcome {
+        guard try await isRegisteredWorktree(path: path) else {
+            return FileManager.default.fileExists(atPath: path)
+                ? .unregisteredPath
+                : .alreadyAbsent
+        }
+
         do {
             _ = try await runGit(["worktree", "remove", path, "--force"])
         } catch {
@@ -419,6 +438,14 @@ final class GitService {
             }
             _ = try await runGit(["worktree", "prune"])
         }
+        return .removed
+    }
+
+    private func normalizedWorktreePath(_ path: String) -> String {
+        URL(fileURLWithPath: path, isDirectory: true)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
     }
 
     func renameBranch(from oldName: String, to newName: String) async throws {

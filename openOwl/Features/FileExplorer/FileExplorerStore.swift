@@ -390,14 +390,22 @@ final class FileExplorerStore {
     func copyFiles(_ urls: [URL]) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.writeObjects(urls as [NSURL])
+        UserDefaults.standard.removeObject(forKey: "openowl.fileCutPending")
+        guard pasteboard.writeObjects(urls as [NSURL]) else {
+            errorMessage = "无法复制文件到剪贴板"
+            return
+        }
     }
 
     /// Cut files: copy to pasteboard and mark for move
     func cutFiles(_ urls: [URL]) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.writeObjects(urls as [NSURL])
+        guard pasteboard.writeObjects(urls as [NSURL]) else {
+            UserDefaults.standard.removeObject(forKey: "openowl.fileCutPending")
+            errorMessage = "无法剪切文件到剪贴板"
+            return
+        }
         // Store cut state — on paste we move instead of copy
         UserDefaults.standard.set(true, forKey: "openowl.fileCutPending")
     }

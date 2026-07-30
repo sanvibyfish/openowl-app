@@ -59,6 +59,7 @@ final class OutlineTreeViewController: NSViewController {
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
+        scrollView.backgroundColor = .clear
 
         outlineView = KeyableOutlineView()
         outlineView.headerView = nil
@@ -68,7 +69,10 @@ final class OutlineTreeViewController: NSViewController {
         outlineView.rowHeight = AppSpacing.listRowHeight
         outlineView.intercellSpacing = NSSize(width: 0, height: 0)
         outlineView.usesAlternatingRowBackgroundColors = false
-        outlineView.selectionHighlightStyle = .sourceList
+        // Flat list (not sourceList) — sourceList paints a loud system slab
+        // that fights the dock's base surface.
+        outlineView.selectionHighlightStyle = .regular
+        outlineView.backgroundColor = .clear
         outlineView.floatsGroupRows = false
         outlineView.autoresizesOutlineColumn = false
 

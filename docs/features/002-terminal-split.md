@@ -52,6 +52,9 @@ indirect enum TerminalSplitNode: Equatable {
 ## 4. 注意事项
 
 - 分割线宽度 1px，热区 8px（方便拖拽）
+- 多窗格仅轻微弱化非 focused pane，不绘制焦点边框，避免分隔边缘出现突兀的 accent 高亮
+- `TerminalNSView` 的焦点回调只同步 `focusedPaneID`；侧栏点击 pane 时先切换到所属 main/worktree namespace，再选中对应分屏并单次请求 first responder，避免跨 worktree 显示空白或焦点请求自循环造成终端闪屏
+- Free Terminal 标签采用 28pt 平面连续 tab bar，active tab 通过背景层级与终端内容连接
 - 关闭窗格后焦点转移到最近的邻居（Euclidean 距离）
 - 标签按项目隔离：切换项目只显示该项目的标签
 
@@ -63,4 +66,6 @@ indirect enum TerminalSplitNode: Equatable {
 
 | 日期 | 说明 |
 |------|------|
+| 2026-07-29 | 拆分 AppKit 焦点回报与侧栏主动聚焦；点击终端条目时同步切换 namespace 和具体分屏，修复闪屏与跨 worktree 空白 |
+| 2026-07-24 | 统一终端工作区视觉：平面标签栏、语义分隔线和低干扰 pane 焦点提示 |
 | 2026-03-16 | 创建文档 |

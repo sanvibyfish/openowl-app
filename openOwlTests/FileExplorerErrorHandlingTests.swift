@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AppKit
 @testable import openOwl
 
 /// Tests for the silent-failure fixes in FileExplorerStore:
@@ -214,6 +215,205 @@ struct FileExplorerErrorHandlingTests {
         #expect(normalized.activeFilePath == URL(
             fileURLWithPath: "/tmp/openowl-project/a.swift"
         ).standardizedFileURL.path)
+    }
+
+    @Test func fileEditorDiskSignature_changesWhenFileChanges() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-signature-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let fileURL = tmp.appendingPathComponent("a.swift")
+        try "a".write(to: fileURL, atomically: true, encoding: .utf8)
+        let first = try #require(FileEditorDiskSignatureProvider.signature(for: fileURL))
+
+        try "ab".write(to: fileURL, atomically: true, encoding: .utf8)
+        let second = try #require(FileEditorDiskSignatureProvider.signature(for: fileURL))
+
+        #expect(first != second)
+    }
+
+    @Test func fileEditorDiskSignature_changesForSameSizeAtomicReplacement() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-signature-replace-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let fileURL = tmp.appendingPathComponent("a.swift")
+        let replacementURL = tmp.appendingPathComponent("replacement.swift")
+        try "aa".write(to: fileURL, atomically: false, encoding: .utf8)
+        let first = try #require(FileEditorDiskSignatureProvider.signature(for: fileURL))
+
+        try "bb".write(to: replacementURL, atomically: false, encoding: .utf8)
+        _ = try FileManager.default.replaceItemAt(fileURL, withItemAt: replacementURL)
+        let second = try #require(FileEditorDiskSignatureProvider.signature(for: fileURL))
+
+        #expect(first.fileSize == second.fileSize)
+        #expect(first.fileIdentifier != nil)
+        #expect(second.fileIdentifier != nil)
+        #expect(first.fileIdentifier != second.fileIdentifier)
+    }
+
+    @Test func fileEditorReloadCommitPolicy_rejectsDirtyTabAfterReadStarted() {
+        let requestID = UUID()
+        let generation = UUID()
+        let signature = FileEditorDiskSignature(
+            modifiedAt: Date(timeIntervalSince1970: 1),
+            fileSize: 10,
+            fileIdentifier: 1
+        )
+        let request = FileEditorReadRequest(
+            id: requestID,
+            sessionGeneration: generation,
+            signature: signature
+        )
+        #expect(FileEditorReloadCommitPolicy.shouldCommit(
+            isTabOpen: true,
+            isDirty: false,
+            request: request,
+            currentRequestID: requestID,
+            currentSessionGeneration: generation,
+            currentDiskSignature: signature
+        ))
+        #expect(!FileEditorReloadCommitPolicy.shouldCommit(
+            isTabOpen: true,
+            isDirty: true,
+            request: request,
+            currentRequestID: requestID,
+            currentSessionGeneration: generation,
+            currentDiskSignature: signature
+        ))
+    }
+
+    @Test func fileEditorReadCommitPolicy_newSameURLRequestSupersedesOldRequest() {
+        let oldRequestID = UUID()
+        let newRequestID = UUID()
+        let generation = UUID()
+        let signature = FileEditorDiskSignature(
+            modifiedAt: Date(timeIntervalSince1970: 1),
+            fileSize: 10,
+            fileIdentifier: 1
+        )
+        let oldRequest = FileEditorReadRequest(
+            id: oldRequestID,
+            sessionGeneration: generation,
+            signature: signature
+        )
+
+        #expect(!FileEditorReloadCommitPolicy.shouldCommit(
+            isTabOpen: true,
+            isDirty: false,
+            request: oldRequest,
+            currentRequestID: newRequestID,
+            currentSessionGeneration: generation,
+            currentDiskSignature: signature
+        ))
+    }
+
+    @Test func fileEditorReloadCommitPolicy_rejectsChangedDiskSignature() {
+        let requestID = UUID()
+        let generation = UUID()
+        let readSignature = FileEditorDiskSignature(
+            modifiedAt: Date(timeIntervalSince1970: 1),
+            fileSize: 10,
+            fileIdentifier: 1
+        )
+        let newerSignature = FileEditorDiskSignature(
+            modifiedAt: Date(timeIntervalSince1970: 2),
+            fileSize: 10,
+            fileIdentifier: 2
+        )
+        let request = FileEditorReadRequest(
+            id: requestID,
+            sessionGeneration: generation,
+            signature: readSignature
+        )
+
+        #expect(!FileEditorReloadCommitPolicy.shouldCommit(
+            isTabOpen: true,
+            isDirty: false,
+            request: request,
+            currentRequestID: requestID,
+            currentSessionGeneration: generation,
+            currentDiskSignature: newerSignature
+        ))
+        #expect(FileEditorReloadCommitPolicy.shouldRetry(
+            isTabOpen: true,
+            isDirty: false,
+            request: request,
+            currentRequestID: requestID,
+            currentSessionGeneration: generation,
+            currentDiskSignature: newerSignature
+        ))
+    }
+
+    @Test func fileEditorReadCommitPolicy_rejectsRequestFromPreviousProjectGeneration() {
+        let requestID = UUID()
+        let oldGeneration = UUID()
+        let signature = FileEditorDiskSignature(
+            modifiedAt: Date(timeIntervalSince1970: 1),
+            fileSize: 10,
+            fileIdentifier: 1
+        )
+        let request = FileEditorReadRequest(
+            id: requestID,
+            sessionGeneration: oldGeneration,
+            signature: signature
+        )
+
+        #expect(!FileEditorReloadCommitPolicy.shouldCommit(
+            isTabOpen: true,
+            isDirty: false,
+            request: request,
+            currentRequestID: requestID,
+            currentSessionGeneration: UUID(),
+            currentDiskSignature: signature
+        ))
+    }
+
+    @Test func fileEditorStorageUpdater_mutatesExistingStorageInPlace() {
+        let storage = NSTextStorage(string: "old")
+
+        let updated = FileEditorStorageUpdater.update(storage, with: "new")
+
+        #expect(updated === storage)
+        #expect(storage.string == "new")
+    }
+
+    @Test func fileEditorStorageUpdater_createsStorageWhenMissing() {
+        let created = FileEditorStorageUpdater.update(nil, with: "new")
+
+        #expect(created.string == "new")
+        #expect(created.length == 3)
+    }
+
+    @Test func fileEditorLoadingSuppression_restoresImmediatelyAfterSynchronousMutation() {
+        var isLoading = false
+        var observedDuringMutation = false
+
+        FileEditorLoadingSuppression.perform(
+            previousValue: isLoading,
+            setValue: { isLoading = $0 }
+        ) {
+            observedDuringMutation = isLoading
+        }
+
+        #expect(observedDuringMutation)
+        #expect(!isLoading)
+
+        var immediateUserEditMarkedDirty = false
+        if !isLoading {
+            immediateUserEditMarkedDirty = true
+        }
+        #expect(immediateUserEditMarkedDirty)
+
+        isLoading = true
+        FileEditorLoadingSuppression.perform(
+            previousValue: isLoading,
+            setValue: { isLoading = $0 },
+            operation: {}
+        )
+        #expect(isLoading)
     }
 
     private var defaultsSuiteName: String {

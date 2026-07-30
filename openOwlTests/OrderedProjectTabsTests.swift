@@ -138,4 +138,63 @@ struct OrderedProjectTabsTests {
         let thisRootTabs = tabs.filter { $0.id == root.id || $0.worktreeOf == root.id }
         #expect(thisRootTabs.count == 3)  // 1 root + 2 worktrees
     }
+
+    // MARK: - Project Rail selection restoration
+
+    @Test @MainActor func activateLastProject_restoresPreviouslySelectedWorktree() {
+        let store = ProjectStore()
+        let firstRootURL = URL(
+            fileURLWithPath: "/tmp/test-restore-root-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let secondRootURL = URL(
+            fileURLWithPath: "/tmp/test-restore-other-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        store.addOrActivateProject(firstRootURL)
+        store.addOrActivateProject(secondRootURL)
+
+        let firstRoot = store.projects.first { $0.path == firstRootURL.standardizedFileURL.path }!
+        let secondRoot = store.projects.first { $0.path == secondRootURL.standardizedFileURL.path }!
+        let worktree = store.addWorktreeProject(
+            parentID: firstRoot.id,
+            path: "/tmp/test-restore-wt-\(UUID().uuidString)",
+            branch: "feature/restore"
+        )
+
+        store.activateProject(id: worktree.id)
+        store.activateProject(id: secondRoot.id)
+        store.activateLastProject(inRoot: firstRoot.id)
+
+        #expect(store.activeProjectID == worktree.id)
+    }
+
+    @Test @MainActor func activateLastProject_keepsExplicitMainSelection() {
+        let store = ProjectStore()
+        let firstRootURL = URL(
+            fileURLWithPath: "/tmp/test-restore-main-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let secondRootURL = URL(
+            fileURLWithPath: "/tmp/test-restore-main-other-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        store.addOrActivateProject(firstRootURL)
+        store.addOrActivateProject(secondRootURL)
+
+        let firstRoot = store.projects.first { $0.path == firstRootURL.standardizedFileURL.path }!
+        let secondRoot = store.projects.first { $0.path == secondRootURL.standardizedFileURL.path }!
+        let worktree = store.addWorktreeProject(
+            parentID: firstRoot.id,
+            path: "/tmp/test-restore-main-wt-\(UUID().uuidString)",
+            branch: "feature/main"
+        )
+
+        store.activateProject(id: worktree.id)
+        store.activateProject(id: firstRoot.id)
+        store.activateProject(id: secondRoot.id)
+        store.activateLastProject(inRoot: firstRoot.id)
+
+        #expect(store.activeProjectID == firstRoot.id)
+    }
 }

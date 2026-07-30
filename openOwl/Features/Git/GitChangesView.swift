@@ -64,8 +64,6 @@ struct GitChangesView: View {
         VStack(spacing: 0) {
             changesPanelToolbar
 
-            PanelDivider()
-
             commitArea
 
             PanelDivider()
@@ -97,17 +95,14 @@ struct GitChangesView: View {
     // MARK: - Changes Panel Toolbar
 
     private var changesPanelToolbar: some View {
-        HStack(spacing: 6) {
-            SectionTitle("CHANGES")
-
-            Spacer(minLength: 4)
+        // No "CHANGES" title — the Git tab above already names this panel.
+        HStack(spacing: 2) {
+            Spacer(minLength: 0)
 
             Button { store.refreshNow() } label: {
                 SpinningIcon(systemName: "arrow.clockwise", isSpinning: store.isRefreshing)
-                    .font(AppFonts.toolbarIcon)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .buttonStyle(.icon(font: AppFonts.toolbarIcon, size: 24))
             .help("Refresh")
             .accessibilityLabel("Refresh")
             .disabled(store.isRefreshing || store.isRunningCommand)
@@ -116,15 +111,23 @@ struct GitChangesView: View {
                 Image(systemName: rightDockStore.gitShowsDiff
                     ? "square.lefthalf.filled"
                     : "square.split.2x1")
-                    .font(AppFonts.toolbarIcon)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .buttonStyle(.icon(
+                isActive: rightDockStore.gitShowsDiff,
+                font: AppFonts.toolbarIcon,
+                size: 24
+            ))
             .help(rightDockStore.gitShowsDiff ? "Hide diff" : "Show diff")
             .accessibilityLabel(rightDockStore.gitShowsDiff ? "Hide diff" : "Show diff")
         }
-        .padding(.horizontal, AppSpacing.panelPadding)
+        .padding(.horizontal, 6)
         .frame(height: AppSpacing.headerHeight)
+        .background(RailChrome.background)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(RailChrome.hairline)
+                .frame(height: 1)
+        }
     }
 
     // MARK: - Commit Area (compact, web-style)

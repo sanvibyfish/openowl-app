@@ -53,6 +53,87 @@ struct FileEditorSession: Codable, Equatable {
     var activeFilePath: String?
 }
 
+struct FileEditorDiskSignature: Equatable {
+    let modifiedAt: Date?
+    let fileSize: Int
+    let fileIdentifier: UInt64?
+}
+
+enum FileEditorDiskSignatureProvider {
+    static func signature(for url: URL) -> FileEditorDiskSignature? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+            return nil
+        }
+        return FileEditorDiskSignature(
+            modifiedAt: attributes[.modificationDate] as? Date,
+            fileSize: (attributes[.size] as? NSNumber)?.intValue ?? 0,
+            fileIdentifier: (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
+        )
+    }
+}
+
+struct FileEditorReadRequest {
+    let id: UUID
+    let sessionGeneration: UUID
+    let signature: FileEditorDiskSignature
+}
+
+enum FileEditorReloadCommitPolicy {
+    static func shouldCommit(
+        isTabOpen: Bool,
+        isDirty: Bool,
+        request: FileEditorReadRequest,
+        currentRequestID: UUID?,
+        currentSessionGeneration: UUID,
+        currentDiskSignature: FileEditorDiskSignature?
+    ) -> Bool {
+        isTabOpen
+            && !isDirty
+            && request.id == currentRequestID
+            && request.sessionGeneration == currentSessionGeneration
+            && request.signature == currentDiskSignature
+    }
+
+    static func shouldRetry(
+        isTabOpen: Bool,
+        isDirty: Bool,
+        request: FileEditorReadRequest,
+        currentRequestID: UUID?,
+        currentSessionGeneration: UUID,
+        currentDiskSignature: FileEditorDiskSignature?
+    ) -> Bool {
+        isTabOpen
+            && !isDirty
+            && request.id == currentRequestID
+            && request.sessionGeneration == currentSessionGeneration
+            && currentDiskSignature != nil
+            && request.signature != currentDiskSignature
+    }
+}
+
+enum FileEditorStorageUpdater {
+    static func update(_ storage: NSTextStorage?, with content: String) -> NSTextStorage {
+        guard let storage else { return NSTextStorage(string: content) }
+        storage.replaceCharacters(
+            in: NSRange(location: 0, length: storage.length),
+            with: content
+        )
+        return storage
+    }
+}
+
+enum FileEditorLoadingSuppression {
+    static func perform<T>(
+        previousValue: Bool,
+        setValue: (Bool) -> Void,
+        operation: () -> T
+    ) -> T {
+        setValue(true)
+        defer { setValue(previousValue) }
+        return operation()
+    }
+}
+
 enum FileEditorSessionPersistence {
     private static let defaultsKey = "openowl.fileExplorer.editorSessions.v1"
     private static var cache: [String: FileEditorSession]?
@@ -168,6 +249,9 @@ struct FileExplorerView: View {
     @State private var activeTabURL: URL?
     @State private var tabStorages: [URL: NSTextStorage] = [:]
     @State private var tabImageCache: [URL: NSImage] = [:]
+    @State private var tabDiskSignatures: [URL: FileEditorDiskSignature] = [:]
+    @State private var fileReadRequestIDs: [URL: UUID] = [:]
+    @State private var editorSessionGeneration = UUID()
     @State private var dirtyTabs: Set<URL> = []
     @State private var editorSessionProjectKey: String?
     @State private var persistDebounceWork: DispatchWorkItem?
@@ -187,6 +271,7 @@ struct FileExplorerView: View {
     /// large-mode tabs). Drives a centered ProgressView overlay on the editor
     /// panel so the user knows the app is busy, not crashed.
     @State private var heavyProgressText: String? = nil
+    @State private var heavyProgressURL: URL?
 
     // Editor state
     @State private var editorState = SourceEditorState()
@@ -313,26 +398,24 @@ struct FileExplorerView: View {
 
     private var treePanel: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack {
-                SectionTitle("EXPLORER")
+            // Tool strip — same flat base as the outline tree so the left
+            // Files column reads as one surface (not a second elevated slab).
+            HStack(spacing: 2) {
+                Spacer(minLength: 0)
 
-                Spacer()
-
-                // Cmd+P is registered globally in ContentView; don't re-register here
-                // or SwiftUI will treat it as an ambiguous shortcut when this view stays
-                // mounted across tab switches.
                 Button { store.presentQuickOpen() } label: {
-                    Image(systemName: "magnifyingglass").font(AppFonts.secondaryLabel)
+                    Image(systemName: "magnifyingglass")
                 }
-                .buttonStyle(.plain).help("Quick Open (⌘P)")
+                .buttonStyle(.icon(font: AppFonts.toolbarIcon, size: 24))
+                .help("Quick Open (⌘P)")
                 .accessibilityLabel("Quick Open (⌘P)")
                 .disabled(store.rootNodes.isEmpty)
 
                 Button { store.refreshNow() } label: {
-                    Image(systemName: "arrow.clockwise").font(AppFonts.secondaryLabel)
+                    Image(systemName: "arrow.clockwise")
                 }
-                .buttonStyle(.plain).help("Refresh")
+                .buttonStyle(.icon(font: AppFonts.toolbarIcon, size: 24))
+                .help("Refresh")
                 .accessibilityLabel("Refresh")
                 .disabled(store.isRefreshing)
 
@@ -341,9 +424,8 @@ struct FileExplorerView: View {
                     rightDockStore.filesShowsEditor = true
                 } label: {
                     Image(systemName: "sidebar.right")
-                        .font(AppFonts.secondaryLabel)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.icon(font: AppFonts.toolbarIcon, size: 24))
                 .help("Editor only")
                 .accessibilityLabel("Editor only")
                 .disabled(!rightDockStore.filesShowsEditor || openTabs.isEmpty)
@@ -352,16 +434,23 @@ struct FileExplorerView: View {
                     Image(systemName: rightDockStore.filesShowsEditor
                         ? "square.lefthalf.filled"
                         : "square.split.2x1")
-                        .font(AppFonts.secondaryLabel)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.icon(
+                    isActive: rightDockStore.filesShowsEditor,
+                    font: AppFonts.toolbarIcon,
+                    size: 24
+                ))
                 .help(rightDockStore.filesShowsEditor ? "Hide editor" : "Show editor")
                 .accessibilityLabel(rightDockStore.filesShowsEditor ? "Hide editor" : "Show editor")
             }
-            .padding(.horizontal, AppSpacing.panelPadding)
+            .padding(.horizontal, 6)
             .frame(height: AppSpacing.headerHeight)
-
-            PanelDivider()
+            .background(AppPalette.base)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(RailChrome.hairline)
+                    .frame(height: 1)
+            }
 
             if let errorMessage = store.errorMessage {
                 HStack(spacing: 6) {
@@ -411,9 +500,17 @@ struct FileExplorerView: View {
                     onCopyPath: { url in store.copyPath(url) },
                     onDropFiles: { targetDir, sourceURLs in
                         let fm = FileManager.default
+                        var failures: [String] = []
                         for url in sourceURLs {
                             let dest = targetDir.appendingPathComponent(url.lastPathComponent)
-                            try? fm.copyItem(at: url, to: dest)
+                            do {
+                                try fm.copyItem(at: url, to: dest)
+                            } catch {
+                                failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                            }
+                        }
+                        if !failures.isEmpty {
+                            store.errorMessage = failures.joined(separator: "；")
                         }
                         store.refreshNow()
                     },
@@ -421,7 +518,9 @@ struct FileExplorerView: View {
                 )
             }
         }
-        .background(.regularMaterial)
+        // Semantic palette, not .regularMaterial — the blurred material read as
+        // a foreign slab against the dock's flat base/surface/elevated layers.
+        .background(AppPalette.base)
     }
 
     // MARK: - Editor Only Panel
@@ -585,21 +684,27 @@ struct FileExplorerView: View {
     // MARK: - Tab Bar
 
     private var editorTabBar: some View {
-        HStack(spacing: 0) {
-            ForEach(openTabs) { tab in
-                EditorTabButton(
-                    tab: tab,
-                    isActive: tab.url == activeTabURL,
-                    isDirty: dirtyTabs.contains(tab.url),
-                    onSelect: { switchToTab(tab.url) },
-                    onClose: { closeTab(tab.url) }
-                )
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(openTabs) { tab in
+                    EditorTabButton(
+                        tab: tab,
+                        isActive: tab.url == activeTabURL,
+                        isDirty: dirtyTabs.contains(tab.url),
+                        onSelect: { switchToTab(tab.url) },
+                        onClose: { closeTab(tab.url) }
+                    )
+                }
             }
-            Spacer(minLength: 0)
+            .padding(.horizontal, 6)
         }
         .frame(height: AppSpacing.editorTabBarHeight)
-        .background(AppPalette.surface)
-        .glassEffectIfAvailable(in: Rectangle())
+        .background(RailChrome.background)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(RailChrome.hairline)
+                .frame(height: 1)
+        }
     }
 
     // MARK: - Tab Management
@@ -620,10 +725,13 @@ struct FileExplorerView: View {
         // doc comment for the SwiftUI / nested-event-loop interaction).
         if hugeFilePending.contains(url) { return }
 
-        // Already open — just switch
+        // Already open — switch and refresh from disk if the backing file changed.
+        // Dirty tabs keep the in-memory buffer to avoid clobbering user edits.
         if openTabs.contains(where: { $0.url == url }) {
             if activeTabURL != url {
                 switchToTab(url)
+            } else {
+                reloadOpenTabFromDiskIfNeeded(url, reason: "reopen-active")
             }
             return
         }
@@ -670,12 +778,59 @@ struct FileExplorerView: View {
         persistEditorSession(reason: "open-tab", activeOverride: url)
         AppLogger.log("file-editor-state", "open-tab path=%@ tabs=%d", url.path, openTabs.count)
 
-        if isImage {
+        startOpeningFileContent(url, needsLargeMode: needsLargeMode)
+    }
+
+    private func startOpeningFileContent(
+        _ url: URL,
+        needsLargeMode: Bool,
+        signature: FileEditorDiskSignature? = nil
+    ) {
+        guard let request = beginFileRead(for: url, signature: signature) else {
+            loadingFileURL = nil
+            isEditorLoading = false
+            return
+        }
+        loadingFileURL = url
+
+        if isImageURL(url) {
             Task.detached(priority: .userInitiated) {
                 let image = NSImage(contentsOf: url)
                 await MainActor.run {
-                    guard loadingFileURL == url else { return }
+                    let currentSignature = FileEditorDiskSignatureProvider.signature(for: url)
+                    guard FileEditorReloadCommitPolicy.shouldCommit(
+                        isTabOpen: openTabs.contains(where: { $0.url == url })
+                            && loadingFileURL == url,
+                        isDirty: dirtyTabs.contains(url),
+                        request: request,
+                        currentRequestID: fileReadRequestIDs[url],
+                        currentSessionGeneration: editorSessionGeneration,
+                        currentDiskSignature: currentSignature
+                    ) else {
+                        handleRejectedFileRead(
+                            url,
+                            request: request,
+                            currentDiskSignature: currentSignature,
+                            isEligible: loadingFileURL == url,
+                            retry: { latestSignature in
+                                startOpeningFileContent(
+                                    url,
+                                    needsLargeMode: needsLargeMode,
+                                    signature: latestSignature
+                                )
+                            },
+                            onReject: {
+                                if loadingFileURL == url {
+                                    loadingFileURL = nil
+                                }
+                                isEditorLoading = false
+                            }
+                        )
+                        return
+                    }
                     tabImageCache[url] = image
+                    tabDiskSignatures[url] = request.signature
+                    fileReadRequestIDs.removeValue(forKey: url)
                     previewImage = image
                     activeTabURL = url
                     loadingFileURL = nil
@@ -695,26 +850,61 @@ struct FileExplorerView: View {
                 // so the spinner actually paints before the freeze.
                 if needsLargeMode {
                     await MainActor.run {
-                        guard loadingFileURL == url else { return }
-                        heavyProgressText = "Loading \(url.lastPathComponent)…"
+                        guard isCurrentFileRead(request, for: url) else { return }
+                        setHeavyProgress("Loading \(url.lastPathComponent)…", for: url)
                     }
                     try? await Task.sleep(for: .milliseconds(50))
                 }
 
                 await MainActor.run {
-                    guard loadingFileURL == url else { return }
+                    let currentSignature = FileEditorDiskSignatureProvider.signature(for: url)
+                    guard FileEditorReloadCommitPolicy.shouldCommit(
+                        isTabOpen: openTabs.contains(where: { $0.url == url })
+                            && loadingFileURL == url,
+                        isDirty: dirtyTabs.contains(url),
+                        request: request,
+                        currentRequestID: fileReadRequestIDs[url],
+                        currentSessionGeneration: editorSessionGeneration,
+                        currentDiskSignature: currentSignature
+                    ) else {
+                        handleRejectedFileRead(
+                            url,
+                            request: request,
+                            currentDiskSignature: currentSignature,
+                            isEligible: loadingFileURL == url,
+                            retry: { latestSignature in
+                                startOpeningFileContent(
+                                    url,
+                                    needsLargeMode: needsLargeMode,
+                                    signature: latestSignature
+                                )
+                            },
+                            onReject: {
+                                clearHeavyProgress(for: url)
+                                if loadingFileURL == url {
+                                    loadingFileURL = nil
+                                }
+                                isEditorLoading = false
+                            }
+                        )
+                        return
+                    }
                     tabStorages[url] = storage
+                    tabDiskSignatures[url] = request.signature
+                    fileReadRequestIDs.removeValue(forKey: url)
                     previewImage = nil
                     editorState = SourceEditorState()
                     activeTabURL = url
                     loadingFileURL = nil
                     if needsLargeMode {
-                        heavyProgressText = nil
+                        clearHeavyProgress(for: url)
                     }
                 }
                 try? await Task.sleep(for: .milliseconds(50))
                 await MainActor.run {
-                    guard activeTabURL == url else { return }
+                    guard editorSessionGeneration == request.sessionGeneration,
+                          activeTabURL == url,
+                          loadingFileURL == nil else { return }
                     isEditorLoading = false
                 }
             }
@@ -797,14 +987,45 @@ struct FileExplorerView: View {
         return urls
     }
 
-    private func loadRestoredTabContent(_ url: URL) {
+    private func loadRestoredTabContent(
+        _ url: URL,
+        signature: FileEditorDiskSignature? = nil
+    ) {
+        guard let request = beginFileRead(for: url, signature: signature) else { return }
+
         if isImageURL(url) {
             Task.detached(priority: .userInitiated) {
                 let image = NSImage(contentsOf: url)
                 await MainActor.run {
-                    guard openTabs.contains(where: { $0.url == url }) else { return }
+                    let currentSignature = FileEditorDiskSignatureProvider.signature(for: url)
+                    guard FileEditorReloadCommitPolicy.shouldCommit(
+                        isTabOpen: openTabs.contains(where: { $0.url == url }),
+                        isDirty: dirtyTabs.contains(url),
+                        request: request,
+                        currentRequestID: fileReadRequestIDs[url],
+                        currentSessionGeneration: editorSessionGeneration,
+                        currentDiskSignature: currentSignature
+                    ) else {
+                        handleRejectedFileRead(
+                            url,
+                            request: request,
+                            currentDiskSignature: currentSignature,
+                            retry: { latestSignature in
+                                loadRestoredTabContent(url, signature: latestSignature)
+                            },
+                            onReject: {
+                                if activeTabURL == url {
+                                    loadingFileURL = nil
+                                    isEditorLoading = false
+                                }
+                            }
+                        )
+                        return
+                    }
                     if let image {
                         tabImageCache[url] = image
+                        tabDiskSignatures[url] = request.signature
+                        fileReadRequestIDs.removeValue(forKey: url)
                         if activeTabURL == url {
                             previewImage = image
                             loadingFileURL = nil
@@ -812,7 +1033,9 @@ struct FileExplorerView: View {
                         }
                     } else {
                         AppLogger.log("file-editor-state", "restore-image-failed path=%@", url.path)
+                        fileReadRequestIDs.removeValue(forKey: url)
                         openTabs.removeAll { $0.url == url }
+                        tabDiskSignatures.removeValue(forKey: url)
                         persistEditorSession(reason: "restore-image-failed")
                     }
                 }
@@ -828,7 +1051,10 @@ struct FileExplorerView: View {
             } catch {
                 AppLogger.log("file-editor-state", "restore-read-failed path=%@ error=%@", url.path, error.localizedDescription)
                 await MainActor.run {
+                    guard isCurrentFileRead(request, for: url) else { return }
+                    fileReadRequestIDs.removeValue(forKey: url)
                     openTabs.removeAll { $0.url == url }
+                    tabDiskSignatures.removeValue(forKey: url)
                     persistEditorSession(reason: "restore-read-failed")
                 }
                 return
@@ -837,27 +1063,57 @@ struct FileExplorerView: View {
 
             if isLargeMode {
                 await MainActor.run {
-                    guard activeTabURL == url else { return }
-                    heavyProgressText = "Restoring \(url.lastPathComponent)..."
+                    guard isCurrentFileRead(request, for: url),
+                          activeTabURL == url else { return }
+                    setHeavyProgress("Restoring \(url.lastPathComponent)...", for: url)
                 }
                 try? await Task.sleep(for: .milliseconds(50))
             }
 
             await MainActor.run {
-                guard openTabs.contains(where: { $0.url == url }) else { return }
+                let currentSignature = FileEditorDiskSignatureProvider.signature(for: url)
+                guard FileEditorReloadCommitPolicy.shouldCommit(
+                    isTabOpen: openTabs.contains(where: { $0.url == url }),
+                    isDirty: dirtyTabs.contains(url),
+                    request: request,
+                    currentRequestID: fileReadRequestIDs[url],
+                    currentSessionGeneration: editorSessionGeneration,
+                    currentDiskSignature: currentSignature
+                ) else {
+                    handleRejectedFileRead(
+                        url,
+                        request: request,
+                        currentDiskSignature: currentSignature,
+                        retry: { latestSignature in
+                            loadRestoredTabContent(url, signature: latestSignature)
+                        },
+                        onReject: {
+                            clearHeavyProgress(for: url)
+                            if activeTabURL == url {
+                                loadingFileURL = nil
+                                isEditorLoading = false
+                            }
+                        }
+                    )
+                    return
+                }
                 tabStorages[url] = storage
+                tabDiskSignatures[url] = request.signature
+                fileReadRequestIDs.removeValue(forKey: url)
                 if activeTabURL == url {
                     previewImage = nil
                     editorState = SourceEditorState()
                     loadingFileURL = nil
                     if isLargeMode {
-                        heavyProgressText = nil
+                        clearHeavyProgress(for: url)
                     }
                 }
             }
             try? await Task.sleep(for: .milliseconds(50))
             await MainActor.run {
-                guard activeTabURL == url else { return }
+                guard editorSessionGeneration == request.sessionGeneration,
+                      activeTabURL == url,
+                      loadingFileURL == nil else { return }
                 isEditorLoading = false
             }
         }
@@ -868,12 +1124,15 @@ struct FileExplorerView: View {
         activeTabURL = nil
         tabStorages.removeAll()
         tabImageCache.removeAll()
+        tabDiskSignatures.removeAll()
+        fileReadRequestIDs.removeAll()
+        editorSessionGeneration = UUID()
         dirtyTabs.removeAll()
         largeModeTabs.removeAll()
         previewImage = nil
         loadingFileURL = nil
         isEditorLoading = false
-        heavyProgressText = nil
+        setHeavyProgress(nil, for: nil)
         if persist {
             persistEditorSession(reason: reason)
         }
@@ -904,6 +1163,202 @@ struct FileExplorerView: View {
 
     private func flushEditorSession(reason: String) {
         persistEditorSession(reason: reason, immediate: true)
+    }
+
+    private func setHeavyProgress(_ text: String?, for url: URL?) {
+        heavyProgressText = text
+        heavyProgressURL = text == nil ? nil : url
+    }
+
+    private func clearHeavyProgress(for url: URL) {
+        guard heavyProgressURL == nil || heavyProgressURL == url else { return }
+        setHeavyProgress(nil, for: nil)
+    }
+
+    private func beginFileRead(
+        for url: URL,
+        signature: FileEditorDiskSignature? = nil
+    ) -> FileEditorReadRequest? {
+        guard let signature = signature ?? FileEditorDiskSignatureProvider.signature(for: url) else {
+            return nil
+        }
+        let request = FileEditorReadRequest(
+            id: UUID(),
+            sessionGeneration: editorSessionGeneration,
+            signature: signature
+        )
+        fileReadRequestIDs[url] = request.id
+        return request
+    }
+
+    private func isCurrentFileRead(_ request: FileEditorReadRequest, for url: URL) -> Bool {
+        fileReadRequestIDs[url] == request.id
+            && editorSessionGeneration == request.sessionGeneration
+    }
+
+    @discardableResult
+    private func reloadOpenTabFromDiskIfNeeded(_ url: URL, reason: String) -> Bool {
+        guard openTabs.contains(where: { $0.url == url }) else { return false }
+        guard !dirtyTabs.contains(url) else {
+            AppLogger.log("file-editor-state", "reload-skip reason=dirty trigger=%@ path=%@", reason, url.path)
+            return false
+        }
+        guard let signature = FileEditorDiskSignatureProvider.signature(for: url) else { return false }
+        guard tabDiskSignatures[url] != signature else { return false }
+
+        reloadOpenTabFromDisk(url, signature: signature, reason: reason)
+        return true
+    }
+
+    private func reloadOpenTabFromDisk(_ url: URL, signature: FileEditorDiskSignature, reason: String) {
+        guard let request = beginFileRead(for: url, signature: signature) else { return }
+        loadingFileURL = url
+
+        if isImageURL(url) {
+            Task.detached(priority: .userInitiated) {
+                let image = NSImage(contentsOf: url)
+                await MainActor.run {
+                    let currentSignature = FileEditorDiskSignatureProvider.signature(for: url)
+                    guard FileEditorReloadCommitPolicy.shouldCommit(
+                        isTabOpen: openTabs.contains(where: { $0.url == url }),
+                        isDirty: dirtyTabs.contains(url),
+                        request: request,
+                        currentRequestID: fileReadRequestIDs[url],
+                        currentSessionGeneration: editorSessionGeneration,
+                        currentDiskSignature: currentSignature
+                    ) else {
+                        handleRejectedFileRead(
+                            url,
+                            request: request,
+                            currentDiskSignature: currentSignature,
+                            retry: { latestSignature in
+                                reloadOpenTabFromDisk(
+                                    url,
+                                    signature: latestSignature,
+                                    reason: "\(reason)-disk-changed-during-read"
+                                )
+                            }
+                        )
+                        return
+                    }
+                    tabImageCache[url] = image
+                    tabDiskSignatures[url] = request.signature
+                    fileReadRequestIDs.removeValue(forKey: url)
+                    if activeTabURL == url {
+                        previewImage = image
+                        loadingFileURL = nil
+                        isEditorLoading = false
+                    }
+                    AppLogger.log("file-editor-state", "reload-image trigger=%@ path=%@", reason, url.path)
+                }
+            }
+            return
+        }
+
+        let shouldUseLargeMode = signature.fileSize >= Self.largeFileThreshold
+        Task.detached(priority: .userInitiated) {
+            let content: String
+            do {
+                content = try String(contentsOf: url, encoding: .utf8)
+            } catch {
+                await MainActor.run {
+                    guard isCurrentFileRead(request, for: url) else { return }
+                    fileReadRequestIDs.removeValue(forKey: url)
+                    if loadingFileURL == url {
+                        loadingFileURL = nil
+                    }
+                    store.errorMessage = "Failed to reload \(url.lastPathComponent): \(error.localizedDescription)"
+                }
+                return
+            }
+
+            await MainActor.run {
+                let isTabOpen = openTabs.contains(where: { $0.url == url })
+                let isDirty = dirtyTabs.contains(url)
+                let currentSignature = FileEditorDiskSignatureProvider.signature(for: url)
+                guard FileEditorReloadCommitPolicy.shouldCommit(
+                    isTabOpen: isTabOpen,
+                    isDirty: isDirty,
+                    request: request,
+                    currentRequestID: fileReadRequestIDs[url],
+                    currentSessionGeneration: editorSessionGeneration,
+                    currentDiskSignature: currentSignature
+                ) else {
+                    if isDirty {
+                        AppLogger.log(
+                            "file-editor-state",
+                            "reload-skip reason=dirty-during-read trigger=%@ path=%@",
+                            reason,
+                            url.path
+                        )
+                    }
+                    handleRejectedFileRead(
+                        url,
+                        request: request,
+                        currentDiskSignature: currentSignature,
+                        retry: { latestSignature in
+                            reloadOpenTabFromDisk(
+                                url,
+                                signature: latestSignature,
+                                reason: "\(reason)-disk-changed-during-read"
+                            )
+                        }
+                    )
+                    return
+                }
+                let previousLoading = isEditorLoading
+                FileEditorLoadingSuppression.perform(
+                    previousValue: previousLoading,
+                    setValue: { isEditorLoading = $0 }
+                ) {
+                    tabStorages[url] = FileEditorStorageUpdater.update(
+                        tabStorages[url],
+                        with: content
+                    )
+                }
+                tabDiskSignatures[url] = request.signature
+                fileReadRequestIDs.removeValue(forKey: url)
+                if shouldUseLargeMode {
+                    largeModeTabs.insert(url)
+                } else {
+                    largeModeTabs.remove(url)
+                }
+                if activeTabURL == url {
+                    previewImage = nil
+                    loadingFileURL = nil
+                }
+                AppLogger.log("file-editor-state", "reload-text trigger=%@ path=%@", reason, url.path)
+            }
+        }
+    }
+
+    private func handleRejectedFileRead(
+        _ url: URL,
+        request: FileEditorReadRequest,
+        currentDiskSignature: FileEditorDiskSignature?,
+        isEligible: Bool = true,
+        retry: (FileEditorDiskSignature) -> Void,
+        onReject: () -> Void = {}
+    ) {
+        guard isCurrentFileRead(request, for: url) else { return }
+        let shouldRetry = FileEditorReloadCommitPolicy.shouldRetry(
+            isTabOpen: isEligible && openTabs.contains(where: { $0.url == url }),
+            isDirty: dirtyTabs.contains(url),
+            request: request,
+            currentRequestID: fileReadRequestIDs[url],
+            currentSessionGeneration: editorSessionGeneration,
+            currentDiskSignature: currentDiskSignature
+        )
+        if loadingFileURL == url {
+            loadingFileURL = nil
+        }
+        fileReadRequestIDs.removeValue(forKey: url)
+
+        if shouldRetry, let currentDiskSignature {
+            retry(currentDiskSignature)
+        } else {
+            onReject()
+        }
     }
 
     private func fileSize(for url: URL) -> Int {
@@ -964,6 +1419,7 @@ struct FileExplorerView: View {
         if isImage {
             previewImage = tabImageCache[url]
             isEditorLoading = false
+            reloadOpenTabFromDiskIfNeeded(url, reason: "switch-tab")
         } else {
             previewImage = nil
             // Storage already in tabStorages — SourceEditor recreated via .id(url)
@@ -971,6 +1427,7 @@ struct FileExplorerView: View {
                 try? await Task.sleep(for: .milliseconds(50))
                 guard activeTabURL == url else { return }
                 isEditorLoading = false
+                reloadOpenTabFromDiskIfNeeded(url, reason: "switch-tab")
             }
         }
 
@@ -986,10 +1443,10 @@ struct FileExplorerView: View {
         // before the synchronous removeValue freeze.
         let needsSpinner = largeModeTabs.contains(url) && tabStorages[url] != nil
         if needsSpinner {
-            heavyProgressText = "Closing \(url.lastPathComponent)…"
+            setHeavyProgress("Closing \(url.lastPathComponent)…", for: url)
             DispatchQueue.main.async {
                 performTabClose(url)
-                heavyProgressText = nil
+                clearHeavyProgress(for: url)
             }
         } else {
             performTabClose(url)
@@ -1014,8 +1471,11 @@ struct FileExplorerView: View {
         openTabs.remove(at: index)
         tabStorages.removeValue(forKey: url)
         tabImageCache.removeValue(forKey: url)
+        tabDiskSignatures.removeValue(forKey: url)
+        fileReadRequestIDs.removeValue(forKey: url)
         dirtyTabs.remove(url)
         largeModeTabs.remove(url)
+        clearHeavyProgress(for: url)
 
         if wasActive {
             if openTabs.isEmpty {
@@ -1060,6 +1520,8 @@ struct FileExplorerView: View {
         openTabs.removeAll { $0.url == evictURL }
         tabStorages.removeValue(forKey: evictURL)
         tabImageCache.removeValue(forKey: evictURL)
+        tabDiskSignatures.removeValue(forKey: evictURL)
+        fileReadRequestIDs.removeValue(forKey: evictURL)
         largeModeTabs.remove(evictURL)
         persistEditorSession(reason: "evict-tab")
     }
@@ -1073,6 +1535,7 @@ struct FileExplorerView: View {
         do {
             try storage.string.write(to: url, atomically: true, encoding: .utf8)
             dirtyTabs.remove(url)
+            tabDiskSignatures[url] = FileEditorDiskSignatureProvider.signature(for: url)
             store.refreshNow()
         } catch {
             store.errorMessage = "Failed to save: \(error.localizedDescription)"
@@ -1084,6 +1547,7 @@ struct FileExplorerView: View {
             guard let storage = tabStorages[url] else { continue }
             do {
                 try storage.string.write(to: url, atomically: true, encoding: .utf8)
+                tabDiskSignatures[url] = FileEditorDiskSignatureProvider.signature(for: url)
             } catch {
                 NSLog("openOwl: Failed to save %@: %@", url.lastPathComponent, error.localizedDescription)
             }
@@ -1141,8 +1605,7 @@ private struct EditorTabButton: View {
     @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Label area — Button for proper AppKit hit testing inside ScrollView
+        HStack(spacing: 4) {
             Button(action: onSelect) {
                 HStack(spacing: 4) {
                     Image(systemName: FileExplorerView.fileIconName(for: tab.url))
@@ -1150,31 +1613,29 @@ private struct EditorTabButton: View {
                         .foregroundStyle(FileExplorerView.fileIconColor(for: tab.url))
 
                     Text(tab.name)
-                        .font(AppFonts.secondaryLabel)
+                        .font(AppFonts.secondaryLabel.weight(isActive ? .medium : .regular))
+                        .foregroundStyle(isActive ? AppPalette.textPrimary : AppPalette.textSecondary)
                         .lineLimit(1)
                 }
-                .padding(.leading, 8)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            // Close button — separate from select
             closeOrDirtyIndicator
-                .padding(.trailing, 4)
         }
-        .padding(.trailing, 4)
-        .frame(height: AppSpacing.editorTabBarHeight)
-        .glassEffectWithTint(
-            isActive,
-            in: Rectangle(),
-            fallback: Rectangle()
-                .fill(isActive ? AppColors.activeBackground : (isHovering ? AppColors.hoverBackground : Color.clear))
+        .padding(.horizontal, 8)
+        .frame(height: AppSpacing.editorTabBarHeight - 8)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isActive
+                      ? AppPalette.base
+                      : (isHovering ? AppPalette.surface : Color.clear))
         )
-        .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(Color.secondary.opacity(0.15))
-                .frame(width: 1)
-        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(isActive ? RailChrome.hairline : Color.clear, lineWidth: 1)
+        )
+        .padding(.vertical, 4)
         .onHover { isHovering = $0 }
         .contextMenu {
             Button("Close") { onClose() }

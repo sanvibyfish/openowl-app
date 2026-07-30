@@ -59,6 +59,7 @@ AppLogger.log("resize-diag", "frame=%.1fx%.1f", width, height)
 - 日志目录在首次写入时自动创建，无需手动创建
 - `FileHandle` 在 app 生命周期内保持打开，避免频繁 open/close
 - 当前 `[resize-diag]` 与 `[file-editor-state]` 相关日志使用 `AppLogger`，其他模块的 `NSLog` 可按需逐步迁移
+- `TerminalScrollView.layout` 只记录尺寸发生变化的 layout；无尺寸变化的 terminal layout 不落盘，避免 terminal 输出热路径被诊断日志拖慢
 - `syncSurfaceSize skipped ... hostVisible=false/tiny ...` 表示 pane 当前隐藏或尺寸未稳定，openOwl 会保留上一次可用 PTY 尺寸，恢复显示后再同步
 - `[file-editor-state] restore-skip ...` 表示 editor tab session 恢复时跳过不存在文件、目录或超过图片解码上限的图片
 
@@ -70,6 +71,7 @@ AppLogger.log("resize-diag", "frame=%.1fx%.1f", width, height)
 
 | 日期 | 说明 |
 |------|------|
+| 2026-06-25 | `resize-diag` layout 日志降噪，只记录尺寸变化，避免终端输出热路径重复写日志 |
 | 2026-06-05 | 新增 file-editor-state 示例与恢复跳过语义 |
 | 2026-06-04 | resize-diag 示例更新为 `syncSurfaceSize`，补充隐藏 pane 尺寸跳过语义 |
 | 2026-05-30 | 初始实现，覆盖 resize-diag 日志 |

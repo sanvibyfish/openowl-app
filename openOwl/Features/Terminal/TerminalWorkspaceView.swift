@@ -173,7 +173,7 @@ private struct TerminalTabContentView: View {
                     .opacity(isHiddenByMaximize ? 0 : 1)
                     .allowsHitTesting(!isHiddenByMaximize)
                     .overlay {
-                        // 非聚焦 pane 遮罩（轻柔）
+                        // 非聚焦 pane 仅做轻微弱化，不绘制焦点边框。
                         if isMultiPane && !isMaximized, !workspace.isFocusedPane(paneID, in: tab.id) {
                             Color.primary.opacity(0.04)
                                 .allowsHitTesting(false)
@@ -276,7 +276,7 @@ private struct SplitDividerView: View {
 
             // Visual line
             Rectangle()
-                .fill(isHovered ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.3))
+                .fill(isHovered ? AppPalette.accent.opacity(0.7) : AppPalette.border)
                 .frame(
                     width: isHorizontal ? 1 : nil,
                     height: isHorizontal ? nil : 1
@@ -361,7 +361,7 @@ private struct PaneDragHandle: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 12)
-            .background(Color(nsColor: .underPageBackgroundColor))
+            .background(AppPalette.elevated)
             .contentShape(Rectangle())
             .onHover { isHovered = $0 }
             .onDrag {
@@ -380,7 +380,7 @@ private struct PaneDragHandle: View {
 
             // Bottom separator
             Rectangle()
-                .fill(Color.secondary.opacity(0.2))
+                .fill(AppPalette.border)
                 .frame(height: 1)
         }
     }

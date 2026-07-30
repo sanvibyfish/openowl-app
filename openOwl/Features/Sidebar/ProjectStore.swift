@@ -54,13 +54,15 @@ struct FreeTerminalItem: Identifiable, Equatable {
 @Observable
 final class ProjectStore {
     private(set) var projects: [ProjectItem] = []
+    private var lastActiveProjectIDByRoot: [String: String] = [:]
 
     /// Setting `activeProjectID` to a non-nil value implicitly clears any active
     /// free terminal (project selection takes priority over free-terminal selection).
     var activeProjectID: String? {
         didSet {
-            if activeProjectID != nil {
+            if let activeProjectID {
                 activeFreeTerminalID = nil
+                rememberProjectSelection(activeProjectID)
             }
         }
     }
@@ -220,6 +222,28 @@ final class ProjectStore {
         activeProjectID = id
         persist()
         detectBranchPrefix(for: id)
+    }
+
+    /// Restores the most recently selected main/worktree namespace for a root project.
+    func activateLastProject(inRoot rootID: String) {
+        guard let root = projects.first(where: { $0.id == rootID && !$0.isWorktree }) else { return }
+        let rememberedID = lastActiveProjectIDByRoot[rootID]
+        let targetID: String
+        if let rememberedID,
+           projects.contains(where: {
+               $0.id == rememberedID && ($0.id == rootID || $0.worktreeOf == rootID)
+           }) {
+            targetID = rememberedID
+        } else {
+            targetID = root.id
+        }
+        activateProject(id: targetID)
+    }
+
+    private func rememberProjectSelection(_ projectID: String) {
+        guard let project = projects.first(where: { $0.id == projectID }) else { return }
+        let rootID = project.worktreeOf ?? project.id
+        lastActiveProjectIDByRoot[rootID] = projectID
     }
 
     // MARK: - Active Kind / Free Terminals

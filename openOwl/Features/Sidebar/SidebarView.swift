@@ -1,5 +1,11 @@
 import SwiftUI
 
+/// Legacy wide project list (NavigationSplitView sidebar).
+///
+/// **UI replaced by `ProjectRail`** (Muxy-style narrow icon rail in ContentView).
+/// This file is kept temporarily for reference while worktree row interactions
+/// finish migrating into `ProjectRail` / `WorktreeArchive`. Do not re-wire
+/// `SidebarView` into ContentView without an explicit product decision.
 struct SidebarView: View {
     @Environment(ProjectStore.self) private var projectStore
     @Environment(TerminalWorkspaceStore.self) private var workspace
@@ -544,24 +550,6 @@ private struct WorktreeRow: View {
     }
 
     private func archiveWorktree() async -> Bool {
-        do {
-            let dirty = try await GitService.hasUncommittedChanges(at: wt.url)
-            if dirty {
-                let proceed = await MainActor.run {
-                    let alert = NSAlert()
-                    alert.messageText = "Archive worktree?"
-                    alert.informativeText = "\"\(wt.worktreeBranch ?? wt.name)\" has uncommitted changes.\n\nArchive this worktree anyway?"
-                    alert.alertStyle = .warning
-                    alert.addButton(withTitle: "Archive")
-                    alert.addButton(withTitle: "Cancel")
-                    return alert.runModal() == .alertFirstButtonReturn
-                }
-                guard proceed else { return false }
-            }
-        } catch {
-            NSLog("openOwl: [SidebarView] Failed to check uncommitted changes: %@", error.localizedDescription)
-        }
-
         guard let parentID = wt.worktreeOf,
               let parent = projectStore.projects.first(where: { $0.id == parentID }) else {
             await MainActor.run {
@@ -577,7 +565,47 @@ private struct WorktreeRow: View {
 
         let parentGit = GitService(workingDirectory: parent.url)
         do {
-            try await parentGit.removeWorktree(path: wt.path)
+            if try await parentGit.isRegisteredWorktree(path: wt.path) {
+                do {
+                    let dirty = try await GitService.hasUncommittedChanges(at: wt.url)
+                    if dirty {
+                        let proceed = await MainActor.run {
+                            let alert = NSAlert()
+                            alert.messageText = "Archive worktree?"
+                            alert.informativeText = "\"\(wt.worktreeBranch ?? wt.name)\" has uncommitted changes.\n\nArchive this worktree anyway?"
+                            alert.alertStyle = .warning
+                            alert.addButton(withTitle: "Archive")
+                            alert.addButton(withTitle: "Cancel")
+                            return alert.runModal() == .alertFirstButtonReturn
+                        }
+                        guard proceed else { return false }
+                    }
+                } catch {
+                    NSLog("openOwl: [SidebarView] Failed to check uncommitted changes: %@", error.localizedDescription)
+                }
+            }
+
+            let outcome = try await parentGit.removeWorktree(path: wt.path)
+            if outcome == .unregisteredPath {
+                let shouldTrash = await MainActor.run {
+                    let alert = NSAlert()
+                    alert.messageText = "Worktree registration missing"
+                    alert.informativeText = "\"\(wt.worktreeBranch ?? wt.name)\" is no longer registered as a Git worktree, but its folder still exists and may contain files.\n\nMove the folder to Trash and remove it from OpenOwl?"
+                    alert.alertStyle = .warning
+                    alert.addButton(withTitle: "Move to Trash")
+                    alert.addButton(withTitle: "Keep")
+                    return alert.runModal() == .alertFirstButtonReturn
+                }
+                guard shouldTrash else { return false }
+
+                let worktreeURL = wt.url
+                try await Task.detached(priority: .userInitiated) {
+                    try FileManager.default.trashItem(
+                        at: worktreeURL,
+                        resultingItemURL: nil
+                    )
+                }.value
+            }
         } catch {
             await MainActor.run {
                 let alert = NSAlert()
