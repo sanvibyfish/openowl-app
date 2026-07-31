@@ -77,6 +77,15 @@ final class FileExplorerStore {
     var selectedNodeID: String?
     private(set) var previewState: FilePreviewState = .none
     var errorMessage: String?
+
+    /// File names of editor tabs with unsaved edits, published by the editor
+    /// view. The buffers themselves are `@State` inside that view, so this is
+    /// the only handle `applicationShouldTerminate` has on them — without it,
+    /// ⌘Q discarded unsaved work without asking.
+    private var unsavedTabNamesByEditor: [UUID: [String]] = [:]
+    var unsavedTabNames: [String] {
+        unsavedTabNamesByEditor.values.flatMap { $0 }.sorted()
+    }
     var isQuickOpenPresented = false
     var quickOpenQuery: String = "" {
         didSet {
@@ -88,6 +97,19 @@ final class FileExplorerStore {
     private(set) var nodeIndex: [String: FileExplorerNode] = [:]
     private var searchableFileNodes: [FileExplorerNode] = []
     private var watcher: FileWatcher?
+
+    func publishUnsavedTabNames(_ names: [String], for editorID: UUID) {
+        if names.isEmpty {
+            unsavedTabNamesByEditor.removeValue(forKey: editorID)
+        } else {
+            unsavedTabNamesByEditor[editorID] = names.sorted()
+        }
+    }
+
+    func removeUnsavedTabNames(for editorID: UUID) {
+        unsavedTabNamesByEditor.removeValue(forKey: editorID)
+    }
+
     func setupQueryAutoSearch() {
         // No-op: quickOpenQuery.didSet now triggers updateQuickOpenResults() directly.
         // Kept for API compatibility with callers.
@@ -390,14 +412,22 @@ final class FileExplorerStore {
     func copyFiles(_ urls: [URL]) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.writeObjects(urls as [NSURL])
+        UserDefaults.standard.removeObject(forKey: "openowl.fileCutPending")
+        guard pasteboard.writeObjects(urls as [NSURL]) else {
+            errorMessage = "无法复制文件到剪贴板"
+            return
+        }
     }
 
     /// Cut files: copy to pasteboard and mark for move
     func cutFiles(_ urls: [URL]) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.writeObjects(urls as [NSURL])
+        guard pasteboard.writeObjects(urls as [NSURL]) else {
+            UserDefaults.standard.removeObject(forKey: "openowl.fileCutPending")
+            errorMessage = "无法剪切文件到剪贴板"
+            return
+        }
         // Store cut state — on paste we move instead of copy
         UserDefaults.standard.set(true, forKey: "openowl.fileCutPending")
     }

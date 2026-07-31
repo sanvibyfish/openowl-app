@@ -1,20 +1,24 @@
-# FEAT-006: 项目管理侧边栏
+# FEAT-006: 项目管理侧边栏（Project Rail）
 
-> 状态：✅ Done | 创建日期：2026-01-10 | 完成日期：2026-03-14
+> 状态：✅ Done | 创建日期：2026-01-10 | 完成日期：2026-03-14 | 布局改版：2026-07-28
 
 ---
 
 ## 1. 功能概述
 
-项目列表导航：添加/移除项目、切换活跃项目、Git Worktree 子项目管理、分支前缀自动检测。持久化到 `~/.openowl/openowl.json`。异常时显示 Claude 状态提醒卡片（读取官方 status RSS）。
+项目导航 + free terminal 入口。**2026-07-28 起 UI 改为 Muxy 风格窄 icon rail**（`ProjectRail`，宽 48pt），不再使用宽 `NavigationSplitView` 项目树。
+
+能力不变：添加/移除项目、切换活跃项目、Git Worktree 管理、分支前缀自动检测、持久化 `~/.openowl/openowl.json`、Claude incident 指示。
 
 ## 2. 用户流程
 
-1. **添加项目**: 点击 + 按钮打开文件夹选择器
-2. **切换项目**: 点击项目名称，终端 / Git / 文件浏览器同步切换
-3. **Worktree**: 在项目下创建 Git Worktree，显示为子项目
-4. **移除项目**: 右键移除（只从列表移除，不删除文件）
-5. **状态感知**: Claude 出现异常时弹出提醒卡片，可点击打开官方状态页或关闭忽略本次 incident
+1. **添加项目**: 点 rail 底部 `+` 打开文件夹选择器
+2. **切换项目**: 点项目 monogram，终端 / Git / 文件浏览器同步切换
+3. **Free terminal**: rail 顶部 terminal 图标；中间区显示 standalone shell（tab bar 在内容区顶）
+4. **Worktree**: 再次点击**已选中**的项目图标 → 弹出 popover，可切 main / worktree、创建 worktree
+5. **移除项目**: popover → Remove（只从列表移除，不删磁盘文件）
+6. **归档 worktree**: popover 内 worktree 行右键 → Archive Worktree
+7. **状态感知**: Claude incident 时 rail 底部黄三角；点击打开 status 页，右键可 dismiss
 
 ## 3. 技术实现
 
@@ -47,6 +51,9 @@ struct ProjectItem: Identifiable, Hashable, Codable {
 - 启动时从 UserDefaults 一次性迁移（旧版兼容）
 - 路径验证: `isReasonableProjectPath()` 要求 ≥3 个路径组件
 - 去重: `uniqued()` 基于标准化路径
+- `openowl.json` 无法读取/解码时先改名隔离；隔离成功后异步提示备份路径，并以空项目列表继续启动
+- 隔离失败时异步告警，将本 session 的 `ProjectStore` 标记为只读；后续 `persist()` 全部拒绝，原始 `openowl.json` 保持不变
+- 测试宿主的默认 store 路径位于独立临时目录，避免单元测试读写真实 `~/.openowl/openowl.json`
 
 ### 3.3 Worktree 支持
 
@@ -64,7 +71,17 @@ GitService
 
 Worktree 目录统一存放在 `~/.openowl/workspace/projects/` 下。
 
-归档 worktree 会先进入进度态并禁用重复点击，再执行 `git worktree remove --force`；只有 Git 删除成功后才会从 openOwl 项目列表移除。失败时保留侧边栏条目并显示错误，避免界面状态与磁盘/Git 状态不一致。
+归档 worktree 会先进入进度态并禁用重复点击。openOwl 先以父仓库的 `git worktree list --porcelain` 判断当前登记状态：
+
+- 仍登记为 worktree **且目录仍存在**：检查未提交修改，再执行 `git worktree remove --force`。**未提交检查本身失败时 fail-closed** —— 提示用户并取消归档，绝不在「不知道有没有脏改动」的状态下走 `--force`（git 超时、`index.lock` 被占用、仓库损坏都会走到这条路径）。目录存在性是检查的前置条件：git 无法在不存在的工作目录下运行，少了这个前置判断，抛错会落进 fail-closed 分支，让下面那条「路径已不存在」的清理路径永远无法到达
+- 路径已经不存在：直接清理侧边栏中的失效记录
+- 路径存在但未登记：不再调用 `git worktree remove`；提示用户选择将残留目录移到废纸篓或保留
+
+Project Rail popover 与 Project Session List 的归档入口共享 `ProjectStore` 中按 worktree ID 记录的 in-flight guard。相同 worktree 的重复归档会在业务入口拒绝，菜单显示 `Archiving...` 并禁用；不同 worktree 可独立归档。成功、失败或用户取消后都会释放 guard，允许后续重试。
+
+若归档目标是当前 active worktree，会在任何 `await`、创建 `GitService`、执行 Git 命令或移动文件前先调用 editor context preflight，并同步切到 parent。dirty buffer 保存失败时归档直接取消，不产生 Git/文件副作用；归档 in-flight 期间该 worktree 不可重新激活。
+
+只有 Git 删除成功、路径确认不存在，或用户明确将残留目录移到废纸篓后，才会从 openOwl 项目列表移除。失败或选择保留时继续保留侧边栏条目，避免界面状态与磁盘/Git 状态不一致。
 
 ### 3.4 分支前缀
 
@@ -72,6 +89,7 @@ Worktree 目录统一存放在 `~/.openowl/workspace/projects/` 下。
 - 自动检测: 解析 `git remote get-url origin` 提取 GitHub 用户名
 - 回退: `NSFullUserName()` 转小写去空格
 - 缓存在 ProjectItem 上，persist 后不再重复检测
+- **触发点是 `activeProjectID` 的 `didSet`，不是各个调用点**。全类共 13 处赋值，其中最要紧的是隐式的那几处——删除项目会回落到另一个 root、删除 worktree 会回落到父项目。挂在调用点上必然漏掉它们，那些路径到达的项目会保持 `branchPrefix == nil`，「Create Worktree」永久禁用
 
 ### 3.5 项目隔离
 
@@ -80,29 +98,70 @@ Worktree 目录统一存放在 `~/.openowl/workspace/projects/` 下。
 - Git：切换到该项目的仓库
 - 文件浏览器：切换到该项目的目录
 
-### 3.6 Claude 异常提醒卡片
+### 3.6 Claude 异常提醒
 
-- 位置：Sidebar 底部（仅异常时显示）
+- 位置：Project Rail 底部图标（仅异常时显示）
 - 数据源：`https://status.claude.com/history.rss`
 - 判定：存在未 `Resolved` incident 即显示异常（包括 `Monitoring`）
 - 刷新：启动立即拉取，之后每 5 分钟轮询
 - 容错：拉取失败时静默保留当前显示，等待下一次轮询
-- 关闭行为：用户点 `x` 后忽略当前 incident，仅新 incident 再次弹出
+- 关闭行为：右键 Dismiss 后忽略当前 incident，仅新 incident 再次弹出
+
+### 3.7 布局（Project Rail）
+
+```
+openOwl/Features/Sidebar/
+├── ProjectRail.swift        # 窄 rail UI（主入口）+ WorktreeArchive / WorktreeAlert
+├── ProjectSessionList.swift # 当前项目的分支 / worktree / pane 列表
+├── ProjectStore.swift       # 数据 / 持久化 + worktree 创建与归档的进行中状态
+└── BookmarkStore.swift
+```
+
+worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session list 只调用它 —— 两处都提供同一操作，各自持有进行中状态会让并发的 `git worktree add` 撞上 `index.lock`。异步创建在首个 Git 副作用前执行 editor context preflight；Git 成功后先将新 worktree 登记为 inactive，真正激活时再次审批。任何 pane/context veto 都保持当前项目与 terminal namespace 不变。
+
+窗口结构（`ContentView`）：
+
+```
+┌──────┬──────────────────────────┬─────┐
+│ Rail │  Terminal (主舞台)        │Dock │
+│ 48pt │  (+ FreeTerminalTabBar)  │/rail│
+├──────┴──────────────────────────┴─────┤
+│ StatusBar                              │
+└────────────────────────────────────────┘
+```
+
+- 不再使用 `NavigationSplitView` 左栏
+- 选中态：左 2px accent 竖条 + monogram 填充色
+- monogram 颜色 hash 使用 `magnitude` 计算 palette 索引，`Int.min` 也不会触发 `abs` 溢出
+- 有 terminal bell 时 monogram 角标显示未读数
+- 有 open tab 的 root 排在前面；未打开的 root 半透明
 
 ## 4. 注意事项
 
-- 项目列表按名称排序（worktree 跟随父项目）
-- 折叠/展开状态存在内存中（`collapsedProjectIDs`），不持久化
+- 项目顺序：root 保持 `ProjectStore` 持久化顺序；rail 仅把「本 session 有 tab 的 root」提到前面
+- 从 Project Rail 切回某个 root 时，恢复该 root 最近一次选中的 main/worktree；用户明确切回 main 后，后续继续保持 main
 - 删除根项目时同时移除所有子 worktree
 
 ## 5. 相关需求
 
 - [REQ-006: Claude 状态 Sidebar 指示器](../requirements/REQ-006-claude-status-sidebar.md)
+- [FEAT-008: Right Dock](008-right-dock.md) — 右侧 inspector，与左 rail 对称
 
 ## 6. 更新记录
 
 | 日期 | 说明 |
 |------|------|
+| 2026-07-31 | `openowl.json` 隔离失败时本 session 改为只读且异步告警；active worktree 归档在 Git/文件副作用前执行 editor preflight；monogram hash 改用 magnitude |
+| 2026-07-31 | `openowl.json` 解码失败改为先隔离备份再继续（此前落到迁移分支后 `projects` 为空，第一次 `persist()` 就永久覆盖用户项目列表）；`removeWorktree` 不再按 git stderr 子串分类并递归删整棵工作树，改为只删 `.DS_Store` 后重试 git；两文件 NSLog 全部改 AppLogger |
+| 2026-07-31 | `detectBranchPrefix` 收进 `activeProjectID.didSet`——此前只挂在 4 个调用点，删除项目/worktree 后回落的 5 条路径漏掉，那些项目的 worktree 按钮永久禁用 |
+| 2026-07-31 | 修 `6c52eda` 回归：归档的未提交检查加目录存在性前置，恢复「目录已删除但 git 仍登记」的清理路径；删除零调用且策略相反的死属性 `ProjectStore.branchPrefix`；`branchPrefix` 检测改为在 `init`/`addOrActivateProject` 也触发，避免新加或恢复的项目 worktree 按钮永久禁用 |
 | 2026-03-16 | 创建文档 |
 | 2026-03-18 | 新增 Claude 异常提醒卡片（RSS 轮询 + 可关闭忽略） |
 | 2026-05-10 | 修复 worktree 归档无进度反馈、可重复点击、失败仍从项目列表移除的问题 |
+| 2026-07-24 | 归档前校验 Git worktree 登记状态；失效残留目录需确认后才移到废纸篓 |
+| 2026-07-28 | UI 改为 Muxy 风格 `ProjectRail`（48pt）；宽 `SidebarView` 下线；worktree 经 popover/右键管理 |
+| 2026-07-29 | Project Rail 切回项目时恢复该 root 最近选择的 main/worktree |
+| 2026-07-30 | Project Rail 与 Project Session List 共用按 worktree ID 的归档 in-flight guard，阻止同一 worktree 重复归档 |
+| 2026-07-31 | worktree 创建上移 `ProjectStore.createWorktree`（rail / session list 共用同一 in-flight guard 与失败弹窗）；`branchPrefix` 缺失时禁用入口而非回落 `dev`；删除已下线的 `SidebarView` / `ProjectsSection` / `TerminalsSection`；分支行与 worktree 行合并为单个 `SessionRow` |
+| 2026-07-31 | 归档 worktree 时未提交检查失败改为 fail-closed（取消归档并提示），不再在未知状态下执行 `git worktree remove --force` |
+| 2026-07-31 | 删除项目 monogram 的右键菜单——它是从旧宽侧边栏沿用的交互，与 rail popover 重复承载同一批动作（Open Main / Worktrees / Create Worktree / Reveal / Remove），popover 已全部覆盖。代价：对未选中的项目需先点选再点开 popover，不能一步右键直达 |

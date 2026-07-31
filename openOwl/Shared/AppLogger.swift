@@ -1,5 +1,10 @@
 import Foundation
 
+/// File logger → ~/Library/Logs/openOwl/openowl.log
+///
+/// Noisy tags are off by default. Enable with:
+///   defaults write com.openowl.app log.resizeDiag -bool YES
+///   defaults write com.openowl.app log.keyboardRouting -bool YES
 enum AppLogger {
     private static let queue = DispatchQueue(label: "com.openowl.logger", qos: .utility)
     private static let maxFileSize: UInt64 = 10 * 1024 * 1024 // 10 MB
@@ -22,18 +27,39 @@ enum AppLogger {
         logDir.appendingPathComponent("openowl.log")
     }()
 
+    /// Tags that only write when their UserDefaults switch is on.
+    /// Every other tag is always on.
+    /// `keyboard-routing` fires on every ESC and Ctrl-C — the two most-pressed
+    /// keys in a terminal — and each call does a synchronous NSLog plus a file
+    /// write on the keystroke path. It stays off unless someone is actually
+    /// debugging the Escape routing it was added for.
+    static let optInTags: [String: String] = [
+        "resize-diag": "log.resizeDiag",
+        "keyboard-routing": "log.keyboardRouting",
+    ]
+
+    static func isEnabled(_ tag: String) -> Bool {
+        guard let key = optInTags[tag] else { return true }
+        return UserDefaults.standard.bool(forKey: key)
+    }
+
     static func log(_ tag: String, _ message: String) {
+        guard isEnabled(tag) else { return }
+        emit(tag, message)
+    }
+
+    static func log(_ tag: String, _ format: String, _ args: CVarArg...) {
+        guard isEnabled(tag) else { return }
+        emit(tag, String(format: format, arguments: args))
+    }
+
+    private static func emit(_ tag: String, _ message: String) {
         let timestamp = dateFormatter.string(from: Date())
         let line = "\(timestamp) [\(tag)] \(message)\n"
         NSLog("openOwl: [%@] %@", tag, message)
         queue.async {
             writeToFile(line)
         }
-    }
-
-    static func log(_ tag: String, _ format: String, _ args: CVarArg...) {
-        let message = String(format: format, arguments: args)
-        log(tag, message)
     }
 
     private static func writeToFile(_ line: String) {

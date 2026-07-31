@@ -1,9 +1,12 @@
 import SwiftUI
 
-/// 语义化分割线。当前直接使用系统 Divider，
-/// macOS 的 separatorColor 已自适应暗/亮模式。
+/// Soft hairline divider — quieter than system `Divider` so panel chrome
+/// doesn't compete with terminal content.
 struct PanelDivider: View {
     var body: some View {
-        Divider()
+        Rectangle()
+            .fill(AppPalette.border)
+            .frame(height: 1)
+            .frame(maxWidth: .infinity)
     }
 }

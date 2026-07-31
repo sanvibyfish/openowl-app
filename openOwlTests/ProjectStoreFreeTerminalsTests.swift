@@ -8,12 +8,12 @@ struct ProjectStoreFreeTerminalsTests {
     // MARK: - Init
 
     @Test @MainActor func init_seedsAtLeastOneFreeTerminal() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         #expect(store.freeTerminals.count >= 1)
     }
 
     @Test @MainActor func init_freeTerminalsHaveUniqueIDs() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         _ = store.addFreeTerminal()
         _ = store.addFreeTerminal()
         let ids = Set(store.freeTerminals.map(\.id))
@@ -23,7 +23,7 @@ struct ProjectStoreFreeTerminalsTests {
     // MARK: - addFreeTerminal
 
     @Test @MainActor func addFreeTerminal_appendsItem() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         let initialCount = store.freeTerminals.count
 
         let added = store.addFreeTerminal()
@@ -35,7 +35,7 @@ struct ProjectStoreFreeTerminalsTests {
     // MARK: - removeFreeTerminal
 
     @Test @MainActor func removeFreeTerminal_dropsItem_whenMoreThanOne() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         let extra = store.addFreeTerminal()
         let countBefore = store.freeTerminals.count
 
@@ -46,7 +46,7 @@ struct ProjectStoreFreeTerminalsTests {
     }
 
     @Test @MainActor func removeFreeTerminal_lastOne_isNoOp() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         // Reduce to a single free terminal first.
         while store.freeTerminals.count > 1 {
             if let last = store.freeTerminals.last {
@@ -63,7 +63,7 @@ struct ProjectStoreFreeTerminalsTests {
     }
 
     @Test @MainActor func removeFreeTerminal_active_fallsBackToFirstRemaining() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         let first = store.freeTerminals.first!
         let second = store.addFreeTerminal()
         store.activate(.freeTerminal(second.id))
@@ -75,7 +75,7 @@ struct ProjectStoreFreeTerminalsTests {
     }
 
     @Test @MainActor func removeFreeTerminal_unknownID_isNoOp() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         let countBefore = store.freeTerminals.count
         store.removeFreeTerminal(id: UUID())
         #expect(store.freeTerminals.count == countBefore)
@@ -84,11 +84,11 @@ struct ProjectStoreFreeTerminalsTests {
     // MARK: - activate / activeKind
 
     @Test @MainActor func activate_freeTerminal_clearsActiveProjectID() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         let term = store.freeTerminals.first!
         store.activeProjectID = "fake-project-id"
 
-        store.activate(.freeTerminal(term.id))
+        #expect(store.activate(.freeTerminal(term.id)))
 
         // activate is async — drive the runloop briefly
         let exp = Date().addingTimeInterval(1.0)
@@ -101,10 +101,10 @@ struct ProjectStoreFreeTerminalsTests {
     }
 
     @Test @MainActor func activate_unknownFreeTerminal_isNoOp() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         let originalActive = store.activeFreeTerminalID
 
-        store.activate(.freeTerminal(UUID()))
+        #expect(!store.activate(.freeTerminal(UUID())))
 
         // Wait briefly to ensure no async update sneaks in
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
@@ -112,8 +112,34 @@ struct ProjectStoreFreeTerminalsTests {
         #expect(store.activeFreeTerminalID == originalActive)
     }
 
+    @Test @MainActor func activate_currentFreeTerminal_reportsSuccessWithoutChangingSelection() {
+        let store = makeIsolatedProjectStore()
+        let terminal = store.freeTerminals.first!
+        #expect(store.activate(.freeTerminal(terminal.id)))
+
+        #expect(store.activate(.freeTerminal(terminal.id)))
+        #expect(store.activeFreeTerminalID == terminal.id)
+    }
+
+    @Test @MainActor func activate_freeTerminal_reportsVetoAndKeepsProjectSelection() {
+        let store = makeIsolatedProjectStore()
+        let projectURL = URL(
+            fileURLWithPath: "/tmp/test-terminal-veto-project-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        store.addOrActivateProject(projectURL)
+        let projectID = store.activeProjectID
+        let terminal = store.freeTerminals.first!
+        let approverID = UUID()
+        store.registerActiveContextChangeApprover(id: approverID) { false }
+
+        #expect(!store.activate(.freeTerminal(terminal.id)))
+        #expect(store.activeProjectID == projectID)
+        #expect(store.activeFreeTerminalID == nil)
+    }
+
     @Test @MainActor func activeKind_reflectsProjectFirst() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         store.activeProjectID = "proj-1"
 
         if case .project(let id) = store.activeKind {
@@ -124,7 +150,7 @@ struct ProjectStoreFreeTerminalsTests {
     }
 
     @Test @MainActor func activeKind_reflectsFreeTerminalWhenNoProject() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         let term = store.freeTerminals.first!
         store.activeProjectID = nil
         store.activeFreeTerminalID = term.id
@@ -137,7 +163,7 @@ struct ProjectStoreFreeTerminalsTests {
     }
 
     @Test @MainActor func setActiveProjectID_clearsActiveFreeTerminal() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         let term = store.freeTerminals.first!
         store.activeFreeTerminalID = term.id
         #expect(store.activeFreeTerminalID == term.id)

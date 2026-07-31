@@ -2,16 +2,140 @@ import AppKit
 import SwiftUI
 import UserNotifications
 
+/// Decides whether the app-level Escape/Ctrl-C fallback may bypass AppKit's
+/// current responder. This is intentionally separate from pane lookup so the
+/// responder-chain policy can be regression tested without a live terminal.
+enum TerminalFallbackResponderPolicy {
+    /// Ctrl-C / general terminal key fallback: don't steal from text fields,
+    /// outlines (copy selection), tables, etc.
+    static func allowsFallback(
+        from responder: NSResponder?,
+        in window: NSWindow?,
+        terminalWindow: NSWindow?
+    ) -> Bool {
+        allowsFallback(
+            from: responder,
+            in: window,
+            terminalWindow: terminalWindow,
+            mode: .general
+        )
+    }
+
+    /// Escape is special: users almost always mean "send ESC to the shell /
+    /// cancel in the terminal". Only real text editing should keep it.
+    /// File tree / table focus must NOT strand Escape (common intermittent bug).
+    static func allowsEscapeFallback(
+        from responder: NSResponder?,
+        in window: NSWindow?,
+        terminalWindow: NSWindow?
+    ) -> Bool {
+        allowsFallback(
+            from: responder,
+            in: window,
+            terminalWindow: terminalWindow,
+            mode: .escape
+        )
+    }
+
+    private enum Mode { case general, escape }
+
+    private static func allowsFallback(
+        from responder: NSResponder?,
+        in window: NSWindow?,
+        terminalWindow: NSWindow?,
+        mode: Mode
+    ) -> Bool {
+        guard let window,
+              window === terminalWindow,
+              !(window is NSPanel),
+              window.sheetParent == nil,
+              window.attachedSheet == nil else {
+            return false
+        }
+        guard let responder else { return true }
+        if let terminal = responder as? TerminalNSView {
+            // An active terminal receives the original event through AppKit.
+            // A stale/hidden terminal may fall back to the workspace's active pane.
+            return !terminal.acceptsTerminalKeyboardInput
+        }
+        if responder === window { return true }
+
+        guard let view = responder as? NSView else {
+            // Menus and other non-view responders own their keyboard interaction.
+            return false
+        }
+        if !isAttachedAndVisible(view, in: window) {
+            // SwiftUI can leave the old control as first responder briefly after
+            // a dock/tab transition. A detached or hidden control no longer owns
+            // keyboard interaction and must not strand Escape.
+            return true
+        }
+        switch mode {
+        case .escape:
+            return !isTextEditingInput(view)
+        case .general:
+            return !isInteractiveInput(view)
+        }
+    }
+
+    private static func isAttachedAndVisible(_ view: NSView, in window: NSWindow) -> Bool {
+        guard view.window === window else { return false }
+
+        var candidate: NSView? = view
+        while let current = candidate {
+            if current.isHidden || current.alphaValue < 0.01 {
+                return false
+            }
+            candidate = current.superview
+        }
+        return true
+    }
+
+    /// True text editing only — Escape should stay with these (rename, commit,
+    /// Quick Open, terminal search field).
+    private static func isTextEditingInput(_ view: NSView) -> Bool {
+        var candidate: NSView? = view
+        while let current = candidate {
+            if current is NSTextView || current is NSTextField {
+                return true
+            }
+            candidate = current.superview
+        }
+        return false
+    }
+
+    private static func isInteractiveInput(_ view: NSView) -> Bool {
+        var candidate: NSView? = view
+        while let current = candidate {
+            // NSTextView covers the shared field editor used by NSTextField.
+            // Outline/table/collection keep Ctrl-C for copy; Escape uses the
+            // narrower isTextEditingInput check instead.
+            if current is NSTextView
+                || current is NSTextField
+                || current is NSOutlineView
+                || current is NSTableView
+                || current is NSCollectionView {
+                return true
+            }
+            candidate = current.superview
+        }
+        return false
+    }
+}
+
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     weak var ghosttyManager: GhosttyAppManager?
     var workspaceStore: TerminalWorkspaceStore?
     weak var projectStore: ProjectStore?
     weak var rightDockStore: RightDockStore?
+    weak var fileExplorerStore: FileExplorerStore?
     private var localKeyMonitor: Any?
+    private let resourceMonitor = ResourceMonitor()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        UNUserNotificationCenter.current().delegate = self
         applyDevIcon()
         ensureEditMenu()
         installTerminalMenu()
@@ -21,12 +145,47 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         installDebugMenu()
         #endif
         requestNotificationPermission()
+        startResourceMonitor()
+    }
+
+    /// Sampling is independent of notification permission — keep the two apart
+    /// so the monitor does not wait on (or get skipped by) the auth callback.
+    private func startResourceMonitor() {
+        resourceMonitor.onSelfProcessAlert = { [weak self] _ in
+            guard let self else { return }
+            if let dump = self.ghosttyManager?.diagnosticDump() {
+                AppLogger.log("resource-monitor", "openOwl self-alert dump:\n%@", dump)
+            }
+            if let workspace = self.workspaceStore {
+                AppLogger.log(
+                    "resource-monitor",
+                    "workspace tabs=%d visible=%d namespace=%@",
+                    workspace.tabs.count,
+                    workspace.visibleTabs.count,
+                    String(describing: workspace.activeNamespace)
+                )
+            }
+        }
+        resourceMonitor.start()
     }
 
     private func requestNotificationPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-            NSLog("openOwl: [Notification] permission granted=%d error=%@",
-                  granted ? 1 : 0, error?.localizedDescription ?? "nil")
+            if let error {
+                AppLogger.log("notification", "authorization failed: %@", error.localizedDescription)
+                return
+            }
+            guard granted else {
+                // Resource alerts are delivered as user notifications, so a
+                // denial silences the whole alerting path. Say so explicitly —
+                // "no alerts" must not read as "nothing is wrong".
+                AppLogger.log(
+                    "notification",
+                    "permission denied — resource alerts cannot be delivered"
+                )
+                return
+            }
+            AppLogger.log("notification", "permission granted")
         }
     }
 
@@ -298,31 +457,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         NSLog("openOwl: applicationWillTerminate")
+        resourceMonitor.stop()
         // Stop all security-scoped access sessions so macOS can clean up
         projectStore?.bookmarkStore.stopAll()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let hasActiveTerminal = ghosttyManager?.needsConfirmQuit() ?? false
+        // The editor keeps unsaved buffers in view state and only writes them
+        // from `.onDisappear`, which macOS does not guarantee to run on quit.
+        // Without this check ⌘Q dropped them with no prompt and no log.
+        let unsaved = fileExplorerStore?.unsavedTabNames ?? []
 
-        NSLog(
-            "openOwl: applicationShouldTerminate requested terminal=%d",
-            hasActiveTerminal ? 1 : 0
+        AppLogger.log(
+            "app-lifecycle",
+            "terminate requested terminal=%d unsaved=%d",
+            hasActiveTerminal ? 1 : 0,
+            unsaved.count
         )
 
-        guard hasActiveTerminal else {
+        guard hasActiveTerminal || !unsaved.isEmpty else {
             return .terminateNow
+        }
+
+        var reasons: [String] = []
+        if !unsaved.isEmpty {
+            reasons.append("These files have unsaved changes:\n" + unsaved.map { "• \($0)" }.joined(separator: "\n"))
+        }
+        if hasActiveTerminal {
+            reasons.append("A terminal command is still running. Quitting will stop it.")
         }
 
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Quit openOwl?"
-        alert.informativeText = "A terminal command is still running. Quitting will stop it."
+        alert.informativeText = reasons.joined(separator: "\n\n")
         alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: unsaved.isEmpty ? "Quit" : "Discard and Quit")
 
         let confirmed = alert.runModal() == .alertSecondButtonReturn
-        NSLog("openOwl: applicationShouldTerminate %@", confirmed ? "confirmed" : "cancelled")
+        AppLogger.log("app-lifecycle", "terminate %@", confirmed ? "confirmed" : "cancelled")
         return confirmed ? .terminateNow : .terminateCancel
     }
 
@@ -366,6 +540,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // only fires when the search text field has SwiftUI focus, so it never
             // steals Enter from the terminal (IME confirmation, command execution).
             case 53: // Escape — close search from anywhere
+                AppLogger.log(
+                    "keyboard-routing",
+                    "escape consumed=terminal-search pane=%@",
+                    paneID.uuidString.prefix(8) as CVarArg
+                )
                 workspaceStore.endSearch(paneID: paneID)
                 ghosttyManager?.terminalView(for: paneID)?.performBindingAction("end_search")
                 _ = ghosttyManager?.focusPane(paneID)
@@ -498,25 +677,87 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let isControlC = flags == [.control] && event.charactersIgnoringModifiers?.lowercased() == "c"
         guard isEscape || isControlC else { return false }
 
-        guard !(rightDockStore?.isFullscreen ?? false) else { return false }
+        let keyName = isEscape ? "escape" : "ctrl-c"
+        // Always log ESC/Ctrl-C attempts so intermittent routing is diagnosable.
+        AppLogger.log(
+            "keyboard-routing",
+            "key=%@ firstResponder=%@",
+            keyName,
+            NSApp.keyWindow?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
+        )
+        guard !(rightDockStore?.isFullscreen ?? false) else {
+            AppLogger.log(
+                "keyboard-routing",
+                "fallback blocked key=%@ reason=right-dock-fullscreen",
+                keyName
+            )
+            return false
+        }
 
         guard let window = NSApp.keyWindow else { return false }
-        if let firstResponder = window.firstResponder {
-            if let terminalResponder = firstResponder as? TerminalNSView,
-               terminalResponder.acceptsTerminalKeyboardInput {
-                return false
-            }
-            if firstResponder !== window && !(firstResponder is TerminalNSView) {
-                return false
-            }
+        let originalResponder = window.firstResponder
+        if isEscape,
+           let terminalResponder = originalResponder as? TerminalNSView,
+           terminalResponder.acceptsTerminalKeyboardInput {
+            return terminalResponder.performKeyEquivalent(with: event)
         }
 
         guard let workspaceStore else { return false }
-        guard let paneID = workspaceStore.activeFocusedPaneID,
-              let terminalView = ghosttyManager?.terminalView(for: paneID) else { return false }
+        guard let paneID = workspaceStore.activeFocusedPaneID else {
+            AppLogger.log(
+                "keyboard-routing",
+                "fallback failed key=%@ reason=no-focused-pane responder=%@",
+                keyName,
+                originalResponder.map { String(describing: type(of: $0)) } ?? "nil"
+            )
+            return false
+        }
+        guard let terminalView = ghosttyManager?.terminalView(for: paneID) else {
+            AppLogger.log(
+                "keyboard-routing",
+                "fallback failed key=%@ reason=no-terminal-view pane=%@ responder=%@",
+                keyName,
+                paneID.uuidString.prefix(8) as CVarArg,
+                originalResponder.map { String(describing: type(of: $0)) } ?? "nil"
+            )
+            return false
+        }
+
+        let allowed = isEscape
+            ? TerminalFallbackResponderPolicy.allowsEscapeFallback(
+                from: originalResponder,
+                in: window,
+                terminalWindow: terminalView.window
+            )
+            : TerminalFallbackResponderPolicy.allowsFallback(
+                from: originalResponder,
+                in: window,
+                terminalWindow: terminalView.window
+            )
+        guard allowed else {
+            if !(originalResponder is TerminalNSView) {
+                AppLogger.log(
+                    "keyboard-routing",
+                    "fallback blocked key=%@ responder=%@",
+                    keyName,
+                    originalResponder.map { String(describing: type(of: $0)) } ?? "nil"
+                )
+            }
+            return false
+        }
 
         ghosttyManager?.ensurePaneFocused(paneID)
-        return terminalView.handleMonitoredKeyDown(event)
+        let handled = terminalView.handleMonitoredKeyDown(event)
+        AppLogger.log(
+            "keyboard-routing",
+            "fallback key=%@ pane=%@ responder=%@ handled=%d terminalAccepts=%d",
+            keyName,
+            paneID.uuidString.prefix(8) as CVarArg,
+            originalResponder.map { String(describing: type(of: $0)) } ?? "nil",
+            handled ? 1 : 0,
+            terminalView.acceptsTerminalKeyboardInput ? 1 : 0
+        )
+        return handled
     }
 }
 
@@ -532,5 +773,17 @@ extension AppDelegate {
             }
         }
         return true
+    }
+}
+
+// MARK: - User Notifications
+
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .list, .sound])
     }
 }

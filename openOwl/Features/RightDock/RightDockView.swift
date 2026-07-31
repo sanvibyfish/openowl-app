@@ -1,15 +1,15 @@
 import AppKit
 import SwiftUI
 
-/// Right-hand inspector panel. Hosts Files / Git / Deploy as switchable tabs
-/// and keeps all three views mounted to preserve their `@State` (editor tabs,
+/// Right-hand inspector panel. Hosts Files / Git as switchable tabs
+/// and keeps both views mounted to preserve their `@State` (editor tabs,
 /// commit drafts, scroll positions, etc.).
 ///
-/// Tab switching, collapse, and fullscreen affordances live on `RightDockRail`
-/// (the always-visible icon strip on the far right) — this view is purely
-/// content + a left-edge resize handle.
+/// The expanded panel owns its tab switcher, project context, collapse, and
+/// fullscreen affordances. `RightDockRail` is only the collapsed entry point.
 struct RightDockView: View {
     @Environment(RightDockStore.self) private var dock
+    @Environment(ProjectStore.self) private var projectStore
 
     /// Provided by the host so we can clamp `setWidth(...)` to a sensible upper
     /// bound (currently 50% of the window) without RightDockStore needing to
@@ -24,16 +24,134 @@ struct RightDockView: View {
             if !dock.isFullscreen && dock.showsDetailForActiveTab {
                 ResizeHandle(
                     currentWidth: dock.width,
+                    onResizeStart: {
+                        dock.beginInteractiveResize()
+                    },
                     onResize: { proposed in
-                        dock.setWidth(proposed, maxWidth: hostWidth * 0.5)
+                        dock.setWidth(
+                            proposed,
+                            maxWidth: RightDockStore.maxNormalWidth(hostWidth: hostWidth)
+                        )
+                    },
+                    onResizeEnd: {
+                        dock.endInteractiveResize()
                     }
                 )
             }
 
-            contentArea
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack(spacing: 0) {
+                dockHeader
+
+                contentArea
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .background(AppPalette.base)
+    }
+
+    private var dockHeader: some View {
+        HStack(spacing: 0) {
+            // Flat underline tabs — no floating pill border (that read as a
+            // detached chip on the left of the Files panel).
+            ForEach(RightDockTab.allCases) { tab in
+                let selected = dock.activeTab == tab
+                Button {
+                    dock.activeTab = tab
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: tab.systemImage)
+                            .font(.system(size: 11, weight: .medium))
+                        Text(tab.title)
+                            .font(AppFonts.caption.weight(selected ? .semibold : .medium))
+                    }
+                    .foregroundStyle(selected ? AppPalette.textPrimary : AppPalette.textTertiary)
+                    .padding(.horizontal, 12)
+                    .frame(height: AppSpacing.headerHeight)
+                    .overlay(alignment: .bottom) {
+                        Rectangle()
+                            .fill(selected ? AppPalette.accent : Color.clear)
+                            .frame(height: 2)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+
+            // Context only — path is the tooltip; name yields when dock is narrow
+            if let project = activeProject {
+                Text(project.displayName)
+                    .font(AppFonts.caption)
+                    .foregroundStyle(AppPalette.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .padding(.leading, 10)
+                    .layoutPriority(-1)
+                    .help(abbreviatedPath(project.url))
+                    .accessibilityLabel("Project \(project.displayName)")
+            }
+
+            Spacer(minLength: 4)
+
+            if let project = activeProject {
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([project.url])
+                } label: {
+                    Image(systemName: "arrow.up.forward.square")
+                }
+                .buttonStyle(.icon(
+                    font: .system(size: 11, weight: .medium),
+                    size: AppSpacing.headerHeight
+                ))
+                .help("Reveal in Finder")
+                .accessibilityLabel("Reveal project in Finder")
+            }
+
+            Button {
+                dock.toggleFullscreen()
+            } label: {
+                Image(systemName: dock.isFullscreen
+                    ? "arrow.down.right.and.arrow.up.left.square.fill"
+                    : "arrow.up.left.and.arrow.down.right.square")
+            }
+            .buttonStyle(.icon(
+                isActive: dock.isFullscreen,
+                font: .system(size: 11, weight: .medium),
+                size: AppSpacing.headerHeight
+            ))
+            .help(dock.isFullscreen ? "Exit fullscreen" : "Fullscreen panel")
+            .accessibilityLabel(dock.isFullscreen ? "Exit fullscreen" : "Fullscreen panel")
+
+            Button {
+                dock.collapse()
+            } label: {
+                Image(systemName: "chevron.right")
+            }
+            .buttonStyle(.icon(
+                font: .system(size: 11, weight: .semibold),
+                size: AppSpacing.headerHeight
+            ))
+            .help("Collapse panel")
+            .accessibilityLabel("Collapse panel")
+        }
+        .padding(.trailing, 4)
+        .frame(height: AppSpacing.headerHeight)
+        .background(AppPalette.base)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(AppPalette.border)
+                .frame(height: 1)
+        }
+    }
+
+    private var activeProject: ProjectItem? {
+        guard let activeProjectID = projectStore.activeProjectID else { return nil }
+        return projectStore.projects.first { $0.id == activeProjectID }
+    }
+
+    private func abbreviatedPath(_ url: URL) -> String {
+        (url.standardizedFileURL.path as NSString).abbreviatingWithTildeInPath
     }
 
     private var contentArea: some View {
@@ -65,7 +183,9 @@ struct RightDockView: View {
 /// version produced visible jitter as the dock rebuilt on every width change.
 private struct ResizeHandle: View {
     let currentWidth: CGFloat
+    let onResizeStart: () -> Void
     let onResize: (CGFloat) -> Void
+    let onResizeEnd: () -> Void
 
     @State private var dragStartWidth: CGFloat?
     @State private var hovering = false
@@ -99,6 +219,7 @@ private struct ResizeHandle: View {
                     .onChanged { value in
                         if dragStartWidth == nil {
                             dragStartWidth = currentWidth
+                            onResizeStart()
                         }
                         // Handle is on the LEFT edge: dragging left makes the
                         // panel wider, so subtract the (negative) translation.
@@ -107,6 +228,7 @@ private struct ResizeHandle: View {
                     }
                     .onEnded { _ in
                         dragStartWidth = nil
+                        onResizeEnd()
                     }
             )
     }

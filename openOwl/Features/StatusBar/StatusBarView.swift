@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// 底部状态栏，参照 CodeEdit 的 StatusBarView。
-/// 28pt 高度，左侧 Git branch + 文件变更数，右侧文件/终端信息。
+/// Bottom status bar — quiet Muxy-style strip: path · project · branch left,
+/// context mode right. 28pt, no loud chrome.
 struct StatusBarView: View {
     @Environment(GitChangesStore.self) private var gitStore
     @Environment(RightDockStore.self) private var rightDockStore
@@ -11,29 +11,48 @@ struct StatusBarView: View {
     static let height: CGFloat = AppSpacing.statusBarHeight
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            // 左侧：Git branch + dirty indicator
-            StatusBarBranchLabel(
+        HStack(alignment: .center, spacing: 8) {
+            StatusBarLocationLabel(
+                path: abbreviatedActivePath,
+                projectName: activeProjectName,
                 branch: gitStore.statusSnapshot?.branch,
                 changesCount: totalChangesCount
             )
 
-            Spacer()
+            Spacer(minLength: 8)
 
             #if DEBUG
             MetalStatsView()
             #endif
 
-            // 右侧：根据当前可见区域显示不同信息
             StatusBarContextInfo(
                 visibleArea: visibleArea,
                 selectedFileName: fileExplorerStore.selectedNode?.name
             )
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 1)
+        .padding(.horizontal, 12)
         .frame(height: Self.height)
-        .background(.bar)
+        .background(AppPalette.elevated)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(AppPalette.border)
+                .frame(height: 1)
+        }
+    }
+
+    private var activeProjectName: String? {
+        guard let id = projectStore.activeProjectID else { return nil }
+        return projectStore.projects.first(where: { $0.id == id })?.displayName
+    }
+
+    private var abbreviatedActivePath: String? {
+        guard let url = projectStore.activeProjectURL else {
+            if projectStore.activeFreeTerminalID != nil {
+                return "~"
+            }
+            return nil
+        }
+        return (url.standardizedFileURL.path as NSString).abbreviatingWithTildeInPath
     }
 
     private var visibleArea: StatusBarVisibleArea {
@@ -52,37 +71,64 @@ struct StatusBarView: View {
     }
 }
 
-// MARK: - Branch Label
+// MARK: - Location (left)
 
-private struct StatusBarBranchLabel: View {
+private struct StatusBarLocationLabel: View {
+    let path: String?
+    let projectName: String?
     let branch: String?
     let changesCount: Int
 
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "arrow.triangle.branch")
-                .font(AppFonts.toolbarIcon)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            if let path {
+                Text(path)
+                    .font(AppFonts.statusBar)
+                    .foregroundStyle(AppPalette.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .layoutPriority(-1)
+            }
 
-            Text(branch ?? "—")
-                .font(AppFonts.statusBar)
-                .lineLimit(1)
-                .foregroundStyle(.secondary)
+            if let projectName {
+                bullet
+                Text(projectName)
+                    .font(AppFonts.statusBar.weight(.medium))
+                    .foregroundStyle(AppPalette.textSecondary)
+                    .lineLimit(1)
+            }
 
-            if changesCount > 0 {
-                Text("\(changesCount)")
-                    .font(AppFonts.badge)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(Color.secondary.opacity(0.15))
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
+            if let branch {
+                bullet
+                Image(systemName: "arrow.triangle.branch")
+                    .font(AppFonts.toolbarIcon)
+                    .foregroundStyle(AppPalette.textTertiary)
+                Text(branch)
+                    .font(AppFonts.statusBar)
+                    .foregroundStyle(AppPalette.textSecondary)
+                    .lineLimit(1)
+
+                if changesCount > 0 {
+                    Text("\(changesCount)")
+                        .font(AppFonts.badge)
+                        .foregroundStyle(AppPalette.textSecondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(AppPalette.textTertiary.opacity(0.18))
+                        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                }
             }
         }
     }
+
+    private var bullet: some View {
+        Text("·")
+            .font(AppFonts.statusBar)
+            .foregroundStyle(AppPalette.textTertiary)
+    }
 }
 
-// MARK: - Context Info (右侧)
+// MARK: - Context Info (right)
 
 enum StatusBarVisibleArea {
     case terminal
@@ -95,36 +141,36 @@ private struct StatusBarContextInfo: View {
     let selectedFileName: String?
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             switch visibleArea {
             case .terminal:
                 Image(systemName: "terminal")
                     .font(AppFonts.toolbarIcon)
-                    .foregroundStyle(.tertiary)
                 Text("Terminal")
                     .font(AppFonts.statusBar)
-                    .foregroundStyle(.tertiary)
 
             case .git:
                 Image(systemName: "arrow.triangle.pull")
                     .font(AppFonts.toolbarIcon)
-                    .foregroundStyle(.tertiary)
                 Text("Git")
                     .font(AppFonts.statusBar)
-                    .foregroundStyle(.tertiary)
 
             case .files:
                 if let name = selectedFileName {
                     Image(systemName: "doc")
                         .font(AppFonts.toolbarIcon)
-                        .foregroundStyle(.tertiary)
                     Text(name)
                         .font(AppFonts.statusBar)
-                        .foregroundStyle(.tertiary)
                         .lineLimit(1)
+                } else {
+                    Image(systemName: "folder")
+                        .font(AppFonts.toolbarIcon)
+                    Text("Files")
+                        .font(AppFonts.statusBar)
                 }
             }
         }
+        .foregroundStyle(AppPalette.textTertiary)
     }
 }
 
@@ -144,7 +190,7 @@ private struct MetalStatsView: View {
             Text("Metal \(active)/\(total)")
                 .font(Font.system(.caption, design: .monospaced))
         }
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(AppPalette.textTertiary)
         .help("Active/Total Metal surfaces (ideal: 1 active)")
         .onAppear { refresh() }
         .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in

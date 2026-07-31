@@ -2,49 +2,59 @@ import SwiftUI
 
 /// Tab bar shown above the standalone terminal — mirrors ghostty's
 /// multi-tab UX for the free-terminal namespace. Project terminals don't
-/// use this bar (they use sidebar worktrees and split panes for layout).
+/// use this bar (they use rail worktrees and split panes for layout).
 struct FreeTerminalTabBar: View {
     @Environment(TerminalWorkspaceStore.self) private var workspace
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 2) {
-                ForEach(workspace.visibleTabs) { tab in
-                    FreeTerminalTabButton(
-                        tab: tab,
-                        isActive: workspace.activeTabID == tab.id,
-                        canClose: workspace.visibleTabs.count > 1
-                    )
+        // Keep `+` OUTSIDE the ScrollView. Inside a horizontal ScrollView on
+        // macOS the plus often loses hit-testing (clicks appear dead). The
+        // scroll area only hosts tab pills; + is a fixed trailing control.
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(workspace.visibleTabs) { tab in
+                        FreeTerminalTabButton(
+                            tab: tab,
+                            isActive: workspace.activeTabID == tab.id,
+                            canClose: workspace.visibleTabs.count > 1
+                        )
+                    }
                 }
-
-                // Inline `+` button at the end of the tab list — always
-                // visible because it scrolls with the tabs. (Earlier
-                // attempt put it outside the ScrollView in a flanking
-                // HStack, but ScrollView's greedy horizontal sizing
-                // squeezed the button out of the visible area.)
-                Button {
-                    _ = workspace.newTab()
-                    // newTab itself doesn't fire the host sync callback
-                    // (it's also called from store-internal paths where
-                    // re-entering sync would recurse), so signal explicitly.
-                    workspace.notifyContextChange()
-                } label: {
-                    Image(systemName: "plus")
-                        .font(AppFonts.toolbarIcon)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("New tab (⌘T)")
-                .accessibilityLabel("New tab (⌘T)")
-                .padding(.leading, 4)
+                .padding(.leading, 8)
+                .padding(.trailing, 4)
             }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 4)
+
+            Button(action: addTab) {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppPalette.textSecondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("New tab (⌘T)")
+            .accessibilityLabel("New tab (⌘T)")
+            .padding(.trailing, 6)
         }
-        .frame(height: AppSpacing.headerHeight)
-        .background(Color(nsColor: .underPageBackgroundColor))
+        .frame(height: AppSpacing.editorTabBarHeight)
+        .background(AppPalette.elevated)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(AppPalette.border)
+                .frame(height: 1)
+        }
+    }
+
+    private func addTab() {
+        // Explicit free-terminal namespace when possible — falls back to
+        // activeNamespace inside newTab if nil.
+        if case .freeTerminal(let id) = workspace.activeNamespace {
+            _ = workspace.newTab(for: .freeTerminal(id))
+        } else {
+            _ = workspace.newTab()
+        }
+        workspace.notifyContextChange()
     }
 }
 
@@ -57,8 +67,6 @@ private struct FreeTerminalTabButton: View {
     @State private var hovering = false
 
     private var displayTitle: String {
-        // Prefer the focused pane's OSC-reported title, then any pane in the
-        // tab, else fall back to the tab's stored title ("Tab 1", etc.).
         if let pid = tab.focusedPaneID ?? tab.splitTree.firstPaneID,
            let title = workspace.paneTitles[pid], !title.isEmpty {
             return title
@@ -69,8 +77,8 @@ private struct FreeTerminalTabButton: View {
     var body: some View {
         HStack(spacing: 4) {
             Text(displayTitle)
-                .font(AppFonts.body)
-                .foregroundStyle(isActive ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                .font(AppFonts.secondaryLabel.weight(isActive ? .medium : .regular))
+                .foregroundStyle(isActive ? AppPalette.textPrimary : AppPalette.textSecondary)
                 .lineLimit(1)
 
             if canClose && (hovering || isActive) {
@@ -78,8 +86,10 @@ private struct FreeTerminalTabButton: View {
                     workspace.closeTab(id: tab.id)
                 } label: {
                     Image(systemName: "xmark")
-                        .font(AppFonts.smallIcon)
-                        .foregroundStyle(.secondary)
+                        .font(AppFonts.tinyIcon.weight(.semibold))
+                        .foregroundStyle(AppPalette.textTertiary)
+                        .frame(width: 14, height: 14)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Close tab")
@@ -87,15 +97,22 @@ private struct FreeTerminalTabButton: View {
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 4)
+        .frame(height: AppSpacing.editorTabBarHeight - 8)
         .background(
-            RoundedRectangle(cornerRadius: AppSpacing.cornerRadiusSmall, style: .continuous)
-                .fill(isActive ? AppColors.activeBackground : (hovering ? AppColors.hoverBackground : Color.clear))
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isActive
+                      ? AppPalette.base
+                      : (hovering ? AppPalette.surface : Color.clear))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(isActive ? AppPalette.border : Color.clear, lineWidth: 1)
         )
         .contentShape(Rectangle())
         .onTapGesture {
             workspace.selectTab(id: tab.id)
         }
         .onHover { hovering = $0 }
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 }

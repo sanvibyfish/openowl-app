@@ -177,6 +177,55 @@ struct TerminalNamespaceTests {
         #expect(store.activeProjectID == nil)
     }
 
+    // MARK: - Pane focus routing
+
+    @Test @MainActor func focusPane_recordsAppKitFocusWithoutRequestingItAgain() {
+        let store = TerminalWorkspaceStore()
+        store.ensureInitialTab()
+        let paneID = store.activeFocusedPaneID!
+        var focusRequests: [UUID] = []
+        store.focusPaneHandler = { focusRequests.append($0) }
+
+        store.focusPane(paneID)
+
+        #expect(store.activeFocusedPaneID == paneID)
+        #expect(focusRequests.isEmpty)
+    }
+
+    @Test @MainActor func selectPane_inActiveNamespace_requestsFirstResponderExactlyOnce() {
+        let store = TerminalWorkspaceStore()
+        let namespace: TerminalNamespace = .project("proj-A")
+        let tabID = store.newTab(for: namespace)
+        store.switchNamespace(namespace)
+        let paneID = store.tabs.first(where: { $0.id == tabID })!.splitTree.firstPaneID!
+        var focusRequests: [UUID] = []
+        store.focusPaneHandler = { focusRequests.append($0) }
+
+        store.selectPane(paneID, in: namespace)
+
+        #expect(store.activeFocusedPaneID == paneID)
+        #expect(focusRequests == [paneID])
+    }
+
+    @Test @MainActor func selectPane_inNamespace_switchesBeforeRequestingFocus() {
+        let store = TerminalWorkspaceStore()
+        let sourceNamespace: TerminalNamespace = .project("proj-A")
+        let targetNamespace: TerminalNamespace = .project("proj-B")
+        _ = store.newTab(for: sourceNamespace)
+        let targetTabID = store.newTab(for: targetNamespace)
+        let targetPaneID = store.tabs.first(where: { $0.id == targetTabID })!.splitTree.firstPaneID!
+        store.switchNamespace(sourceNamespace)
+        var focusRequests: [UUID] = []
+        store.focusPaneHandler = { focusRequests.append($0) }
+
+        store.selectPane(targetPaneID, in: targetNamespace)
+
+        #expect(store.activeNamespace == targetNamespace)
+        #expect(store.activeTabID == targetTabID)
+        #expect(store.activeFocusedPaneID == targetPaneID)
+        #expect(focusRequests == [targetPaneID])
+    }
+
     // MARK: - hasTabs(for:) — sidebar inactive grouping
 
     @Test @MainActor func hasTabs_emptyStore_returnsFalse() {

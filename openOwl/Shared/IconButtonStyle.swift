@@ -13,6 +13,10 @@ struct IconButtonStyle: ButtonStyle {
             .symbolVariant(isActive ? .fill : .none)
             .foregroundColor(isActive ? .accentColor : .secondary)
             .frame(width: size.width, height: size.height)
+            // Without this the hit area is just the SF Symbol's drawn glyph —
+            // a 12pt "plus" is two thin strokes, so most clicks inside the
+            // 28×28 frame land on nothing and the button appears dead.
+            .contentShape(Rectangle())
             .brightness(configuration.isPressed ? -0.1 : 0)
     }
 }

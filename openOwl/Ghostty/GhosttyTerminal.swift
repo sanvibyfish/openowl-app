@@ -17,6 +17,9 @@ class TerminalNSView: NSView {
     private var lastSyncedBackingSize: CGSize?
     private var lastSyncedScale: CGFloat = 0
     private var resizeDebounceWork: DispatchWorkItem?
+    /// Temporarily suppress automatic setFrameSize-driven PTY resize while the
+    /// host clips the view during Right Dock animation.
+    var suppressFrameSizeSync = false
     /// Whether the host (TerminalScrollView) considers this surface visible.
     /// Used by viewDidMoveToWindow to avoid briefly un-hiding a paused surface.
     private var hostVisible = true
@@ -281,7 +284,19 @@ class TerminalNSView: NSView {
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
+        guard !suppressFrameSizeSync, !inLiveResize else { return }
         syncSurfaceSize(reason: "setFrameSize")
+    }
+
+    override func viewWillStartLiveResize() {
+        super.viewWillStartLiveResize()
+        resizeDebounceWork?.cancel()
+        resizeDebounceWork = nil
+    }
+
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        syncSurfaceSize(reason: "live-resize-ended", force: true)
     }
 
     /// Synchronize the libghostty surface/PTY size with the current AppKit bounds.
@@ -297,6 +312,7 @@ class TerminalNSView: NSView {
             resizeDebounceWork = nil
             commitSurfaceSize(reason: reason)
         } else {
+            guard !inLiveResize else { return }
             let fb = convertToBacking(bounds.size)
             let candidate = CGSize(width: floor(fb.width), height: floor(fb.height))
             if candidate == lastSyncedBackingSize { return }
@@ -313,6 +329,9 @@ class TerminalNSView: NSView {
     private func commitSurfaceSize(reason: String) {
         guard let surface else { return }
         let paneTag = paneID.uuidString.prefix(8) as CVarArg
+
+        // Expected skips (hidden / zero-size during SwiftUI layout) are silent
+        // unless the resize-diag tag is switched on — AppLogger owns that switch.
         func logSkip(_ detail: String) {
             AppLogger.log("resize-diag", "syncSurfaceSize skipped pane=%@ reason=%@ %@", paneTag, reason, detail)
         }
@@ -335,8 +354,17 @@ class TerminalNSView: NSView {
         ghostty_surface_set_size(surface, UInt32(backingSize.width), UInt32(backingSize.height))
         lastSyncedBackingSize = backingSize
         let after = ghostty_surface_size(surface)
-        AppLogger.log("resize-diag", "syncSurfaceSize pane=%@ reason=%@ pts=%.1fx%.1f px=%.0fx%.0f cols=%d rows=%d window=%@",
-                      paneID.uuidString.prefix(8) as CVarArg,
+
+        // Milestones always log under "resize"; every other frame goes to the
+        // opt-in "resize-diag" tag. A reason keeps the same tag whether or not
+        // the verbose switch is on, so grepping the log by tag stays reliable.
+        let milestoneReasons: Set<String> = [
+            "create", "reattach", "live-resize-ended", "resize-freeze-ended",
+            "visibility-restored", "backing-change"
+        ]
+        AppLogger.log(milestoneReasons.contains(reason) ? "resize" : "resize-diag",
+                      "syncSurfaceSize pane=%@ reason=%@ pts=%.1fx%.1f px=%.0fx%.0f cols=%d rows=%d window=%@",
+                      paneTag,
                       reason,
                       pointSize.width, pointSize.height,
                       backingSize.width, backingSize.height,
@@ -366,6 +394,11 @@ class TerminalNSView: NSView {
             super.keyDown(with: event)
             return
         }
+        processTerminalKeyDown(event)
+    }
+
+    /// Shared key path for normal keyDown and monitor injection.
+    private func processTerminalKeyDown(_ event: NSEvent) {
         guard let surface else {
             interpretKeyEvents([event])
             return
@@ -446,19 +479,22 @@ class TerminalNSView: NSView {
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard event.type == .keyDown, let surface else { return false }
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let flags = event.modifierFlags.intersection([.command, .shift, .control, .option])
 
         // performKeyEquivalent traverses ALL NSViews in the window.
         // Only the first responder should claim terminal shortcuts —
         // this prevents stealing Cmd+V/C from TextFields.
         guard window?.firstResponder === self else { return false }
 
-        // Intercept Escape — NavigationSplitView consumes ESC before keyDown
-        // reaches this view. Use the stricter acceptsTerminalKeyboardInput
-        // guard because ESC directly invokes keyDown, which must only run on
-        // the active, visible pane.
+        // Intercept Escape early — SwiftUI/AppKit chrome can eat ESC before
+        // keyDown. Only the active visible pane should claim it here.
         if event.keyCode == 53, flags.isEmpty || flags == .shift {
             guard acceptsTerminalKeyboardInput else { return false }
+            AppLogger.log(
+                "keyboard-routing",
+                "native escape pane=%@ responder=TerminalNSView",
+                paneID.uuidString.prefix(8) as CVarArg
+            )
             keyDown(with: event)
             return true
         }
@@ -502,10 +538,18 @@ class TerminalNSView: NSView {
         return false
     }
 
+    /// Inject a key from the app-level NSEvent monitor. Unlike normal
+    /// `keyDown`, firstResponder may still be a stale control when this runs —
+    /// claim focus, then process without re-checking firstResponder identity
+    /// (that double-check was the intermittent Escape drop).
     @discardableResult
     func handleMonitoredKeyDown(_ event: NSEvent) -> Bool {
-        guard acceptsTerminalKeyboardInput else { return false }
-        keyDown(with: event)
+        guard surface != nil else { return false }
+        guard isEffectivelyVisible else { return false }
+        if window?.firstResponder !== self {
+            window?.makeFirstResponder(self)
+        }
+        processTerminalKeyDown(event)
         return true
     }
 

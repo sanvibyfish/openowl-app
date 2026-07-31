@@ -7,50 +7,60 @@ struct ContentView: View {
     @Environment(ProjectStore.self) var projectStore
     @Environment(RightDockStore.self) var rightDockStore
 
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    /// Worktree + pane session list next to the icon rail (default on).
+    @AppStorage("openowl.ui.sessionListVisible") private var isSessionListVisible = true
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 180, ideal: 250, max: 500)
-        } detail: {
-            GeometryReader { geo in
-                VStack(spacing: 0) {
-                    HStack(spacing: 0) {
-                        // Terminal — center area. Hidden when the right dock is
-                        // fullscreen but kept mounted (no surface destroy) so its
-                        // shell processes keep running in the background.
-                        terminalContent
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .frame(width: rightDockStore.isFullscreen ? 0 : nil)
-                            .clipped()
+        GeometryReader { geo in
+            let leftChrome = ProjectRail.width
+                + (isSessionListVisible ? ProjectSessionList.width : 0)
+            let hostWidth = max(0, geo.size.width - leftChrome)
 
-                        if rightDockStore.isExpanded {
-                            Divider()
+            HStack(spacing: 0) {
+                // Left: monogram rail + optional session list (worktrees / panes)
+                ProjectRail(isSessionListVisible: $isSessionListVisible)
 
-                            RightDockView(hostWidth: geo.size.width)
-                                .frame(
-                                    width: rightDockStore.effectiveWidth(
-                                        hostWidth: geo.size.width,
-                                        railWidth: RightDockRail.width
-                                    )
-                                )
-                                .frame(maxHeight: .infinity)
-                        }
+                if isSessionListVisible {
+                    ProjectSessionList()
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                }
 
-                        Divider()
+                // Center + right dock
+                HStack(spacing: 0) {
+                    terminalContent
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(width: rightDockStore.isFullscreen ? 0 : nil)
+                        .clipped()
 
+                    softVerticalDivider
+                        .frame(width: rightDockStore.isExpanded ? 1 : 0)
+                        .opacity(rightDockStore.isExpanded ? 1 : 0)
+
+                    RightDockView(hostWidth: hostWidth)
+                        .frame(
+                            width: rightDockStore.isExpanded
+                                ? rightDockStore.effectiveWidth(hostWidth: hostWidth)
+                                : 0
+                        )
+                        .frame(maxHeight: .infinity)
+                        .opacity(rightDockStore.isExpanded ? 1 : 0)
+                        .disabled(!rightDockStore.isExpanded)
+                        .allowsHitTesting(rightDockStore.isExpanded)
+                        .accessibilityHidden(!rightDockStore.isExpanded)
+                        .clipped()
+
+                    if !rightDockStore.isExpanded {
                         RightDockRail()
                     }
-
-                    Divider()
-
-                    StatusBarView()
                 }
-                .background(AppPalette.base)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .animation(.easeOut(duration: 0.15), value: isSessionListVisible)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                StatusBarView()
+            }
+            .background(AppPalette.base)
         }
-        .navigationSplitViewStyle(.balanced)
         .navigationTitle("")
         .background {
             Button("") { fileExplorerStore.presentQuickOpen(projectURL: projectStore.activeProjectURL) }
@@ -60,7 +70,6 @@ struct ContentView: View {
         .overlay {
             if fileExplorerStore.isQuickOpenPresented {
                 ZStack(alignment: .top) {
-                    // Click outside to dismiss
                     Color.black.opacity(0.001)
                         .onTapGesture { fileExplorerStore.dismissQuickOpen() }
 
@@ -79,14 +88,21 @@ struct ContentView: View {
             resignFirstResponderForTabSwitch()
         }
         .onChange(of: rightDockStore.isExpanded) { _, newValue in
-            AppLogger.log("resize-diag", "=== RightDock.isExpanded -> %@ activeTab=%@ ===",
+            AppLogger.log("resize", "RightDock.isExpanded -> %@ activeTab=%@",
                           newValue ? "TRUE" : "FALSE", rightDockStore.activeTab.rawValue)
             resignFirstResponderForTabSwitch()
         }
         .onChange(of: rightDockStore.isFullscreen) { _, newValue in
-            AppLogger.log("resize-diag", "=== RightDock.isFullscreen -> %@ activeTab=%@ ===",
+            AppLogger.log("resize", "RightDock.isFullscreen -> %@ activeTab=%@",
                           newValue ? "TRUE" : "FALSE", rightDockStore.activeTab.rawValue)
         }
+    }
+
+    private var softVerticalDivider: some View {
+        Rectangle()
+            .fill(AppPalette.border)
+            .frame(width: 1)
+            .frame(maxHeight: .infinity)
     }
 
     @ViewBuilder

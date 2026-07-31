@@ -768,7 +768,10 @@ final class TerminalWorkspaceStore {
         }
     }
 
-    /// Called from TerminalNSView focus changes.
+    /// Records a focus change reported by TerminalNSView.
+    ///
+    /// This must not request first responder again: TerminalNSView calls this
+    /// from becomeFirstResponder(), so requesting focus here creates a loop.
     func focusPane(_ paneID: UUID) {
         clearBell(paneID: paneID)
 
@@ -781,9 +784,15 @@ final class TerminalWorkspaceStore {
 
             activeTabID = targetTabID
             tabs[index].focusedPaneID = paneID
-
             return
         }
+    }
+
+    /// Selects a pane from the sidebar, switching its namespace before focus is handed off.
+    func selectPane(_ paneID: UUID, in namespace: TerminalNamespace) {
+        switchNamespace(namespace)
+        focusPane(paneID)
+        requestFocus(for: paneID)
     }
 
     // MARK: - Drag

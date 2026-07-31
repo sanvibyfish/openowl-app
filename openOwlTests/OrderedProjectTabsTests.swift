@@ -9,7 +9,7 @@ struct OrderedProjectTabsTests {
 
     @MainActor
     private func storeWithProjects(_ items: [ProjectItem]) -> ProjectStore {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         // Inject test projects directly (bypasses persistence)
         for item in items {
             store.addOrActivateProject(item.url)
@@ -20,7 +20,7 @@ struct OrderedProjectTabsTests {
     // MARK: - Basic ordering
 
     @Test @MainActor func emptyStore_returnsEmpty() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         // Fresh store might have seeded project; test the computed property logic directly
         let rootCount = store.rootProjects.count
         let tabCount = store.orderedProjectTabs.count
@@ -29,7 +29,7 @@ struct OrderedProjectTabsTests {
     }
 
     @Test @MainActor func singleRoot_noWorktrees() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         let root = ProjectItem(path: "/tmp/test-project-alpha", name: "Alpha")
         store.addOrActivateProject(root.url)
 
@@ -41,7 +41,7 @@ struct OrderedProjectTabsTests {
     }
 
     @Test @MainActor func rootWithWorktrees_worktreesFollowRoot() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         let rootURL = URL(fileURLWithPath: "/tmp/test-ordered-root", isDirectory: true)
         store.addOrActivateProject(rootURL)
 
@@ -74,7 +74,7 @@ struct OrderedProjectTabsTests {
     }
 
     @Test @MainActor func multipleRoots_worktreesGroupedUnderRespectiveRoot() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
 
         let urlA = URL(fileURLWithPath: "/tmp/test-multi-root-aaa", isDirectory: true)
         let urlB = URL(fileURLWithPath: "/tmp/test-multi-root-bbb", isDirectory: true)
@@ -109,7 +109,7 @@ struct OrderedProjectTabsTests {
     }
 
     @Test @MainActor func orderedProjectTabs_excludesNoOrphanWorktrees() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         let tabs = store.orderedProjectTabs
 
         // Every worktree in the result should have a root also in the result
@@ -122,7 +122,7 @@ struct OrderedProjectTabsTests {
     // MARK: - Tab count
 
     @Test @MainActor func tabCount_equalsRootsPlusWorktrees() {
-        let store = ProjectStore()
+        let store = makeIsolatedProjectStore()
         let url = URL(fileURLWithPath: "/tmp/test-count-root", isDirectory: true)
         store.addOrActivateProject(url)
 
@@ -137,5 +137,161 @@ struct OrderedProjectTabsTests {
         let tabs = store.orderedProjectTabs
         let thisRootTabs = tabs.filter { $0.id == root.id || $0.worktreeOf == root.id }
         #expect(thisRootTabs.count == 3)  // 1 root + 2 worktrees
+    }
+
+    // MARK: - Worktree archive progress
+
+    @Test @MainActor func beginArchivingWorktree_rejectsDuplicateWorktree() {
+        let store = makeIsolatedProjectStore()
+
+        #expect(store.beginArchivingWorktree(id: "worktree-a"))
+        #expect(!store.beginArchivingWorktree(id: "worktree-a"))
+        #expect(store.isArchivingWorktree(id: "worktree-a"))
+    }
+
+    @Test @MainActor func beginArchivingWorktree_allowsDifferentWorktrees() {
+        let store = makeIsolatedProjectStore()
+
+        #expect(store.beginArchivingWorktree(id: "worktree-a"))
+        #expect(store.beginArchivingWorktree(id: "worktree-b"))
+        #expect(store.isArchivingWorktree(id: "worktree-a"))
+        #expect(store.isArchivingWorktree(id: "worktree-b"))
+    }
+
+    @Test @MainActor func endArchivingWorktree_allowsRetry() {
+        let store = makeIsolatedProjectStore()
+
+        #expect(store.beginArchivingWorktree(id: "worktree-a"))
+        store.endArchivingWorktree(id: "worktree-a")
+
+        #expect(!store.isArchivingWorktree(id: "worktree-a"))
+        #expect(store.beginArchivingWorktree(id: "worktree-a"))
+    }
+
+    @Test @MainActor func archivingWorktree_cannotBecomeActiveUntilArchiveEnds() {
+        let store = makeIsolatedProjectStore()
+        let rootURL = URL(
+            fileURLWithPath: "/tmp/test-archive-activation-root-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        store.addOrActivateProject(rootURL)
+        let root = store.projects.first { $0.path == rootURL.standardizedFileURL.path }!
+        let worktree = store.addWorktreeProject(
+            parentID: root.id,
+            path: "/tmp/test-archive-activation-wt-\(UUID().uuidString)",
+            branch: "feature/archive"
+        )
+
+        #expect(store.beginArchivingWorktree(id: worktree.id))
+        #expect(!store.activateProject(id: worktree.id))
+        #expect(store.activeProjectID == root.id)
+
+        store.endArchivingWorktree(id: worktree.id)
+        #expect(store.activateProject(id: worktree.id))
+        #expect(store.activeProjectID == worktree.id)
+    }
+
+    @Test @MainActor func removeActiveWorktree_vetoLeavesSelectionAndProjectsUnchanged() {
+        let store = makeIsolatedProjectStore()
+        let rootURL = URL(
+            fileURLWithPath: "/tmp/test-remove-active-root-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        store.addOrActivateProject(rootURL)
+        let root = store.projects.first { $0.path == rootURL.standardizedFileURL.path }!
+        let worktree = store.addWorktreeProject(
+            parentID: root.id,
+            path: "/tmp/test-remove-active-wt-\(UUID().uuidString)",
+            branch: "feature/remove-veto"
+        )
+        #expect(store.activateProject(id: worktree.id))
+        let projectsBefore = store.projects
+        let approverID = UUID()
+        store.registerActiveContextChangeApprover(id: approverID) { false }
+
+        store.removeWorktreeProject(id: worktree.id)
+
+        #expect(store.projects == projectsBefore)
+        #expect(store.activeProjectID == worktree.id)
+    }
+
+    @Test @MainActor func newlyRegisteredWorktree_remainsRegisteredWhenActivationIsVetoed() {
+        let store = makeIsolatedProjectStore()
+        let rootURL = URL(
+            fileURLWithPath: "/tmp/test-create-final-veto-root-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        store.addOrActivateProject(rootURL)
+        let root = store.projects.first { $0.path == rootURL.standardizedFileURL.path }!
+        let worktree = store.addWorktreeProject(
+            parentID: root.id,
+            path: "/tmp/test-create-final-veto-wt-\(UUID().uuidString)",
+            branch: "feature/final-veto"
+        )
+        let approverID = UUID()
+        store.registerActiveContextChangeApprover(id: approverID) { false }
+
+        #expect(!store.activateProject(id: worktree.id))
+        #expect(store.projects.contains(where: { $0.id == worktree.id }))
+        #expect(store.activeProjectID == root.id)
+    }
+
+    // MARK: - Project Rail selection restoration
+
+    @Test @MainActor func activateLastProject_restoresPreviouslySelectedWorktree() {
+        let store = makeIsolatedProjectStore()
+        let firstRootURL = URL(
+            fileURLWithPath: "/tmp/test-restore-root-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let secondRootURL = URL(
+            fileURLWithPath: "/tmp/test-restore-other-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        store.addOrActivateProject(firstRootURL)
+        store.addOrActivateProject(secondRootURL)
+
+        let firstRoot = store.projects.first { $0.path == firstRootURL.standardizedFileURL.path }!
+        let secondRoot = store.projects.first { $0.path == secondRootURL.standardizedFileURL.path }!
+        let worktree = store.addWorktreeProject(
+            parentID: firstRoot.id,
+            path: "/tmp/test-restore-wt-\(UUID().uuidString)",
+            branch: "feature/restore"
+        )
+
+        store.activateProject(id: worktree.id)
+        store.activateProject(id: secondRoot.id)
+        store.activateLastProject(inRoot: firstRoot.id)
+
+        #expect(store.activeProjectID == worktree.id)
+    }
+
+    @Test @MainActor func activateLastProject_keepsExplicitMainSelection() {
+        let store = makeIsolatedProjectStore()
+        let firstRootURL = URL(
+            fileURLWithPath: "/tmp/test-restore-main-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let secondRootURL = URL(
+            fileURLWithPath: "/tmp/test-restore-main-other-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        store.addOrActivateProject(firstRootURL)
+        store.addOrActivateProject(secondRootURL)
+
+        let firstRoot = store.projects.first { $0.path == firstRootURL.standardizedFileURL.path }!
+        let secondRoot = store.projects.first { $0.path == secondRootURL.standardizedFileURL.path }!
+        let worktree = store.addWorktreeProject(
+            parentID: firstRoot.id,
+            path: "/tmp/test-restore-main-wt-\(UUID().uuidString)",
+            branch: "feature/main"
+        )
+
+        store.activateProject(id: worktree.id)
+        store.activateProject(id: firstRoot.id)
+        store.activateProject(id: secondRoot.id)
+        store.activateLastProject(inRoot: firstRoot.id)
+
+        #expect(store.activeProjectID == firstRoot.id)
     }
 }

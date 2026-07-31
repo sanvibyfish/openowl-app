@@ -10,7 +10,6 @@ enum AppConstants {
     static let ghosttyResourcesDirEnv = "GHOSTTY_RESOURCES_DIR"
 
     // Layout
-    static let sidebarWidth: CGFloat = 250
     static let contentMinWidth: CGFloat = 400
     static let windowMinWidth: CGFloat = 800
     static let windowMinHeight: CGFloat = 500
@@ -31,9 +30,9 @@ enum AppPalette {
     static let textSecondary: Color = .secondary
     static let textTertiary  = Color(nsColor: .tertiaryLabelColor)
 
-    // 边框
-    static let border      = Color(nsColor: .separatorColor)
-    static let borderHover = Color(nsColor: .quaternaryLabelColor)
+    // 边框 — hairline-soft so chrome recedes (Muxy-style); hover still a bit stronger
+    static let border      = Color.primary.opacity(0.08)
+    static let borderHover = Color.primary.opacity(0.14)
 
     // 强调色（respects user's system accent color）
     static let accent: Color = .accentColor
@@ -118,7 +117,10 @@ enum AppSpacing {
     static let cornerRadiusSmall: CGFloat = 4
     static let itemGap: CGFloat = 6
     static let panelPadding: CGFloat = 12
-    static let headerHeight: CGFloat = 32
+    /// Matches `editorTabBarHeight` so a panel's tool header and the editor /
+    /// diff tab bar beside it sit on the same baseline — a 32/28 mismatch put
+    /// a visible step in the divider between the two columns.
+    static let headerHeight: CGFloat = 28
     static let statusBarHeight: CGFloat = 28
     static let editorTabBarHeight: CGFloat = 28
     static let listRowHeight: CGFloat = 26

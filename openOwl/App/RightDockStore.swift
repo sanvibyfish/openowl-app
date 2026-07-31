@@ -31,6 +31,7 @@ final class RightDockStore {
     /// Width used when the active tab's detail panel is hidden — narrow enough
     /// to comfortably fit just the tree/changes list without dead space.
     static let listOnlyWidth: CGFloat = 260
+    static let maxWidthFraction: CGFloat = 0.5
 
     private static let keyExpanded = "openowl.rightDock.isExpanded"
     private static let keyActiveTab = "openowl.rightDock.activeTab"
@@ -42,7 +43,10 @@ final class RightDockStore {
     var isExpanded: Bool {
         didSet {
             UserDefaults.standard.set(isExpanded, forKey: Self.keyExpanded)
-            if !isExpanded { isFullscreen = false }
+            if !isExpanded {
+                endInteractiveResize()
+                isFullscreen = false
+            }
             startDockResizeAnimation()
         }
     }
@@ -57,14 +61,26 @@ final class RightDockStore {
 
     /// Fullscreen is session-scoped — not persisted across launches.
     var isFullscreen: Bool = false {
-        didSet { startDockResizeAnimation() }
+        didSet {
+            if isFullscreen { endInteractiveResize() }
+            startDockResizeAnimation()
+        }
     }
 
     /// True only during the ~400ms window after the dock starts expanding/collapsing.
-    /// Used by TerminalPanel to freeze terminal width during the animation to prevent
+    /// Used by TerminalPanel to freeze terminal resize during the animation to prevent
     /// destructive PTY reflow, then auto-releases so the terminal can resize normally.
     private(set) var isAnimatingDockResize: Bool = false
     private var dockResizeTimer: DispatchWorkItem?
+
+    /// True while the user is dragging the dock resize handle. The terminal
+    /// should keep rendering clipped to its host, but the PTY size must not
+    /// follow every intermediate drag width.
+    private(set) var isInteractingWithWidthResize: Bool = false
+
+    var shouldFreezeTerminalResize: Bool {
+        isAnimatingDockResize || isInteractingWithWidthResize
+    }
 
     /// File explorer: false hides the editor pane, leaving only the tree.
     var filesShowsEditor: Bool {
@@ -113,6 +129,14 @@ final class RightDockStore {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 
+    func beginInteractiveResize() {
+        isInteractingWithWidthResize = true
+    }
+
+    func endInteractiveResize() {
+        isInteractingWithWidthResize = false
+    }
+
     /// True if the active tab's detail panel (editor / diff) is currently visible.
     var showsDetailForActiveTab: Bool {
         switch activeTab {
@@ -123,11 +147,15 @@ final class RightDockStore {
 
     /// Width the dock panel actually occupies, given fullscreen state and
     /// whether the active tab is showing its detail pane. The host passes its
-    /// own width so fullscreen can stretch to fill the space minus the rail.
-    func effectiveWidth(hostWidth: CGFloat, railWidth: CGFloat) -> CGFloat {
-        if isFullscreen { return max(0, hostWidth - railWidth) }
-        if !showsDetailForActiveTab { return Self.listOnlyWidth }
-        return width
+    /// own width so fullscreen can stretch to fill it.
+    func effectiveWidth(hostWidth: CGFloat) -> CGFloat {
+        if isFullscreen { return max(0, hostWidth) }
+        let candidate = showsDetailForActiveTab ? width : Self.listOnlyWidth
+        return min(candidate, Self.maxNormalWidth(hostWidth: hostWidth))
+    }
+
+    static func maxNormalWidth(hostWidth: CGFloat) -> CGFloat {
+        max(0, hostWidth * maxWidthFraction)
     }
 
     /// Toolbar button behavior:

@@ -76,6 +76,24 @@ runtime.close_surface_cb = { userdata in ... }     // 关闭请求
 
 openOwl 当前实现已按以上流程修复（参考 `openOwl/Ghostty/GhosttyTerminal.swift` 与 `openOwl/Ghostty/GhosttyInput.swift`）。
 
+**ESC fallback 路由**
+
+Right Dock 切换或 SwiftUI 重建后，first responder 可能暂时落在 `NSHostingView` 或普通容器视图，而不是可见的 `TerminalNSView`。此时 AppDelegate 的 local monitor 可以把 ESC 转发到当前 workspace 的 focused pane，但必须遵循 responder 分类：
+
+- 当前可见 Terminal 已是 first responder 时，local monitor 直接调用 Terminal 的 ESC key-equivalent 入口，避免事件随后被 `NavigationSplitView` 抢先消费
+- 当前可见且仍挂在 key window 上的 `NSTextField`、field editor / `NSTextView`、`NSOutlineView` / `NSTableView` / `NSCollectionView` 后代属于真实输入区域，阻止 terminal fallback
+- 普通命令按钮、`NSHostingView`、非交互容器后代、window、空 first responder，以及已经隐藏或从 key window 拆卸的旧 responder 允许 terminal fallback
+- 转发前仍需确认目标 pane 可见且可接受终端键盘输入，避免隐藏或 stale terminal 收到按键
+
+该策略由 `TerminalFallbackResponderPolicy` 集中实现，并由 `TerminalKeyboardRoutingTests` 覆盖。
+ESC/Ctrl+C 的 fallback 结果以及 terminal 原生 ESC 路径会写入 `openowl.log` 的 `keyboard-routing` 标签，便于定位间歇性焦点漂移。
+
+**Kitty keyboard 协议状态恢复**
+
+TUI 可通过 Kitty keyboard protocol 启用增强按键编码。若前台程序异常退出而没有 pop 模式，遗留的 flag stack 会让 shell 后续按键显示为 `9;1:3u` 一类 CSI-u 文本。
+
+Ghostty shell integration 收到明确的 `prompt_start` 时，会重置当前 active screen 的整个 Kitty keyboard flag stack。该边界表示 shell 已重新开始绘制 prompt；清理不发生在 `end_command`、focus 切换或 pane reattach 时，避免仍在输出或仍活跃的 TUI 被提前关闭增强键盘模式。此操作不会清屏、清除 scrollback 或重启 shell。
+
 ### 8. 剪贴板 (Copy/Paste)
 
 终端的复制粘贴需要处理 macOS 事件路由和 ghostty 内部状态的交互：
@@ -220,3 +238,4 @@ scripts/
 - 需要 Zig 编译器来构建（不需要 Zig 开发经验，只是构建工具）
 - cmux 使用 Ghostty fork (manaflow-ai/ghostty)，可能需要我们也 fork 一份
 - 性能敏感路径不要加额外 allocation（cmux 特别强调 typing latency）
+- Kitty keyboard 状态只能在 shell integration 的明确 `prompt_start` 边界恢复；不要在 focus、隐藏/显示或 reattach 生命周期中重置

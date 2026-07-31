@@ -28,7 +28,8 @@ NSOutlineView 驱动的文件树 + 模糊搜索 Quick Open + 文件预览 + Git 
 ### 编辑器 Tab 恢复
 1. 每个项目独立记录已打开文件 tab 路径与当前 active tab
 2. App 重启或切回项目时按磁盘当前内容重新加载文件
-3. 不持久化未保存的编辑缓冲区；切项目/视图卸载前仍沿用现有 dirty tab auto-save
+3. 不持久化未保存的编辑缓冲区；项目/worktree/free terminal 上下文变更前同步执行 dirty tab auto-save
+4. Right Dock 折叠时 `FileExplorerView` 仍常驻，当前 tabs、dirty buffer 与 editor session 不会因折叠销毁
 
 ## 3. 技术实现
 
@@ -82,7 +83,27 @@ classifyGitState: GitFileChange → FileGitState
 - 存储位置：`UserDefaults` key `openowl.fileExplorer.editorSessions.v1`
 - 命名空间：项目根目录标准化绝对路径
 - 内容：最多 10 个打开文件路径 + active file path
-- 恢复：过滤不存在路径、目录、超过图片解码上限的图片；普通大文件按 large-file mode 恢复
+- 恢复：过滤不存在路径、目录、无法取得 size 的文件，以及不允许自动读取的文件。普通文本 `>= 50 MB` 不自动 restore/reload；图片 `> 50 MB` 不读取（恰好 50 MB 仍允许）
+- `fileSize(for:)` 与磁盘签名中的 size 缺失时返回 `nil`，不再以 `0` 绕过大文件与图片上限
+- 已打开 tab 记录磁盘签名（mtime + size + inode/fileIdentifier）；重复打开或切回 tab 时，非 dirty tab 会按磁盘当前内容刷新，dirty tab 不覆盖用户未保存编辑
+- **所有读取失败走同一个收尾** `failFileRead(_:closingTab:reason:message:)`。open / restore / reload × 图片 / 文本共 8 条失败路径此前各写各的，已漂移出三种契约（一种报错、一种静默关 tab、一种让 spinner 永转）。统一后的规则：
+  - open（`closingTab: true, persistRemoval: true`）：失败 tab 从内存和已保存 session 一并移除
+  - restore（`closingTab: true, persistRemoval: false`）：失败 tab 只从本次内存恢复结果移除，保留已保存 session，供下次启动/切回项目重试
+  - reload（`closingTab: false`）：tab 已有可用内容，只停止假装刷新成功
+  - 失败 URL 持有 pending activation 时同时结束 `isEditorLoading`，避免现有编辑器被 overlay 持续遮挡
+  - **所有读取失败都不推进 `tabDiskSignatures`** —— 推进等于标记「已与磁盘同步」，会让 `reloadOpenTabFromDiskIfNeeded` 永久跳过该 tab，一次瞬时解码失败会让文件到重启前都是陈旧的
+- **打开失败不落地空缓冲区**：权限被拒、文件在 stat 后被删、内容非 UTF-8 都会关闭该 tab 并报错。若代之以空字符串，磁盘签名校验仍会通过（磁盘没变），用户会看到一个可编辑的空文档，首次 ⌘S 就把原文件截断
+- **上下文变更先否决、后执行**：`ProjectStore` 在项目/worktree/free terminal 切换或删除的任何副作用前同步调用 editor preflight；auto-save 失败则整个 action 不发生，不会先切换 `activeProjectID` 或 terminal namespace 再恢复旧状态。`activeKind` 监听覆盖 free terminal A → B
+- **异步 worktree 操作分阶段审批**：创建 worktree 在首个 Git 副作用前审批；Git 成功后先把新 worktree 登记为 inactive，实际激活时再次审批。归档 active worktree 则在任何 `await` / Git 副作用前审批并切到 parent，归档 in-flight 期间禁止重新激活
+- **三个保存出口共享签名冲突否决**：⌘S、关闭 dirty tab、上下文变更前 save-all 都调用 `saveTab`；磁盘签名与打开时不一致或无法取得签名时拒绝覆盖，保留 dirty buffer
+- **关闭 tab 时保存失败则不关闭**：dirty tab 的 buffer 是用户编辑的唯一副本，写盘失败或 storage 已被驱逐时弹窗并保留 tab。关闭 active tab A 后自动选择相邻 tab B，并通过正常 `switchToTab` / reload 流程核验 B 的磁盘内容
+- **错误横幅在两种布局下都渲染**：`errorBanner` 同时挂在 tree panel 与 editor-only panel。此前它只在 tree panel 内，而 editor-only 恰是长时间编辑、最可能触发保存失败的模式，错误对用户完全不可见
+- **未保存名称按 editor/window 隔离聚合**：每个 `FileExplorerView` 以自己的 token 发布 dirty tab 名称；view disappear 只移除该 token，不会清空其他窗口的数据。`AppDelegate` 读取 flattened、sorted 的计算结果，并与终端确认合并成一个退出提示；dock 折叠不会触发 view disappear
+- 磁盘 reload 提交的是**新的** `NSTextStorage`，不改写编辑器持有的那个：直接 `replaceCharacters` 会绕过 `TextView.replaceCharacters`，让 `CEUndoManager` 保留指向旧内容的 range，后续 undo 会重放越界 range 抛出无法 catch 的 `NSRangeException`
+- 编辑器的 SwiftUI identity 是 `ObjectIdentifier(storage)`——跟随 **storage 对象是否被替换**，而不是磁盘状态。**不要改回磁盘签名**：`write(to:atomically:true)` 会替换 inode，所以每次 ⌘S 签名都会变，编辑器会被重建、`setTextStorage` 随之 `clearStack()` 清空撤销历史（见测试 `fileEditorDiskSignature_changesForOwnAtomicSaveOfSameLengthContent`）。reload 换对象 → 重建（光标夹取后恢复）；save 不换对象 → 编辑器原地存活
+- 每个 URL 的异步读取使用独立 request identity，并携带 project session generation 与读取前磁盘签名；提交结果前再次核验 request、session 与磁盘签名，过期读取不会覆盖较新内容
+- 打开/恢复/reload 的 pending activation 与读取身份分离；一个文件的 reload 完成不会清除另一个文件的待激活状态
+- 只有 reload（storage 对象被替换）才重建编辑器视图，光标位置按新 buffer 长度夹取后恢复；scroll 与 focus 不跨 reload 保留 —— 这是不触发 undo 越界崩溃的代价。保存不重建，编辑器交互状态完整保留
 - 日志：`[file-editor-state]` 记录 `persist` / `restore` / `restore-skip` / `clear`
 
 ## 4. 注意事项
@@ -91,7 +112,7 @@ classifyGitState: GitFileChange → FileGitState
 - 文件预览限制 160KB，检测二进制文件（null byte 检测）
 - 剪切操作通过 UserDefaults flag 标记，粘贴时判断是复制还是移动
 - 目录树变更通过 FileWatcher 自动刷新
-- Editor tab session 只保存路径和 active tab，不保存文件内容本身
+- Editor tab session 只保存路径和 active tab，不持久化文件内容本身；内存中的 tab 内容通过磁盘签名判断是否需要刷新
 
 ## 5. 相关需求
 
@@ -101,6 +122,13 @@ classifyGitState: GitFileChange → FileGitState
 
 | 日期 | 说明 |
 |------|------|
+| 2026-07-31 | 上下文切换/删除改为副作用前同步 editor preflight；补齐 dock 折叠常驻、三保存出口签名冲突否决、tab 关闭后正常切换/reload、自动读取上限、open/restore 失败持久化差异与 unsaved names 生命周期 |
+| 2026-07-31 | `fileSize(for:)` 改返回 `Int?`——`?? 0` 会同时废掉 large-mode、50MB 确认框和图片上限三道保护；未知大小改为按大文件保守处理 |
+| 2026-07-31 | 8 条读取失败路径统一到 `failFileRead`（此前三种契约互不一致）；关 tab 保存失败不再销毁 buffer；错误横幅在 editor-only 模式也渲染；⌘Q 增加未保存守卫；`saveAllDirtyTabs` 元组改具名 `SaveFailure` |
+| 2026-07-31 | 修 `6c52eda` 回归：编辑器 identity 从磁盘签名改为 `ObjectIdentifier(storage)`——原子保存会换 inode，旧写法导致每次 ⌘S 重建编辑器并清空撤销栈；补测试固化该事实 |
+| 2026-07-31 | 打开失败不再折叠成空缓冲区（避免 ⌘S 截断原文件）；切项目保存失败时保留脏标记与 tab 并弹窗；磁盘 reload 改为提交新 `NSTextStorage` + 签名折进编辑器 identity，修复 undo 越界崩溃并保留光标 |
+| 2026-07-30 | 编辑器异步读取增加 request/session/磁盘签名提交门禁，隔离 pending activation，并以原地刷新保留编辑器交互状态 |
+| 2026-06-25 | 已打开 editor tab 增加磁盘签名刷新，修复外部修改后内容不更新 |
 | 2026-06-05 | 新增按项目 editor tab session 持久化与 file-editor-state 日志 |
 | 2026-05-07 | 全量扫描新增嵌套 repo 与依赖/构建目录懒加载边界，避免 workspace 级目录占用 GB 级内存 |
 | 2026-03-16 | 创建文档 |

@@ -8,6 +8,7 @@
 - UI review 后续：DeploymentStore 拆分（P3，分离健康检查/日志/进程管理）
 - Git 和 File 模块化拆分（待下个 session 开始，预估 3-4 天）
 - [ ] .dic 单击 1GB+ 内存暴涨根因定位（已加 DIAG-MEM 诊断日志，待用户实测回贴）
+- [x] 2026-07-28 UI：左侧宽项目树 → Muxy 风格 `ProjectRail`（48pt）；`ContentView` 去掉 NavigationSplitView
 
 ## Release & Distribution
 
@@ -107,6 +108,7 @@
 - [x] TerminalSearchOverlay 位置修复 — 从 topTrailing overlay 移入 pane content 内部，修复 padding（horizontal 12pt, vertical 4pt）和宽度对齐
 - [x] 搜索框 Return/Shift+Return/Esc 快捷键 — AppDelegate handleLocalKeyDown 在 command guard 前处理搜索态快捷键
 - [x] FileExplorerView defer 修复 — openFileInTab 改用 defer 延迟，避免 view update 期间改状态
+- [x] 文件编辑器刷新/遮挡修复 — editor tab 按磁盘签名刷新、dirty tab 不覆盖、Right Dock resize 暂停 PTY resize 但裁剪 Metal view，terminal no-op layout 日志降噪
 - [x] 搜索框全面修复 — overlay 移到最外层避免 drop delegate 拦截点击；AppDelegate Return 拦截加 terminalHasFocus 判断修复 IME Enter；TerminalSearchOverlay 加 isFocused 参数失焦自动关闭
 - [x] 搜索框 Enter 阻挡修复 — .onKeyPress(.return) 替换为 .onSubmit（修复 @FocusState 与 AppKit firstResponder 失同步），删除 SwiftUI 层冗余 .contentShape+.onDrop 文件拖拽处理
 - [x] 搜索匹配计数修复 — ghostty selected 0-based → 显示 1-based（selected + 1）

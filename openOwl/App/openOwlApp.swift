@@ -42,6 +42,7 @@ struct openOwlApp: App {
                     appDelegate.ghosttyManager = ghosttyManager
                     appDelegate.projectStore = projectStore
                     appDelegate.rightDockStore = rightDockStore
+                    appDelegate.fileExplorerStore = fileExplorerStore
                     workspaceStore.destroyPaneHandler = { [weak ghosttyManager] paneID in
                         ghosttyManager?.destroyPane(paneID)
                     }
