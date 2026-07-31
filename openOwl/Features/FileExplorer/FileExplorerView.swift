@@ -262,6 +262,7 @@ struct FileExplorerView: View {
     @State private var previewImage: NSImage?
     @State private var isEditorLoading = false
     @State private var pendingActivationURL: URL?
+    @State private var isRollingBackProjectSwitch = false
 
     // Dirty tracking coordinator (shared across tab switches)
     @State private var editTracker = EditTracker()
@@ -318,17 +319,28 @@ struct FileExplorerView: View {
             setupEditTracker()
             restoreEditorSession(for: projectStore.activeProjectURL, reason: "appear")
         }
-        .onChange(of: projectStore.activeProjectID) { _, _ in
+        .onChange(of: projectStore.activeProjectID) { oldProjectID, _ in
+            if isRollingBackProjectSwitch {
+                isRollingBackProjectSwitch = false
+                store.setProject(projectStore.activeProjectURL)
+                return
+            }
+
             let saveFailures = saveAllDirtyTabs()
             flushEditorSession(reason: "project-switch-out")
-            store.setProject(projectStore.activeProjectURL)
             // Unsaved work outranks a consistent editor: `clearEditorTabs`
             // releases every storage, so running it after a failed save is what
             // turned "could not write" into "edits gone".
             guard saveFailures.isEmpty else {
+                if let oldProjectID {
+                    isRollingBackProjectSwitch = true
+                    projectStore.activateProject(id: oldProjectID)
+                }
+                store.setProject(projectStore.activeProjectURL)
                 presentSaveFailureAlert(saveFailures)
                 return
             }
+            store.setProject(projectStore.activeProjectURL)
             clearEditorTabs(reason: "project-switch", persist: false)
             restoreEditorSession(for: projectStore.activeProjectURL, reason: "project-switch-in")
         }
@@ -1625,6 +1637,7 @@ struct FileExplorerView: View {
     private func removeTab(_ url: URL, reason: String) {
         guard let index = openTabs.firstIndex(where: { $0.url == url }) else { return }
         let wasActive = url == activeTabURL
+        let ownedPendingActivation = pendingActivationURL == url
 
         openTabs.remove(at: index)
         tabStorages.removeValue(forKey: url)
@@ -1635,6 +1648,7 @@ struct FileExplorerView: View {
         largeModeTabs.remove(url)
         clearHeavyProgress(for: url)
         if pendingActivationURL == url { pendingActivationURL = nil }
+        if ownedPendingActivation { isEditorLoading = false }
 
         if wasActive {
             if openTabs.isEmpty {

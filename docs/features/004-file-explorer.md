@@ -85,11 +85,11 @@ classifyGitState: GitFileChange → FileGitState
 - 恢复：过滤不存在路径、目录、超过图片解码上限的图片；普通大文件按 large-file mode 恢复
 - 已打开 tab 记录磁盘签名（mtime + size + inode/fileIdentifier）；重复打开或切回 tab 时，非 dirty tab 会按磁盘当前内容刷新，dirty tab 不覆盖用户未保存编辑
 - **所有读取失败走同一个收尾** `failFileRead(_:closingTab:reason:message:)`。open / restore / reload × 图片 / 文本共 8 条失败路径此前各写各的，已漂移出三种契约（一种报错、一种静默关 tab、一种让 spinner 永转）。统一后的规则：
-  - open / restore（`closingTab: true`）：tab 是因这次读取才存在的，失败就撤下来（复用 `removeTab`，与手动关闭同一套选中项迁移逻辑）
+  - open / restore（`closingTab: true`）：tab 是因这次读取才存在的，失败就撤下来（复用 `removeTab`，与手动关闭同一套选中项迁移逻辑）；若该 URL 持有 pending activation，同时结束 `isEditorLoading`，避免现有编辑器被 overlay 持续遮挡
   - reload（`closingTab: false`）：tab 已有可用内容，只停止假装刷新成功
   - **两者都不推进 `tabDiskSignatures`** —— 推进等于标记「已与磁盘同步」，会让 `reloadOpenTabFromDiskIfNeeded` 永久跳过该 tab，一次瞬时解码失败会让文件到重启前都是陈旧的
 - **打开失败不落地空缓冲区**：权限被拒、文件在 stat 后被删、内容非 UTF-8 都会关闭该 tab 并报错。若代之以空字符串，磁盘签名校验仍会通过（磁盘没变），用户会看到一个可编辑的空文档，首次 ⌘S 就把原文件截断
-- **切项目时保存失败不清脏标记**：只有写盘成功的 tab 才移除 dirty 标记；存在失败时跳过 `clearEditorTabs`，保留 tab 与内容并弹窗列出失败文件
+- **切项目时保存失败撤回项目切换**：只有写盘成功的 tab 才移除 dirty 标记；存在失败时跳过 `clearEditorTabs`，将 `activeProjectID` 撤回旧项目，使文件树与 editor session 保持同一项目，并保留 tab 与内容、弹窗列出失败文件；rollback 回调只同步文件树，不再次保存
 - **关闭 tab 时保存失败则不关闭**：dirty tab 的 buffer 是用户编辑的唯一副本，写盘失败或 storage 已被驱逐时弹窗并保留 tab，不再「报个错然后照样释放」
 - **错误横幅在两种布局下都渲染**：`errorBanner` 同时挂在 tree panel 与 editor-only panel。此前它只在 tree panel 内，而 editor-only 恰是长时间编辑、最可能触发保存失败的模式，错误对用户完全不可见
 - **⌘Q 检查未保存编辑**：编辑器 buffer 是 View 的 `@State`，`.onDisappear` 在 app 终止时不保证触发。View 通过 `FileExplorerStore.unsavedTabNames` 发布脏 tab 文件名，`applicationShouldTerminate` 据此与终端确认合并成一个提示
@@ -116,6 +116,7 @@ classifyGitState: GitFileChange → FileGitState
 
 | 日期 | 说明 |
 |------|------|
+| 2026-07-31 | 补齐 failure path：dirty tab 自动保存失败时撤回项目切换且不触发保存循环；新 tab 读取/解码失败时清理其 pending activation 与 loading overlay |
 | 2026-07-31 | `fileSize(for:)` 改返回 `Int?`——`?? 0` 会同时废掉 large-mode、50MB 确认框和图片上限三道保护；未知大小改为按大文件保守处理 |
 | 2026-07-31 | 8 条读取失败路径统一到 `failFileRead`（此前三种契约互不一致）；关 tab 保存失败不再销毁 buffer；错误横幅在 editor-only 模式也渲染；⌘Q 增加未保存守卫；`saveAllDirtyTabs` 元组改具名 `SaveFailure` |
 | 2026-07-31 | 修 `6c52eda` 回归：编辑器 identity 从磁盘签名改为 `ObjectIdentifier(storage)`——原子保存会换 inode，旧写法导致每次 ⌘S 重建编辑器并清空撤销栈；补测试固化该事实 |
