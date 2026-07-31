@@ -15,8 +15,8 @@
 1. **添加项目**: 点 rail 底部 `+` 打开文件夹选择器
 2. **切换项目**: 点项目 monogram，终端 / Git / 文件浏览器同步切换
 3. **Free terminal**: rail 顶部 terminal 图标；中间区显示 standalone shell（tab bar 在内容区顶）
-4. **Worktree**: 再次点击**已选中**的项目图标 → 弹出 popover，可切 main / worktree、创建 worktree；或右键菜单
-5. **移除项目**: 右键 / popover → Remove（只从列表移除，不删磁盘文件）
+4. **Worktree**: 再次点击**已选中**的项目图标 → 弹出 popover，可切 main / worktree、创建 worktree
+5. **移除项目**: popover → Remove（只从列表移除，不删磁盘文件）
 6. **归档 worktree**: popover 内 worktree 行右键 → Archive Worktree
 7. **状态感知**: Claude incident 时 rail 底部黄三角；点击打开 status 页，右键可 dismiss
 
@@ -157,3 +157,4 @@ worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session lis
 | 2026-07-30 | Project Rail 与 Project Session List 共用按 worktree ID 的归档 in-flight guard，阻止同一 worktree 重复归档 |
 | 2026-07-31 | worktree 创建上移 `ProjectStore.createWorktree`（rail / session list 共用同一 in-flight guard 与失败弹窗）；`branchPrefix` 缺失时禁用入口而非回落 `dev`；删除已下线的 `SidebarView` / `ProjectsSection` / `TerminalsSection`；分支行与 worktree 行合并为单个 `SessionRow` |
 | 2026-07-31 | 归档 worktree 时未提交检查失败改为 fail-closed（取消归档并提示），不再在未知状态下执行 `git worktree remove --force` |
+| 2026-07-31 | 删除项目 monogram 的右键菜单——它是从旧宽侧边栏沿用的交互，与 rail popover 重复承载同一批动作（Open Main / Worktrees / Create Worktree / Reveal / Remove），popover 已全部覆盖。代价：对未选中的项目需先点选再点开 popover，不能一步右键直达 |

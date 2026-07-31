@@ -177,9 +177,6 @@ struct ProjectRail: View {
                 }
             )
         }
-        .contextMenu {
-            projectContextMenu(project)
-        }
     }
 
     private func projectTooltip(_ project: ProjectItem) -> String {
@@ -197,43 +194,6 @@ struct ProjectRail: View {
         }
         projectStore.activateLastProject(inRoot: project.id)
         popoverProjectID = nil
-    }
-
-    @ViewBuilder
-    private func projectContextMenu(_ project: ProjectItem) -> some View {
-        Button("Open Main") {
-            projectStore.activateProject(id: project.id)
-        }
-
-        let worktrees = projectStore.worktrees(for: project.id)
-        if !worktrees.isEmpty {
-            Menu("Worktrees") {
-                ForEach(worktrees) { wt in
-                    Button(wt.worktreeBranch ?? wt.name) {
-                        projectStore.activateProject(id: wt.id)
-                    }
-                }
-            }
-        }
-
-        // Detection runs off `activeProjectID`, so a project that has never been
-        // opened keeps a nil prefix indefinitely — the tooltip has to say that
-        // rather than imply something is loading.
-        Button("Create Worktree") {
-            Task { await createWorktree(for: project) }
-        }
-        .disabled(project.branchPrefix == nil)
-        .help(project.branchPrefix == nil ? Self.missingPrefixHelp : "")
-
-        Divider()
-
-        Button("Reveal in Finder") {
-            NSWorkspace.shared.activateFileViewerSelecting([project.url])
-        }
-
-        Button("Remove Project", role: .destructive) {
-            projectStore.removeProject(id: project.id)
-        }
     }
 
     private func createWorktree(for project: ProjectItem) async {
