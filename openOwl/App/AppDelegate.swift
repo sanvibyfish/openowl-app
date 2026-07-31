@@ -129,6 +129,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var workspaceStore: TerminalWorkspaceStore?
     weak var projectStore: ProjectStore?
     weak var rightDockStore: RightDockStore?
+    weak var fileExplorerStore: FileExplorerStore?
     private var localKeyMonitor: Any?
     private let resourceMonitor = ResourceMonitor()
 
@@ -463,25 +464,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let hasActiveTerminal = ghosttyManager?.needsConfirmQuit() ?? false
+        // The editor keeps unsaved buffers in view state and only writes them
+        // from `.onDisappear`, which macOS does not guarantee to run on quit.
+        // Without this check ⌘Q dropped them with no prompt and no log.
+        let unsaved = fileExplorerStore?.unsavedTabNames ?? []
 
-        NSLog(
-            "openOwl: applicationShouldTerminate requested terminal=%d",
-            hasActiveTerminal ? 1 : 0
+        AppLogger.log(
+            "app-lifecycle",
+            "terminate requested terminal=%d unsaved=%d",
+            hasActiveTerminal ? 1 : 0,
+            unsaved.count
         )
 
-        guard hasActiveTerminal else {
+        guard hasActiveTerminal || !unsaved.isEmpty else {
             return .terminateNow
+        }
+
+        var reasons: [String] = []
+        if !unsaved.isEmpty {
+            reasons.append("These files have unsaved changes:\n" + unsaved.map { "• \($0)" }.joined(separator: "\n"))
+        }
+        if hasActiveTerminal {
+            reasons.append("A terminal command is still running. Quitting will stop it.")
         }
 
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Quit openOwl?"
-        alert.informativeText = "A terminal command is still running. Quitting will stop it."
+        alert.informativeText = reasons.joined(separator: "\n\n")
         alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: unsaved.isEmpty ? "Quit" : "Discard and Quit")
 
         let confirmed = alert.runModal() == .alertSecondButtonReturn
-        NSLog("openOwl: applicationShouldTerminate %@", confirmed ? "confirmed" : "cancelled")
+        AppLogger.log("app-lifecycle", "terminate %@", confirmed ? "confirmed" : "cancelled")
         return confirmed ? .terminateNow : .terminateCancel
     }
 

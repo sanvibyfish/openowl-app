@@ -53,6 +53,13 @@ struct FileEditorSession: Codable, Equatable {
     var activeFilePath: String?
 }
 
+/// A tab whose buffer could not be written. Carried out of the save routines so
+/// the caller can decide whether to block the action that prompted the save.
+struct SaveFailure {
+    let url: URL
+    let message: String
+}
+
 struct FileEditorDiskSignature: Equatable {
     let modifiedAt: Date?
     let fileSize: Int
@@ -345,9 +352,20 @@ struct FileExplorerView: View {
                 store.selectNode(url.path)
             }
         }
+        .onChange(of: dirtyTabs) { _, tabs in
+            // Publishing names rather than URLs keeps the quit prompt readable
+            // and avoids handing the store anything it could act on.
+            store.unsavedTabNames = tabs.map(\.lastPathComponent).sorted()
+        }
         .onDisappear {
-            saveAllDirtyTabs()
+            let saveFailures = saveAllDirtyTabs()
             flushEditorSession(reason: "disappear")
+            // The view can disappear on a dock toggle, not just on teardown, so
+            // this is still a moment the user can act on — dropping the failures
+            // silently is what made a failed autosave invisible.
+            if !saveFailures.isEmpty {
+                presentSaveFailureAlert(saveFailures)
+            }
         }
         // Shortcuts are gated on right-dock visibility — without this gate, Cmd+S / Cmd+W
         // would fire even while the dock is closed or showing a different tab (the view
@@ -436,21 +454,7 @@ struct FileExplorerView: View {
                     .frame(height: 1)
             }
 
-            if let errorMessage = store.errorMessage {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(AppFonts.toolbarIcon)
-                    Text(errorMessage).font(AppFonts.caption).lineLimit(1)
-                    Spacer()
-                    Button { store.errorMessage = nil } label: {
-                        Image(systemName: "xmark").font(AppFonts.tinyIcon)
-                    }.buttonStyle(.plain)
-                    .accessibilityLabel("Dismiss")
-                }
-                .foregroundStyle(.red)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Color.red.opacity(0.12))
-            }
+            errorBanner
 
             if store.rootNodes.isEmpty {
                 Spacer()
@@ -535,6 +539,8 @@ struct FileExplorerView: View {
 
             PanelDivider()
 
+            errorBanner
+
             ZStack {
                 editorContentArea
 
@@ -578,6 +584,29 @@ struct FileExplorerView: View {
                         .cornerRadius(8)
                     }
             }
+        }
+    }
+
+    /// Rendered by both the tree panel and the editor-only panel. It used to
+    /// live inside the tree, so with the tree hidden — the mode people edit in
+    /// longest, and therefore the one most likely to hit a save failure — open,
+    /// reload and save errors were reported to a view that was never built.
+    @ViewBuilder
+    private var errorBanner: some View {
+        if let errorMessage = store.errorMessage {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(AppFonts.toolbarIcon)
+                Text(errorMessage).font(AppFonts.caption)
+                Spacer()
+                Button { store.errorMessage = nil } label: {
+                    Image(systemName: "xmark").font(AppFonts.tinyIcon)
+                }.buttonStyle(.plain)
+                .accessibilityLabel("Dismiss")
+            }
+            .foregroundStyle(.red)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(Color.red.opacity(0.12))
         }
     }
 
@@ -777,8 +806,14 @@ struct FileExplorerView: View {
         signature: FileEditorDiskSignature? = nil
     ) {
         guard let request = beginFileRead(for: url, signature: signature) else {
-            if pendingActivationURL == url { pendingActivationURL = nil }
-            isEditorLoading = false
+            // The tab is already in `openTabs` and persisted; without taking it
+            // back down the user gets a tab that shows nothing and never will.
+            failFileRead(
+                url,
+                closingTab: true,
+                reason: "open-stat-failed",
+                message: "Could not read \(url.lastPathComponent) — it may have been moved or its permissions changed."
+            )
             return
         }
         pendingActivationURL = url
@@ -816,6 +851,15 @@ struct FileExplorerView: View {
                         )
                         return
                     }
+                    guard let image else {
+                        failFileRead(
+                            url,
+                            closingTab: true,
+                            reason: "open-image-decode-failed",
+                            message: "Could not open \(url.lastPathComponent) — the image could not be decoded."
+                        )
+                        return
+                    }
                     tabImageCache[url] = image
                     tabDiskSignatures[url] = request.signature
                     fileReadRequestIDs.removeValue(forKey: url)
@@ -837,23 +881,14 @@ struct FileExplorerView: View {
                     // real file to whatever the user typed into what looks like
                     // an empty document. Permission denied, a file deleted
                     // between stat and read, and non-UTF-8 content all land here.
-                    AppLogger.log(
-                        "file-editor-state",
-                        "open-read-failed path=%@ error=%@",
-                        url.path,
-                        error.localizedDescription
-                    )
                     await MainActor.run {
                         guard isCurrentFileRead(request, for: url) else { return }
-                        fileReadRequestIDs.removeValue(forKey: url)
-                        openTabs.removeAll { $0.url == url }
-                        tabDiskSignatures.removeValue(forKey: url)
-                        largeModeTabs.remove(url)
-                        if pendingActivationURL == url { pendingActivationURL = nil }
-                        isEditorLoading = false
-                        store.errorMessage =
-                            "Could not open \(url.lastPathComponent): \(error.localizedDescription)"
-                        persistEditorSession(reason: "open-read-failed")
+                        failFileRead(
+                            url,
+                            closingTab: true,
+                            reason: "open-read-failed",
+                            message: "Could not open \(url.lastPathComponent): \(error.localizedDescription)"
+                        )
                     }
                     return
                 }
@@ -1005,7 +1040,15 @@ struct FileExplorerView: View {
         _ url: URL,
         signature: FileEditorDiskSignature? = nil
     ) {
-        guard let request = beginFileRead(for: url, signature: signature) else { return }
+        guard let request = beginFileRead(for: url, signature: signature) else {
+            failFileRead(
+                url,
+                closingTab: true,
+                reason: "restore-stat-failed",
+                message: "Could not restore \(url.lastPathComponent) — it may have been moved or its permissions changed."
+            )
+            return
+        }
 
         if isImageURL(url) {
             Task.detached(priority: .userInitiated) {
@@ -1044,11 +1087,12 @@ struct FileExplorerView: View {
                             isEditorLoading = false
                         }
                     } else {
-                        AppLogger.log("file-editor-state", "restore-image-failed path=%@", url.path)
-                        fileReadRequestIDs.removeValue(forKey: url)
-                        openTabs.removeAll { $0.url == url }
-                        tabDiskSignatures.removeValue(forKey: url)
-                        persistEditorSession(reason: "restore-image-failed")
+                        failFileRead(
+                            url,
+                            closingTab: true,
+                            reason: "restore-image-failed",
+                            message: "Could not restore \(url.lastPathComponent) — the image could not be decoded."
+                        )
                     }
                 }
             }
@@ -1061,13 +1105,14 @@ struct FileExplorerView: View {
             do {
                 content = try String(contentsOf: url, encoding: .utf8)
             } catch {
-                AppLogger.log("file-editor-state", "restore-read-failed path=%@ error=%@", url.path, error.localizedDescription)
                 await MainActor.run {
                     guard isCurrentFileRead(request, for: url) else { return }
-                    fileReadRequestIDs.removeValue(forKey: url)
-                    openTabs.removeAll { $0.url == url }
-                    tabDiskSignatures.removeValue(forKey: url)
-                    persistEditorSession(reason: "restore-read-failed")
+                    failFileRead(
+                        url,
+                        closingTab: true,
+                        reason: "restore-read-failed",
+                        message: "Could not restore \(url.lastPathComponent): \(error.localizedDescription)"
+                    )
                 }
                 return
             }
@@ -1205,6 +1250,36 @@ struct FileExplorerView: View {
             && editorSessionGeneration == request.sessionGeneration
     }
 
+    /// Single exit for a read that could not produce content.
+    ///
+    /// Open and restore commit the tab before the read starts, so a failure has
+    /// to take it back down (`closingTab`); a reload already has usable content
+    /// on screen and only needs to stop pretending it refreshed. Neither may
+    /// advance `tabDiskSignatures` — marking the tab as in sync with disk makes
+    /// `reloadOpenTabFromDiskIfNeeded` skip it forever, so a file that briefly
+    /// failed to decode would stay stale until the app restarts.
+    ///
+    /// Every read path routes through here. They used to clean up separately and
+    /// had drifted into three different contracts: one reported the error, one
+    /// closed the tab silently, one left the spinner spinning.
+    private func failFileRead(
+        _ url: URL,
+        closingTab: Bool,
+        reason: String,
+        message: String
+    ) {
+        AppLogger.log("file-editor-state", "%@ path=%@", reason, url.path)
+        if closingTab {
+            removeTab(url, reason: reason)
+        } else {
+            fileReadRequestIDs.removeValue(forKey: url)
+            clearHeavyProgress(for: url)
+            if pendingActivationURL == url { pendingActivationURL = nil }
+            if activeTabURL == url { isEditorLoading = false }
+        }
+        store.errorMessage = message
+    }
+
     @discardableResult
     private func reloadOpenTabFromDiskIfNeeded(_ url: URL, reason: String) -> Bool {
         guard openTabs.contains(where: { $0.url == url }) else { return false }
@@ -1269,6 +1344,18 @@ struct FileExplorerView: View {
                         )
                         return
                     }
+                    guard let image else {
+                        // Keep the tab and its cached image: the previously
+                        // decoded copy is still the best thing to show, and not
+                        // advancing the signature leaves the retry armed.
+                        failFileRead(
+                            url,
+                            closingTab: false,
+                            reason: "reload-image-decode-failed",
+                            message: "Could not reload \(url.lastPathComponent) — the image could not be decoded."
+                        )
+                        return
+                    }
                     tabImageCache[url] = image
                     tabDiskSignatures[url] = request.signature
                     fileReadRequestIDs.removeValue(forKey: url)
@@ -1290,8 +1377,12 @@ struct FileExplorerView: View {
             } catch {
                 await MainActor.run {
                     guard isCurrentFileRead(request, for: url) else { return }
-                    fileReadRequestIDs.removeValue(forKey: url)
-                    store.errorMessage = "Failed to reload \(url.lastPathComponent): \(error.localizedDescription)"
+                    failFileRead(
+                        url,
+                        closingTab: false,
+                        reason: "reload-read-failed",
+                        message: "Failed to reload \(url.lastPathComponent): \(error.localizedDescription)"
+                    )
                 }
                 return
             }
@@ -1479,17 +1570,43 @@ struct FileExplorerView: View {
     }
 
     private func performTabClose(_ url: URL) {
-        // Auto-save dirty tab
+        // A dirty tab's buffer is the only copy of the user's edits, so closing
+        // it is only safe once the write lands. `saveAllDirtyTabs` already
+        // refuses to drop a tab it could not write; this path used to report the
+        // error and then release the storage anyway.
         if dirtyTabs.contains(url) {
-            if let storage = tabStorages[url] {
-                do {
-                    try storage.string.write(to: url, atomically: true, encoding: .utf8)
-                } catch {
-                    store.errorMessage = "Failed to save \(url.lastPathComponent): \(error.localizedDescription)"
-                }
+            guard let storage = tabStorages[url] else {
+                AppLogger.log("file-editor-state", "close-blocked reason=storage-missing path=%@", url.path)
+                presentSaveFailureAlert([SaveFailure(url: url, message: "The edits are no longer held in memory.")])
+                return
+            }
+            do {
+                try storage.string.write(to: url, atomically: true, encoding: .utf8)
+                tabDiskSignatures[url] = FileEditorDiskSignatureProvider.signature(for: url)
+                dirtyTabs.remove(url)
+            } catch {
+                AppLogger.log(
+                    "file-editor-state",
+                    "close-blocked path=%@ error=%@",
+                    url.path,
+                    error.localizedDescription
+                )
+                presentSaveFailureAlert([SaveFailure(url: url, message: error.localizedDescription)])
+                return
             }
         }
 
+        removeTab(url, reason: "close-tab")
+    }
+
+    /// Tears a tab down and moves the selection to a neighbour.
+    ///
+    /// Shared by manual close and by the read-failure path. The two used to be
+    /// written out separately, and the failure copy forgot to move
+    /// `activeTabURL` off the tab it had just removed — a failed restore left
+    /// the selection pointing at a tab that no longer existed with the loading
+    /// spinner running forever.
+    private func removeTab(_ url: URL, reason: String) {
         guard let index = openTabs.firstIndex(where: { $0.url == url }) else { return }
         let wasActive = url == activeTabURL
 
@@ -1501,11 +1618,13 @@ struct FileExplorerView: View {
         dirtyTabs.remove(url)
         largeModeTabs.remove(url)
         clearHeavyProgress(for: url)
+        if pendingActivationURL == url { pendingActivationURL = nil }
 
         if wasActive {
             if openTabs.isEmpty {
                 activeTabURL = nil
                 previewImage = nil
+                isEditorLoading = false
             } else {
                 let newIndex = min(index, openTabs.count - 1)
                 let newURL = openTabs[newIndex].url
@@ -1526,7 +1645,7 @@ struct FileExplorerView: View {
                 }
             }
         }
-        persistEditorSession(reason: "close-tab")
+        persistEditorSession(reason: reason)
     }
 
     private func closeActiveTab() {
@@ -1573,14 +1692,14 @@ struct FileExplorerView: View {
     /// UI claim the edits were saved, and the `clearEditorTabs` that follows a
     /// project switch then dropped them for good.
     @discardableResult
-    private func saveAllDirtyTabs() -> [(url: URL, message: String)] {
-        var failures: [(url: URL, message: String)] = []
+    private func saveAllDirtyTabs() -> [SaveFailure] {
+        var failures: [SaveFailure] = []
         for url in dirtyTabs {
             guard let storage = tabStorages[url] else {
                 // A dirty tab with no storage means eviction raced the edit —
                 // internal inconsistency, not "nothing to save".
                 AppLogger.log("file-editor-state", "save-failed reason=storage-missing path=%@", url.path)
-                failures.append((url, "The edits are no longer held in memory."))
+                failures.append(SaveFailure(url: url, message: "The edits are no longer held in memory."))
                 continue
             }
             do {
@@ -1594,13 +1713,13 @@ struct FileExplorerView: View {
                     url.path,
                     error.localizedDescription
                 )
-                failures.append((url, error.localizedDescription))
+                failures.append(SaveFailure(url: url, message: error.localizedDescription))
             }
         }
         return failures
     }
 
-    private func presentSaveFailureAlert(_ failures: [(url: URL, message: String)]) {
+    private func presentSaveFailureAlert(_ failures: [SaveFailure]) {
         let detail = failures
             .map { "• \($0.url.lastPathComponent) — \($0.message)" }
             .joined(separator: "\n")

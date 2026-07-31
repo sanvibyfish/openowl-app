@@ -77,6 +77,12 @@ final class FileExplorerStore {
     var selectedNodeID: String?
     private(set) var previewState: FilePreviewState = .none
     var errorMessage: String?
+
+    /// File names of editor tabs with unsaved edits, published by the editor
+    /// view. The buffers themselves are `@State` inside that view, so this is
+    /// the only handle `applicationShouldTerminate` has on them — without it,
+    /// ⌘Q discarded unsaved work without asking.
+    var unsavedTabNames: [String] = []
     var isQuickOpenPresented = false
     var quickOpenQuery: String = "" {
         didSet {

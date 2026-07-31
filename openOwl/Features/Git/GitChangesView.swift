@@ -499,7 +499,14 @@ struct GitChangesView: View {
                 HStack(spacing: 0) {
                     if showCommitFileList {
                         commitFileSidebar(sections: sections)
-                        PanelDivider()
+                        // `PanelDivider` is fixed horizontal and width-greedy;
+                        // between two side-by-side panes it needs the vertical
+                        // form, which is what the old `Divider()` resolved to
+                        // here on its own.
+                        Rectangle()
+                            .fill(AppPalette.border)
+                            .frame(width: 1)
+                            .frame(maxHeight: .infinity)
                     }
                     commitDiffByFile(sections: sections)
                 }

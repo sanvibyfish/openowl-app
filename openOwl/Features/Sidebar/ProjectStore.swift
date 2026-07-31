@@ -71,11 +71,18 @@ final class ProjectStore {
 
     /// Setting `activeProjectID` to a non-nil value implicitly clears any active
     /// free terminal (project selection takes priority over free-terminal selection).
+    ///
+    /// Branch-prefix detection hangs off this rather than off the call sites:
+    /// there are thirteen assignments, and the ones that matter most are the
+    /// implicit ones (removing a project falls back to another root, removing a
+    /// worktree falls back to its parent). A project reached that way used to
+    /// keep a nil prefix, which left "Create Worktree" permanently disabled.
     var activeProjectID: String? {
         didSet {
             if let activeProjectID {
                 activeFreeTerminalID = nil
                 rememberProjectSelection(activeProjectID)
+                detectBranchPrefix(for: activeProjectID)
             }
         }
     }
@@ -204,14 +211,6 @@ final class ProjectStore {
         if activeProjectID == nil, let first = freeTerminals.first {
             activeFreeTerminalID = first.id
         }
-
-        // `load()` assigns `activeProjectID` directly, bypassing
-        // `activateProject`. Without this, a restored project keeps
-        // `branchPrefix == nil` and worktree creation stays disabled until the
-        // user switches away and back.
-        if let activeProjectID {
-            detectBranchPrefix(for: activeProjectID)
-        }
     }
 
     // MARK: - Project Management
@@ -233,7 +232,6 @@ final class ProjectStore {
         if let existing = projects.first(where: { $0.path == normalized }) {
             activeProjectID = existing.id
             persist()
-            detectBranchPrefix(for: existing.id)
             return
         }
 
@@ -243,7 +241,6 @@ final class ProjectStore {
         bookmarkStore.save(projectID: item.id, url: url)
         bookmarkStore.startAccessing(projectID: item.id)
         persist()
-        detectBranchPrefix(for: item.id)
 
         // Auto-discover existing worktrees on disk
         Task { await discoverWorktrees(for: item) }
@@ -279,7 +276,6 @@ final class ProjectStore {
         guard projects.contains(where: { $0.id == id }) else { return }
         activeProjectID = id
         persist()
-        detectBranchPrefix(for: id)
     }
 
     /// Restores the most recently selected main/worktree namespace for a root project.
@@ -376,60 +372,6 @@ final class ProjectStore {
         }
         bookmarkStore.remove(projectID: id)
         childIDs.forEach { bookmarkStore.remove(projectID: $0) }
-        persist()
-    }
-
-    // MARK: - Tab Reordering
-
-    /// Reorder root projects to match `orderedIDs`. Each root's worktrees
-    /// follow their parent. Items not in `orderedIDs` (e.g. roots the caller
-    /// chose not to include in the drag scope) keep their relative order at
-    /// the tail. Called by SwiftUI `.onMove` from the sidebar PROJECTS list.
-    func reorderRootProjects(orderedIDs: [String]) {
-        var newProjects: [ProjectItem] = []
-        var seen: Set<String> = []
-
-        for id in orderedIDs {
-            guard let root = projects.first(where: { $0.id == id && !$0.isWorktree }) else { continue }
-            newProjects.append(root)
-            seen.insert(id)
-            for wt in worktrees(for: id) {
-                newProjects.append(wt)
-                seen.insert(wt.id)
-            }
-        }
-
-        // Append everything we didn't touch (inactive roots + their worktrees,
-        // anything missing from orderedIDs) in their original relative order.
-        for project in projects where !seen.contains(project.id) {
-            newProjects.append(project)
-        }
-
-        guard newProjects != projects else { return }
-        projects = newProjects
-        persist()
-    }
-
-    /// Move a root project (and its worktrees) to a new position among root projects.
-    func moveRootProject(id: String, beforeID: String?) {
-        guard let sourceIdx = projects.firstIndex(where: { $0.id == id && !$0.isWorktree }) else { return }
-        let source = projects[sourceIdx]
-        let children = worktrees(for: id)
-
-        // Remove source + its worktrees
-        projects.removeAll { $0.id == id || $0.worktreeOf == id }
-
-        // Find insertion point
-        if let beforeID, let targetIdx = projects.firstIndex(where: { $0.id == beforeID }) {
-            projects.insert(source, at: targetIdx)
-            for (offset, child) in children.enumerated() {
-                projects.insert(child, at: targetIdx + 1 + offset)
-            }
-        } else {
-            // Move to end
-            projects.append(source)
-            projects.append(contentsOf: children)
-        }
         persist()
     }
 

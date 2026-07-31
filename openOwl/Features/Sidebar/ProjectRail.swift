@@ -17,6 +17,11 @@ struct ProjectRail: View {
 
     static let width: CGFloat = RailChrome.leftWidth
 
+    /// Shown on the disabled worktree-creation entries. Deliberately does not
+    /// claim detection is in progress: it only runs for the project being made
+    /// active, so a root the user has never opened has nothing in flight.
+    static let missingPrefixHelp = "Open this project once to detect its branch prefix"
+
     @State private var popoverProjectID: String?
     @State private var showAddMenu = false
 
@@ -211,14 +216,14 @@ struct ProjectRail: View {
             }
         }
 
-        // Detection always resolves to a name (it falls back to the local user
-        // when there is no remote), so a nil prefix only means it has not
-        // finished yet. Say so rather than leaving a silent dead button.
+        // Detection runs off `activeProjectID`, so a project that has never been
+        // opened keeps a nil prefix indefinitely — the tooltip has to say that
+        // rather than imply something is loading.
         Button("Create Worktree") {
             Task { await createWorktree(for: project) }
         }
         .disabled(project.branchPrefix == nil)
-        .help(project.branchPrefix == nil ? "Reading branch prefix…" : "")
+        .help(project.branchPrefix == nil ? Self.missingPrefixHelp : "")
 
         Divider()
 
@@ -522,7 +527,7 @@ private struct ProjectRailPopover: View {
             }
             .buttonStyle(.plain)
             .disabled(creatingWorktree || project.branchPrefix == nil)
-            .help(project.branchPrefix == nil ? "Reading branch prefix…" : "")
+            .help(project.branchPrefix == nil ? ProjectRail.missingPrefixHelp : "")
 
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([project.url])

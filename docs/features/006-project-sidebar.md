@@ -84,6 +84,7 @@ Project Rail popover 与 Project Session List 的归档入口共享 `ProjectStor
 - 自动检测: 解析 `git remote get-url origin` 提取 GitHub 用户名
 - 回退: `NSFullUserName()` 转小写去空格
 - 缓存在 ProjectItem 上，persist 后不再重复检测
+- **触发点是 `activeProjectID` 的 `didSet`，不是各个调用点**。全类共 13 处赋值，其中最要紧的是隐式的那几处——删除项目会回落到另一个 root、删除 worktree 会回落到父项目。挂在调用点上必然漏掉它们，那些路径到达的项目会保持 `branchPrefix == nil`，「Create Worktree」永久禁用
 
 ### 3.5 项目隔离
 
@@ -144,6 +145,7 @@ worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session lis
 
 | 日期 | 说明 |
 |------|------|
+| 2026-07-31 | `detectBranchPrefix` 收进 `activeProjectID.didSet`——此前只挂在 4 个调用点，删除项目/worktree 后回落的 5 条路径漏掉，那些项目的 worktree 按钮永久禁用 |
 | 2026-07-31 | 修 `6c52eda` 回归：归档的未提交检查加目录存在性前置，恢复「目录已删除但 git 仍登记」的清理路径；删除零调用且策略相反的死属性 `ProjectStore.branchPrefix`；`branchPrefix` 检测改为在 `init`/`addOrActivateProject` 也触发，避免新加或恢复的项目 worktree 按钮永久禁用 |
 | 2026-03-16 | 创建文档 |
 | 2026-03-18 | 新增 Claude 异常提醒卡片（RSS 轮询 + 可关闭忽略） |

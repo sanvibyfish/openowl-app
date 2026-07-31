@@ -2,9 +2,9 @@ import Foundation
 
 /// File logger → ~/Library/Logs/openOwl/openowl.log
 ///
-/// Noisy tags (`resize-diag`) are off by default. Enable with:
+/// Noisy tags are off by default. Enable with:
 ///   defaults write com.openowl.app log.resizeDiag -bool YES
-/// Keyboard routing is always on (needed to debug Escape).
+///   defaults write com.openowl.app log.keyboardRouting -bool YES
 enum AppLogger {
     private static let queue = DispatchQueue(label: "com.openowl.logger", qos: .utility)
     private static let maxFileSize: UInt64 = 10 * 1024 * 1024 // 10 MB
@@ -29,7 +29,14 @@ enum AppLogger {
 
     /// Tags that only write when their UserDefaults switch is on.
     /// Every other tag is always on.
-    static let optInTags: [String: String] = ["resize-diag": "log.resizeDiag"]
+    /// `keyboard-routing` fires on every ESC and Ctrl-C — the two most-pressed
+    /// keys in a terminal — and each call does a synchronous NSLog plus a file
+    /// write on the keystroke path. It stays off unless someone is actually
+    /// debugging the Escape routing it was added for.
+    static let optInTags: [String: String] = [
+        "resize-diag": "log.resizeDiag",
+        "keyboard-routing": "log.keyboardRouting",
+    ]
 
     static func isEnabled(_ tag: String) -> Bool {
         guard let key = optInTags[tag] else { return true }
