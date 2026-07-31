@@ -425,18 +425,20 @@ final class GitService {
         do {
             _ = try await runGit(["worktree", "remove", path, "--force"])
         } catch {
-            // macOS leaves .DS_Store in the directory, causing "Directory not empty".
-            // Fall back to manual cleanup + prune.
-            let errorMsg = String(describing: error)
-            guard errorMsg.contains("not empty") || errorMsg.contains("is not empty") else {
-                throw error
-            }
-            NSLog("openOwl: worktree remove hit non-empty dir (likely .DS_Store), manual cleanup: %@", path)
-            let url = URL(fileURLWithPath: path)
-            if FileManager.default.fileExists(atPath: path) {
-                try FileManager.default.removeItem(at: url)
-            }
-            _ = try await runGit(["worktree", "prune"])
+            // macOS drops .DS_Store into the directory behind git's back, which
+            // makes `--force` fail with "Directory not empty". Remove that one
+            // file and let git try again.
+            //
+            // This used to classify the failure by searching git's stderr for
+            // "not empty" and then `removeItem` the entire worktree. Git's
+            // messages are not a stable API — they change with version and
+            // locale — and the tree can hold work git had just refused to
+            // discard, so a misclassification deleted it unrecoverably.
+            let dsStore = URL(fileURLWithPath: path).appendingPathComponent(".DS_Store")
+            guard FileManager.default.fileExists(atPath: dsStore.path) else { throw error }
+            AppLogger.log("worktree", "remove failed, retrying without .DS_Store path=%@", path)
+            try FileManager.default.removeItem(at: dsStore)
+            _ = try await runGit(["worktree", "remove", path, "--force"])
         }
         return .removed
     }

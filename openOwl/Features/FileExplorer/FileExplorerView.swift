@@ -755,7 +755,11 @@ struct FileExplorerView: View {
             return
         }
 
-        let fileSize = fileSize(for: url)
+        guard let fileSize = fileSize(for: url) else {
+            AppLogger.log("file-editor-state", "open-skip reason=size-unknown path=%@", url.path)
+            store.errorMessage = "Could not read the size of \(url.lastPathComponent) — it may have been moved or its permissions changed."
+            return
+        }
 
         let isImage = isImageURL(url)
         let needsLargeMode = !isImage && fileSize >= Self.largeFileThreshold
@@ -1024,7 +1028,11 @@ struct FileExplorerView: View {
                               projectKey, url.path)
                 continue
             }
-            let fileSize = fileSize(for: url)
+            guard let fileSize = fileSize(for: url) else {
+                AppLogger.log("file-editor-state", "restore-skip reason=size-unknown project=%@ path=%@",
+                              projectKey, url.path)
+                continue
+            }
             if isImageURL(url), fileSize > Self.imageMaxBytes {
                 AppLogger.log("file-editor-state",
                               "restore-skip reason=image-too-large project=%@ path=%@ size=%d",
@@ -1476,8 +1484,12 @@ struct FileExplorerView: View {
         }
     }
 
-    private func fileSize(for url: URL) -> Int {
-        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+    /// `nil` when the size cannot be read. Callers must treat that as "too
+    /// large to open casually", not as zero: every guard here is a *lower*
+    /// bound, so a 0 fallback silently waived the large-file mode, the 50 MB
+    /// confirmation and the image cap all at once.
+    private func fileSize(for url: URL) -> Int? {
+        try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int
     }
 
     private func isImageURL(_ url: URL) -> Bool {
@@ -1485,7 +1497,11 @@ struct FileExplorerView: View {
     }
 
     private func shouldOpenInLargeMode(_ url: URL) -> Bool {
-        !isImageURL(url) && fileSize(for: url) >= Self.largeFileThreshold
+        guard !isImageURL(url) else { return false }
+        // Unknown size: assume large. Read-only plain text is a recoverable
+        // wrong guess; full syntax highlighting on a huge file is not.
+        guard let size = fileSize(for: url) else { return true }
+        return size >= Self.largeFileThreshold
     }
 
     private static func formattedSize(_ bytes: Int) -> String {

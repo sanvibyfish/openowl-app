@@ -116,6 +116,7 @@ classifyGitState: GitFileChange → FileGitState
 
 | 日期 | 说明 |
 |------|------|
+| 2026-07-31 | `fileSize(for:)` 改返回 `Int?`——`?? 0` 会同时废掉 large-mode、50MB 确认框和图片上限三道保护；未知大小改为按大文件保守处理 |
 | 2026-07-31 | 8 条读取失败路径统一到 `failFileRead`（此前三种契约互不一致）；关 tab 保存失败不再销毁 buffer；错误横幅在 editor-only 模式也渲染；⌘Q 增加未保存守卫；`saveAllDirtyTabs` 元组改具名 `SaveFailure` |
 | 2026-07-31 | 修 `6c52eda` 回归：编辑器 identity 从磁盘签名改为 `ObjectIdentifier(storage)`——原子保存会换 inode，旧写法导致每次 ⌘S 重建编辑器并清空撤销栈；补测试固化该事实 |
 | 2026-07-31 | 打开失败不再折叠成空缓冲区（避免 ⌘S 截断原文件）；切项目保存失败时保留脏标记与 tab 并弹窗；磁盘 reload 改为提交新 `NSTextStorage` + 签名折进编辑器 identity，修复 undo 越界崩溃并保留光标 |

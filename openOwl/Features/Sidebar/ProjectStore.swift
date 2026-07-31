@@ -470,8 +470,19 @@ final class ProjectStore {
                 }
                 return
             } catch {
-                NSLog("openOwl: [ProjectStore] Failed to read %@: %@. Falling back to migration.",
-                      Self.storeURL.path, error.localizedDescription)
+                // The file exists but will not decode. Falling through to the
+                // migration path leaves `projects` empty, and the first
+                // `persist()` of the session then overwrites the only copy of
+                // the user's project list — a transient read error turned into
+                // permanent loss. Move it aside first so the original survives
+                // whatever this session writes.
+                AppLogger.log(
+                    "project-store",
+                    "load failed path=%@ error=%@",
+                    Self.storeURL.path,
+                    error.localizedDescription
+                )
+                quarantineUnreadableStore(reason: error.localizedDescription)
             }
         }
 
@@ -526,6 +537,33 @@ final class ProjectStore {
         return components.count >= 3
     }
 
+    /// Renames an undecodable store file out of the way and tells the user
+    /// where it went, so the next `persist()` cannot destroy it.
+    private func quarantineUnreadableStore(reason: String) {
+        let stamp = Int(Date().timeIntervalSince1970)
+        let backup = Self.storeURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("openowl.json.corrupt-\(stamp)")
+        do {
+            try FileManager.default.moveItem(at: Self.storeURL, to: backup)
+        } catch {
+            AppLogger.log("project-store", "quarantine failed error=%@", error.localizedDescription)
+            return
+        }
+        AppLogger.log("project-store", "quarantined unreadable store to %@", backup.path)
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Project list could not be read"
+        alert.informativeText = """
+        \(reason)
+
+        The file was moved to \(backup.path) so it is not overwritten. openOwl started with an empty project list.
+        """
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
     private func persist() {
         let store = StoreFile(projects: projects, activeProjectId: activeProjectID)
         let encoder = JSONEncoder()
@@ -536,7 +574,7 @@ final class ProjectStore {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try data.write(to: Self.storeURL, options: .atomic)
         } catch {
-            NSLog("openOwl: [ProjectStore] Failed to persist: %@", error.localizedDescription)
+            AppLogger.log("project-store", "persist failed error=%@", error.localizedDescription)
         }
     }
 

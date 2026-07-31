@@ -145,6 +145,7 @@ worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session lis
 
 | 日期 | 说明 |
 |------|------|
+| 2026-07-31 | `openowl.json` 解码失败改为先隔离备份再继续（此前落到迁移分支后 `projects` 为空，第一次 `persist()` 就永久覆盖用户项目列表）；`removeWorktree` 不再按 git stderr 子串分类并递归删整棵工作树，改为只删 `.DS_Store` 后重试 git；两文件 NSLog 全部改 AppLogger |
 | 2026-07-31 | `detectBranchPrefix` 收进 `activeProjectID.didSet`——此前只挂在 4 个调用点，删除项目/worktree 后回落的 5 条路径漏掉，那些项目的 worktree 按钮永久禁用 |
 | 2026-07-31 | 修 `6c52eda` 回归：归档的未提交检查加目录存在性前置，恢复「目录已删除但 git 仍登记」的清理路径；删除零调用且策略相反的死属性 `ProjectStore.branchPrefix`；`branchPrefix` 检测改为在 `init`/`addOrActivateProject` 也触发，避免新加或恢复的项目 worktree 按钮永久禁用 |
 | 2026-03-16 | 创建文档 |

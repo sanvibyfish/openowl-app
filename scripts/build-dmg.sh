@@ -70,8 +70,20 @@ cleanup() {
 
 assert_no_disallowed_xattrs() {
     local target="$1"
+    local raw
+    # Judge the scan and the match separately. Wrapping both in `|| true` (which
+    # `grep` needs, since "no match" exits 1) also swallowed xattr's own
+    # failures — a bad path or an unreadable bundle produced an empty result and
+    # the gate reported success, shipping a package it had never actually
+    # inspected.
+    if ! raw=$(xattr -lr "$target" 2>&1); then
+        echo "ERROR: could not scan extended attributes of $target"
+        echo "$raw"
+        exit 1
+    fi
+
     local disallowed
-    disallowed=$(xattr -lr "$target" 2>/dev/null \
+    disallowed=$(printf '%s\n' "$raw" \
         | grep -E 'com\.apple\.(FinderInfo|ResourceFork)' \
         | head -20 \
         || true)
@@ -200,8 +212,12 @@ echo ">>> Staple..."
 xcrun stapler staple "$DMG_FINAL"
 xcrun stapler validate "$DMG_FINAL"
 
+echo ">>> Gatekeeper assessment..."
+if ! spctl --assess --type open --context context:primary-signature --verbose "$DMG_FINAL" 2>&1; then
+    echo "ERROR: Gatekeeper rejected $DMG_FINAL"
+    exit 1
+fi
+
 echo ""
 echo "=== Done: $DMG_FINAL ==="
 ls -lh "$DMG_FINAL"
-echo "Gatekeeper:"
-spctl --assess --type open --context context:primary-signature --verbose "$DMG_FINAL" 2>&1
