@@ -311,16 +311,14 @@ final class ResourceMonitor {
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.sampleAndNotify()
+                // Cancellation is the only way this sleep fails, and `stop()`
+                // already clears the handle. The task must not clear it itself:
+                // after a stop/start cycle the handle belongs to the *new* task,
+                // and nilling it there would orphan that task and let the next
+                // `start()` run a second loop over the same alert engine.
                 do {
                     try await Task.sleep(for: self.samplingInterval)
-                } catch is CancellationError {
-                    return
                 } catch {
-                    // Release the handle on the way out, otherwise `start()`'s
-                    // `monitoringTask == nil` guard makes the monitor
-                    // unrevivable and nothing says why it went quiet.
-                    AppLogger.log("resource-monitor", "sampling loop aborted: \(error)")
-                    self.monitoringTask = nil
                     return
                 }
             }

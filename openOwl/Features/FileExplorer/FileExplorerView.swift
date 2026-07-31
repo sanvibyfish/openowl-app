@@ -620,7 +620,13 @@ struct FileExplorerView: View {
                         state: $editorState,
                         coordinators: [editTracker]
                     )
-                    .id(editorIdentity(for: url))
+                    // Identity tracks the storage object, not the file on disk.
+                    // A reload swaps in a new NSTextStorage and must rebuild the
+                    // editor around it; a save leaves the object alone and must
+                    // not — `write(atomically:)` replaces the inode, so keying
+                    // this on the disk signature rebuilt the editor on every ⌘S
+                    // and `setTextStorage` cleared the undo stack each time.
+                    .id(ObjectIdentifier(storage))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
                 }
@@ -1213,16 +1219,6 @@ struct FileExplorerView: View {
         return true
     }
 
-    /// Identity for the editor view. The disk signature is part of it so a
-    /// reload swaps in the fresh `NSTextStorage`: `SourceEditor` does not
-    /// re-apply its text on update, so a stable id would keep the old buffer
-    /// on screen.
-    private func editorIdentity(for url: URL) -> String {
-        guard let signature = tabDiskSignatures[url] else { return url.path }
-        let modified = signature.modifiedAt?.timeIntervalSince1970 ?? 0
-        return "\(url.path)|\(signature.fileIdentifier ?? 0)|\(signature.fileSize)|\(modified)"
-    }
-
     /// Carries the caret across a reload, clamped to the new buffer — a file
     /// that shrank on disk leaves the old selection pointing past the end.
     private func clampedCursorPositions(
@@ -1339,8 +1335,8 @@ struct FileExplorerView: View {
                 // `TextView.replaceCharacters`, so CEUndoManager keeps its
                 // mutations pointing at the pre-reload content and a later undo
                 // replays an out-of-bounds range — an NSRangeException Swift
-                // cannot catch. `editorIdentity(for:)` folds the new signature
-                // into the view id so SwiftUI rebuilds around this storage.
+                // cannot catch. Swapping the object also moves the view's
+                // `ObjectIdentifier` id, so SwiftUI rebuilds around this storage.
                 tabStorages[url] = NSTextStorage(string: content)
                 if activeTabURL == url {
                     editorState.cursorPositions = clampedCursorPositions(
@@ -1450,7 +1446,8 @@ struct FileExplorerView: View {
             reloadOpenTabFromDiskIfNeeded(url, reason: "switch-tab")
         } else {
             previewImage = nil
-            // Storage already in tabStorages — SourceEditor recreated via .id(url)
+            // Storage already in tabStorages — the editor keyed on it stays put
+            // unless the reload below actually replaces the object.
             Task {
                 try? await Task.sleep(for: .milliseconds(50))
                 guard activeTabURL == url else { return }

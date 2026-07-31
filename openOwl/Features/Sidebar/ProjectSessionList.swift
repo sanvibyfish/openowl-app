@@ -79,7 +79,7 @@ struct ProjectSessionList: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(project.branchPrefix == nil)
-                    .help("Create worktree")
+                    .help(project.branchPrefix == nil ? "Reading branch prefix…" : "Create worktree")
                     .accessibilityLabel("Create worktree")
                 }
             } else {

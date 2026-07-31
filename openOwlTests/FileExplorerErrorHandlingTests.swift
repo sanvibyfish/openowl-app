@@ -254,6 +254,29 @@ struct FileExplorerErrorHandlingTests {
         #expect(first.fileIdentifier != second.fileIdentifier)
     }
 
+    /// An in-app save changes the disk signature just as much as an external
+    /// edit does, because `write(atomically:)` replaces the inode. Anything that
+    /// wants to distinguish "the user saved" from "the file changed underneath
+    /// us" therefore cannot key off the signature — keying the editor's SwiftUI
+    /// identity on it rebuilt the editor on every ⌘S and dropped the undo stack.
+    @Test func fileEditorDiskSignature_changesForOwnAtomicSaveOfSameLengthContent() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-signature-own-save-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let fileURL = tmp.appendingPathComponent("a.swift")
+        try "aa".write(to: fileURL, atomically: true, encoding: .utf8)
+        let beforeSave = try #require(FileEditorDiskSignatureProvider.signature(for: fileURL))
+
+        // Same call `saveCurrentTab` / `saveAllDirtyTabs` make.
+        try "bb".write(to: fileURL, atomically: true, encoding: .utf8)
+        let afterSave = try #require(FileEditorDiskSignatureProvider.signature(for: fileURL))
+
+        #expect(beforeSave.fileSize == afterSave.fileSize)
+        #expect(beforeSave != afterSave)
+    }
+
     @Test func fileEditorReloadCommitPolicy_rejectsDirtyTabAfterReadStarted() {
         let requestID = UUID()
         let generation = UUID()

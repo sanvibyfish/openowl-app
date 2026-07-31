@@ -99,16 +99,6 @@ final class ProjectStore {
         var activeProjectId: String?
     }
 
-    /// Branch prefix for the active root project (reads from ProjectItem.branchPrefix)
-    var branchPrefix: String {
-        guard let activeID = activeProjectID,
-              let project = projects.first(where: { $0.id == activeID }) else { return "dev" }
-        let root = project.isWorktree
-            ? projects.first(where: { $0.id == project.worktreeOf }) ?? project
-            : project
-        return root.branchPrefix ?? "dev"
-    }
-
     // MARK: - Computed
 
     var rootProjects: [ProjectItem] {
@@ -214,6 +204,14 @@ final class ProjectStore {
         if activeProjectID == nil, let first = freeTerminals.first {
             activeFreeTerminalID = first.id
         }
+
+        // `load()` assigns `activeProjectID` directly, bypassing
+        // `activateProject`. Without this, a restored project keeps
+        // `branchPrefix == nil` and worktree creation stays disabled until the
+        // user switches away and back.
+        if let activeProjectID {
+            detectBranchPrefix(for: activeProjectID)
+        }
     }
 
     // MARK: - Project Management
@@ -235,6 +233,7 @@ final class ProjectStore {
         if let existing = projects.first(where: { $0.path == normalized }) {
             activeProjectID = existing.id
             persist()
+            detectBranchPrefix(for: existing.id)
             return
         }
 
@@ -244,6 +243,7 @@ final class ProjectStore {
         bookmarkStore.save(projectID: item.id, url: url)
         bookmarkStore.startAccessing(projectID: item.id)
         persist()
+        detectBranchPrefix(for: item.id)
 
         // Auto-discover existing worktrees on disk
         Task { await discoverWorktrees(for: item) }

@@ -70,7 +70,7 @@ Worktree 目录统一存放在 `~/.openowl/workspace/projects/` 下。
 
 归档 worktree 会先进入进度态并禁用重复点击。openOwl 先以父仓库的 `git worktree list --porcelain` 判断当前登记状态：
 
-- 仍登记为 worktree：检查未提交修改，再执行 `git worktree remove --force`。**未提交检查本身失败时 fail-closed** —— 提示用户并取消归档，绝不在「不知道有没有脏改动」的状态下走 `--force`（git 超时、`index.lock` 被占用、仓库损坏都会走到这条路径）
+- 仍登记为 worktree **且目录仍存在**：检查未提交修改，再执行 `git worktree remove --force`。**未提交检查本身失败时 fail-closed** —— 提示用户并取消归档，绝不在「不知道有没有脏改动」的状态下走 `--force`（git 超时、`index.lock` 被占用、仓库损坏都会走到这条路径）。目录存在性是检查的前置条件：git 无法在不存在的工作目录下运行，少了这个前置判断，抛错会落进 fail-closed 分支，让下面那条「路径已不存在」的清理路径永远无法到达
 - 路径已经不存在：直接清理侧边栏中的失效记录
 - 路径存在但未登记：不再调用 `git worktree remove`；提示用户选择将残留目录移到废纸篓或保留
 
@@ -144,6 +144,7 @@ worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session lis
 
 | 日期 | 说明 |
 |------|------|
+| 2026-07-31 | 修 `6c52eda` 回归：归档的未提交检查加目录存在性前置，恢复「目录已删除但 git 仍登记」的清理路径；删除零调用且策略相反的死属性 `ProjectStore.branchPrefix`；`branchPrefix` 检测改为在 `init`/`addOrActivateProject` 也触发，避免新加或恢复的项目 worktree 按钮永久禁用 |
 | 2026-03-16 | 创建文档 |
 | 2026-03-18 | 新增 Claude 异常提醒卡片（RSS 轮询 + 可关闭忽略） |
 | 2026-05-10 | 修复 worktree 归档无进度反馈、可重复点击、失败仍从项目列表移除的问题 |

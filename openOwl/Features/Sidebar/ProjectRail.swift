@@ -211,13 +211,14 @@ struct ProjectRail: View {
             }
         }
 
-        // No prefix yet means branch-prefix detection has not finished (or the
-        // repo has no remote to read it from) — offering the action would only
-        // produce a failure alert.
+        // Detection always resolves to a name (it falls back to the local user
+        // when there is no remote), so a nil prefix only means it has not
+        // finished yet. Say so rather than leaving a silent dead button.
         Button("Create Worktree") {
             Task { await createWorktree(for: project) }
         }
         .disabled(project.branchPrefix == nil)
+        .help(project.branchPrefix == nil ? "Reading branch prefix…" : "")
 
         Divider()
 
@@ -521,6 +522,7 @@ private struct ProjectRailPopover: View {
             }
             .buttonStyle(.plain)
             .disabled(creatingWorktree || project.branchPrefix == nil)
+            .help(project.branchPrefix == nil ? "Reading branch prefix…" : "")
 
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([project.url])
@@ -630,7 +632,12 @@ enum WorktreeArchive {
 
         let parentGit = GitService(workingDirectory: parent.url)
         do {
-            if try await parentGit.isRegisteredWorktree(path: wt.path) {
+            // A worktree whose directory is already gone has no uncommitted work
+            // to protect, and git cannot run in a missing working directory —
+            // without this check the throw would hit the fail-closed branch and
+            // make a stale registration impossible to clear from the UI.
+            let worktreeExists = FileManager.default.fileExists(atPath: wt.path)
+            if worktreeExists, try await parentGit.isRegisteredWorktree(path: wt.path) {
                 let dirty: Bool
                 do {
                     dirty = try await GitService.hasUncommittedChanges(at: wt.url)
