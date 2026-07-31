@@ -74,3 +74,4 @@
 | 2026-07-24 | 006 项目侧边栏增加失效 worktree 残留目录的安全归档流程 |
 | 2026-07-28 | 006/008：左侧改为 Muxy 风格 Project Rail，移除宽 NavigationSplitView 侧栏 |
 | 2026-07-30 | 004/006：强化编辑器异步读取提交门禁与交互状态保持，并统一 worktree 归档并发 guard |
+| 2026-07-31 | 004/006/008：同步 editor context preflight、持久化保护、Right Dock 常驻与 resize 中断语义 |

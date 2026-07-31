@@ -314,8 +314,9 @@ private struct SessionPaneRow: View {
 
     var body: some View {
         Button {
-            projectStore.activate(namespace)
-            workspace.selectPane(info.paneID, in: namespace)
+            if projectStore.activate(namespace) {
+                workspace.selectPane(info.paneID, in: namespace)
+            }
         } label: {
             HStack(spacing: 6) {
                 Circle()

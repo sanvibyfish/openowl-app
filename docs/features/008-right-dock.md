@@ -116,11 +116,18 @@ GeometryReader { geo in
             terminalContent
                 .frame(width: dock.isFullscreen ? 0 : nil)
                 .clipped()
-            if dock.isExpanded {
-                Divider()
-                RightDockView(hostWidth: geo.size.width)
-                    .frame(width: dock.effectiveWidth(hostWidth: geo.size.width))
-            } else {
+            Divider()
+                .frame(width: dock.isExpanded ? 1 : 0)
+                .opacity(dock.isExpanded ? 1 : 0)
+            RightDockView(hostWidth: geo.size.width)
+                .frame(width: dock.isExpanded
+                    ? dock.effectiveWidth(hostWidth: geo.size.width)
+                    : 0)
+                .opacity(dock.isExpanded ? 1 : 0)
+                .disabled(!dock.isExpanded)
+                .allowsHitTesting(dock.isExpanded)
+                .accessibilityHidden(!dock.isExpanded)
+            if !dock.isExpanded {
                 Divider()
                 RightDockRail()
             }
@@ -132,6 +139,8 @@ GeometryReader { geo in
 ```
 
 `hostWidth` 通过 GeometryReader 读取 detail 区当前宽度。`RightDockStore.effectiveWidth(hostWidth:)` 会在每次布局时按当前窗口重新 clamp：普通 dock 不超过可用宽度的 50%，避免持久化宽度或窗口缩窄把 Terminal 挤成极窄列；展开态不显示 rail，因此全屏 dock 可占满 detail 区。
+
+`RightDockView` 不再由 `if isExpanded` 条件创建/销毁。折叠态仅将宽度设为 0，并组合 opacity、disabled、hit testing 与 accessibility hidden 隐藏交互；内部 `FileExplorerView` / `GitChangesView` 因此持续挂载，tabs、dirty buffer 与其他 view state 保留。
 
 **四、Inspector 外壳。** 原 `ViewTabBar`（中央 4-tab）删除。dock 折叠时只显示 36pt 右侧 rail，作为重新打开 Files / Git 的入口；rail 使用 15pt 图标和 2pt 活动色条标识上次选中的 tab。展开后 rail 隐藏，由 `RightDockView` 的 28pt 平面 tab header 承担切换，active tab 以背景色阶和 2pt 底边标识。
 
@@ -159,6 +168,7 @@ GeometryReader { geo in
 - **关闭最后一个 free terminal** 在 UI 层（hover button 不显示）和 model 层（`removeFreeTerminal` 早返回）双重保护。
 - **Right Dock 宽度是持久化偏好，不是无条件布局宽度。** 启动或窗口变窄后，`effectiveWidth` 会按当前窗口重新限制普通 dock 宽度，保证 Terminal 不会被历史宽度挤到只剩几列。
 - **Right Dock 展开/收起动画、手动调宽与窗口 live resize 期间暂停 PTY resize，但 Terminal view 仍裁到当前 bounds。** 这样避免多次 SIGWINCH 破坏 scrollback，同时防止 Metal 层继续按旧宽度绘制到 Files/Git 面板背后。freeze 期间 `TerminalNSView.setFrameSize` 的自动 sync 也会被 suppress，直到动画或拖拽结束后强制同步最终尺寸。
+- **手动调宽被折叠或进入 dock fullscreen 打断时立即结束 interactive resize。** 这两种状态都会移除/隐藏 resize handle，`RightDockStore` 同步清除交互 flag；正常 drag end 仍立即清除，不依赖 timeout。
 - **Right Dock 全屏时 Terminal 仍后台运行。** Terminal 的 `frame(width: 0)` + `clipped()` 隐藏视图但不卸载 ghostty surface，shell 进程不受影响。隐藏期间不会把 0/1px 尺寸同步给 libghostty，pane 保留上一次可用 PTY 尺寸；退出全屏恢复显示时会按当前 bounds 强制重同步，避免 TUI 仍按旧列数绘制。
 - **`activeKind` 和 `activeProjectID` 不要双向同步。** 内部代码读 `activeKind`，写优先用 `activate(_:)`。`activeProjectID` 的直接赋值仍兼容（didSet 自动清 `activeFreeTerminalID`），但不再推荐。
 
@@ -170,6 +180,7 @@ GeometryReader { geo in
 
 | 日期 | 变更 | 作者 |
 |------|------|------|
+| 2026-07-31 | `ContentView` 以 width 0 + opacity/disabled/hit-testing/accessibility hidden 保持 `RightDockView` 常驻；折叠或进入 fullscreen 时结束 interactive resize freeze | Codex |
 | 2026-07-28 | 左侧宽 Sidebar 换为 `ProjectRail`；ContentView 去掉 NavigationSplitView，三栏变为 左 rail + Terminal + 右 dock | Lead |
 | 2026-07-25 | 项目上下文条并入 tab header（路径降为 tooltip）、删除 EXPLORER/CHANGES 重复标题、`headerHeight` 32→28 对齐编辑器 tab 栏、文件树背景从 `.regularMaterial` 改回语义色；dock 外壳 104pt→57pt | Lead |
 | 2026-07-24 | 采用终端工作区的平面视觉语言：36pt precision rail、32pt tab header、40pt 项目上下文条，并以细活动线替代胶囊式 segmented control | Codex |

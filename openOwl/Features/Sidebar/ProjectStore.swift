@@ -61,13 +61,24 @@ enum WorktreeCreationError: LocalizedError {
     }
 }
 
+enum UnreadableProjectStoreNotice {
+    case quarantined(reason: String, backupURL: URL)
+    case quarantineFailed(reason: String, storeURL: URL, error: String)
+}
+
 @MainActor
 @Observable
 final class ProjectStore {
     private(set) var projects: [ProjectItem] = []
     private var lastActiveProjectIDByRoot: [String: String] = [:]
+    private let storeURL: URL
+    private let unreadableStoreAlertPresenter: (UnreadableProjectStoreNotice) -> Void
+    private(set) var isStoreUnreadable = false
     private var archivingWorktreeIDs: Set<String> = []
     private var creatingWorktreeRootIDs: Set<String> = []
+
+    @ObservationIgnored
+    private var activeContextChangeApprovers: [UUID: () -> Bool] = [:]
 
     /// Setting `activeProjectID` to a non-nil value implicitly clears any active
     /// free terminal (project selection takes priority over free-terminal selection).
@@ -94,12 +105,24 @@ final class ProjectStore {
     /// Setter exposed for @testable test access; production code should use `activate(_:)`.
     var activeFreeTerminalID: UUID?
 
-    let bookmarkStore = BookmarkStore()
+    let bookmarkStore: BookmarkStore
 
-    private static let storeURL: URL = {
+    private static let productionStoreURL: URL = {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home.appendingPathComponent(".openowl/openowl.json")
     }()
+
+    private static var defaultStoreURL: URL {
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil else {
+            return productionStoreURL
+        }
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "openowl-project-store-test-host-\(ProcessInfo.processInfo.processIdentifier)",
+                isDirectory: true
+            )
+            .appendingPathComponent("openowl.json")
+    }
 
     private struct StoreFile: Codable {
         var projects: [ProjectItem]
@@ -175,14 +198,16 @@ final class ProjectStore {
     /// runs collide on `index.lock`, and per-view in-flight state cannot see
     /// the other view's request.
     func createWorktree(for project: ProjectItem) async throws {
-        guard creatingWorktreeRootIDs.insert(project.id).inserted else { return }
-        defer { creatingWorktreeRootIDs.remove(project.id) }
-
         // Read this root's own prefix, not the active project's, so create works
         // from the rail while a different project is selected.
         guard let prefix = project.branchPrefix else {
             throw WorktreeCreationError.missingBranchPrefix
         }
+        guard !creatingWorktreeRootIDs.contains(project.id) else { return }
+        guard permitsActiveContextChange() else { return }
+        guard creatingWorktreeRootIDs.insert(project.id).inserted else { return }
+        defer { creatingWorktreeRootIDs.remove(project.id) }
+
         let generated = BranchNameGenerator.generate(prefix: prefix)
         let git = GitService(workingDirectory: project.url)
 
@@ -190,19 +215,37 @@ final class ProjectStore {
             branch: generated.branchName,
             dirName: generated.dirName
         )
-        let newProject = addWorktreeProject(
+        let worktree = insertWorktreeProject(
             parentID: project.id,
             path: worktreePath,
-            branch: generated.branchName
+            branch: generated.branchName,
+            activate: false
         )
-        activateProject(id: newProject.id)
+        _ = activateProject(id: worktree.id)
     }
 
     // MARK: - Init
 
-    init() {
+    init(
+        storeURL: URL? = nil,
+        unreadableStoreAlertPresenter: ((UnreadableProjectStoreNotice) -> Void)? = nil
+    ) {
+        let resolvedStoreURL = (storeURL ?? Self.defaultStoreURL).standardizedFileURL
+        self.storeURL = resolvedStoreURL
+        self.unreadableStoreAlertPresenter = unreadableStoreAlertPresenter
+            ?? Self.presentUnreadableStoreAlert
+        bookmarkStore = BookmarkStore(
+            storeURL: resolvedStoreURL == Self.productionStoreURL
+                ? nil
+                : resolvedStoreURL
+                    .deletingLastPathComponent()
+                    .appendingPathComponent("bookmarks.plist")
+        )
+
         load()
-        seedDefaultProjectIfNeeded()
+        if !isStoreUnreadable {
+            seedDefaultProjectIfNeeded()
+        }
         seedDefaultFreeTerminalIfNeeded()
 
         // If no project was restored (fresh install or all projects pruned),
@@ -230,10 +273,11 @@ final class ProjectStore {
     func addOrActivateProject(_ url: URL) {
         let normalized = url.standardizedFileURL.path
         if let existing = projects.first(where: { $0.path == normalized }) {
-            activeProjectID = existing.id
-            persist()
+            _ = activateProject(id: existing.id)
             return
         }
+
+        guard permitsActiveContextChange() else { return }
 
         let item = ProjectItem(url: url)
         projects.append(item)
@@ -272,10 +316,16 @@ final class ProjectStore {
         }
     }
 
-    func activateProject(id: String) {
-        guard projects.contains(where: { $0.id == id }) else { return }
+    @discardableResult
+    func activateProject(id: String) -> Bool {
+        guard projects.contains(where: { $0.id == id }) else { return false }
+        guard !archivingWorktreeIDs.contains(id) else { return false }
+        guard activeProjectID != id || activeFreeTerminalID != nil else { return true }
+        guard permitsActiveContextChange() else { return false }
+
         activeProjectID = id
         persist()
+        return true
     }
 
     /// Restores the most recently selected main/worktree namespace for a root project.
@@ -304,16 +354,32 @@ final class ProjectStore {
 
     /// Unified entry point for activating either a project or a free terminal.
     /// Caller must already be on the main thread.
-    func activate(_ kind: ActiveKind) {
+    @discardableResult
+    func activate(_ kind: ActiveKind) -> Bool {
         switch kind {
         case .project(let id):
-            activateProject(id: id)
+            return activateProject(id: id)
         case .freeTerminal(let id):
-            guard freeTerminals.contains(where: { $0.id == id }) else { return }
+            guard freeTerminals.contains(where: { $0.id == id }) else { return false }
+            guard activeProjectID != nil || activeFreeTerminalID != id else { return true }
+            guard permitsActiveContextChange() else { return false }
+
             activeProjectID = nil
             activeFreeTerminalID = id
             // Free terminals are session-scoped; nothing to persist.
+            return true
         }
+    }
+
+    func registerActiveContextChangeApprover(
+        id: UUID,
+        _ approver: @escaping () -> Bool
+    ) {
+        activeContextChangeApprovers[id] = approver
+    }
+
+    func unregisterActiveContextChangeApprover(id: UUID) {
+        activeContextChangeApprovers.removeValue(forKey: id)
     }
 
     @discardableResult
@@ -328,6 +394,10 @@ final class ProjectStore {
     func removeFreeTerminal(id: UUID) {
         guard freeTerminals.count > 1 else { return }
         guard freeTerminals.contains(where: { $0.id == id }) else { return }
+        if activeFreeTerminalID == id {
+            guard permitsActiveContextChange() else { return }
+        }
+
         freeTerminals.removeAll { $0.id == id }
         if activeFreeTerminalID == id, let next = freeTerminals.first {
             activeFreeTerminalID = next.id
@@ -364,7 +434,12 @@ final class ProjectStore {
     }
 
     func removeProject(id: String) {
+        guard projects.contains(where: { $0.id == id }) else { return }
         let childIDs = worktrees(for: id).map(\.id)
+        if activeProjectID == id || childIDs.contains(activeProjectID ?? "") {
+            guard permitsActiveContextChange() else { return }
+        }
+
         projects.removeAll { $0.id == id || childIDs.contains($0.id) }
 
         if activeProjectID == id || childIDs.contains(activeProjectID ?? "") {
@@ -388,11 +463,23 @@ final class ProjectStore {
 
     func addWorktreeProject(parentID: String, path: String, branch: String) -> ProjectItem {
         if let existing = projects.first(where: { $0.path == path }) {
-            activeProjectID = existing.id
-            persist()
             return existing
         }
 
+        return insertWorktreeProject(
+            parentID: parentID,
+            path: path,
+            branch: branch,
+            activate: false
+        )
+    }
+
+    private func insertWorktreeProject(
+        parentID: String,
+        path: String,
+        branch: String,
+        activate: Bool
+    ) -> ProjectItem {
         let item = ProjectItem(
             path: path,
             name: branch,
@@ -400,7 +487,9 @@ final class ProjectStore {
             worktreeBranch: branch
         )
         projects.append(item)
-        activeProjectID = item.id
+        if activate {
+            activeProjectID = item.id
+        }
         let worktreeURL = URL(fileURLWithPath: path, isDirectory: true)
         bookmarkStore.save(projectID: item.id, url: worktreeURL)
         bookmarkStore.startAccessing(projectID: item.id)
@@ -409,7 +498,12 @@ final class ProjectStore {
     }
 
     func removeWorktreeProject(id: String) {
-        let parentID = projects.first(where: { $0.id == id })?.worktreeOf
+        guard let worktree = projects.first(where: { $0.id == id }) else { return }
+        if activeProjectID == id {
+            guard permitsActiveContextChange() else { return }
+        }
+
+        let parentID = worktree.worktreeOf
         bookmarkStore.remove(projectID: id)
         projects.removeAll { $0.id == id }
         if activeProjectID == id {
@@ -455,9 +549,9 @@ final class ProjectStore {
 
     private func load() {
         // 1) Try ~/.openowl/openowl.json
-        if FileManager.default.fileExists(atPath: Self.storeURL.path) {
+        if FileManager.default.fileExists(atPath: storeURL.path) {
             do {
-                let data = try Data(contentsOf: Self.storeURL)
+                let data = try Data(contentsOf: storeURL)
                 let store = try JSONDecoder().decode(StoreFile.self, from: data)
                 projects = store.projects
                     .filter { Self.isReasonableProjectPath(URL(fileURLWithPath: $0.path)) }
@@ -479,10 +573,13 @@ final class ProjectStore {
                 AppLogger.log(
                     "project-store",
                     "load failed path=%@ error=%@",
-                    Self.storeURL.path,
+                    storeURL.path,
                     error.localizedDescription
                 )
-                quarantineUnreadableStore(reason: error.localizedDescription)
+                guard quarantineUnreadableStore(reason: error.localizedDescription) else {
+                    isStoreUnreadable = true
+                    return
+                }
             }
         }
 
@@ -491,6 +588,8 @@ final class ProjectStore {
         for project in projects {
             bookmarkStore.startAccessing(projectID: project.id)
         }
+
+        guard storeURL == Self.productionStoreURL else { return }
 
         // 2) Migrate from UserDefaults (one-time)
         let defaults = UserDefaults.standard
@@ -539,43 +638,77 @@ final class ProjectStore {
 
     /// Renames an undecodable store file out of the way and tells the user
     /// where it went, so the next `persist()` cannot destroy it.
-    private func quarantineUnreadableStore(reason: String) {
+    private func quarantineUnreadableStore(reason: String) -> Bool {
         let stamp = Int(Date().timeIntervalSince1970)
-        let backup = Self.storeURL
+        let backup = storeURL
             .deletingLastPathComponent()
             .appendingPathComponent("openowl.json.corrupt-\(stamp)")
         do {
-            try FileManager.default.moveItem(at: Self.storeURL, to: backup)
+            try FileManager.default.moveItem(at: storeURL, to: backup)
         } catch {
             AppLogger.log("project-store", "quarantine failed error=%@", error.localizedDescription)
-            return
+            unreadableStoreAlertPresenter(.quarantineFailed(
+                reason: reason,
+                storeURL: storeURL,
+                error: error.localizedDescription
+            ))
+            return false
         }
         AppLogger.log("project-store", "quarantined unreadable store to %@", backup.path)
+        unreadableStoreAlertPresenter(.quarantined(reason: reason, backupURL: backup))
+        return true
+    }
 
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Project list could not be read"
-        alert.informativeText = """
-        \(reason)
+    private static func presentUnreadableStoreAlert(notice: UnreadableProjectStoreNotice) {
+        DispatchQueue.main.async {
+            guard NSApp?.isRunning == true else { return }
 
-        The file was moved to \(backup.path) so it is not overwritten. openOwl started with an empty project list.
-        """
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            switch notice {
+            case .quarantined(let reason, let backupURL):
+                alert.messageText = "Project list could not be read"
+                alert.informativeText = """
+                \(reason)
+
+                The file was moved to \(backupURL.path) so it is not overwritten. openOwl started with an empty project list.
+                """
+            case .quarantineFailed(let reason, let storeURL, let error):
+                alert.messageText = "Project list could not be protected"
+                alert.informativeText = """
+                \(reason)
+
+                openOwl could not move \(storeURL.path) aside: \(error)
+
+                The original file remains in place, and this session will not save project-list changes. Back up or repair the file, then restart openOwl.
+                """
+            }
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
     }
 
     private func persist() {
+        guard !isStoreUnreadable else {
+            AppLogger.log("project-store", "persist refused because store is unreadable")
+            return
+        }
+
         let store = StoreFile(projects: projects, activeProjectId: activeProjectID)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         do {
             let data = try encoder.encode(store)
-            let dir = Self.storeURL.deletingLastPathComponent()
+            let dir = storeURL.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            try data.write(to: Self.storeURL, options: .atomic)
+            try data.write(to: storeURL, options: .atomic)
         } catch {
             AppLogger.log("project-store", "persist failed error=%@", error.localizedDescription)
         }
+    }
+
+    private func permitsActiveContextChange() -> Bool {
+        activeContextChangeApprovers.values.allSatisfy { $0() }
     }
 
 }

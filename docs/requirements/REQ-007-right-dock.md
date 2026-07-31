@@ -80,7 +80,7 @@
   - `⤢` 全屏：panel 拓展到「占满中间+右侧空间」（Sidebar 仍可见，Terminal 隐藏）；再次点击恢复
   - `›` 折叠：关闭 panel
 - 左缘可拖拽调宽度，最小 320pt，最大 = 主窗口宽度 × 50%
-- 两个内容视图全部 mount（opacity + allowsHitTesting 切换），保留各自 state（沿用现有 4-tab 的做法）
+- `RightDockView` 与其两个内容视图始终 mount。panel 折叠时 `ContentView` 将 dock width 设为 0，并组合 opacity、disabled、allowsHitTesting 与 accessibilityHidden 隐藏；保留 FileExplorer tabs、dirty buffer 及 Files/Git 各自 state
 
 **4.1.4 Toolbar 调整**
 
@@ -117,6 +117,7 @@
 - **Cmd+T 等终端快捷键**：始终激活 Terminal（即使 Terminal 当前不可见，也回到 Terminal 视图并退出 panel 全屏）
 - **Dock tab 切换**：展开态只由 header segmented control 切换 Files/Git，避免与项目快捷键冲突
 - **窗口宽度 < 800pt**：panel 最大宽度仍为窗口 50%；用户可拖更窄但不低于 320pt
+- **拖宽期间折叠或进入 dock fullscreen**：立即结束 interactive resize freeze；正常 drag end 同样立即结束，不让 PTY resize 永久冻结
 
 ## 5. 技术方案
 
@@ -224,6 +225,8 @@ func ensureInitialTab(for ns: TerminalNamespace, cwd: String)
 18. Right dock 展开时平面 tab header 可切换 Files/Git，切换后子视图 state 保留
 19. 性能：toggle right dock 动画 < 200ms 无明显卡顿
 20. Right dock 全屏时 Terminal 后台保持运行（shell 进程不被 SIGTSTP）
+21. Right dock 折叠后重新展开 Files，原有 editor tabs 与 dirty buffer 仍存在
+22. 拖动 dock resize handle 时折叠 panel 或进入 fullscreen，interactive resize 状态立即清除
 ```
 
 ## 7. 优先级与排期
@@ -251,6 +254,7 @@ func ensureInitialTab(for ns: TerminalNamespace, cwd: String)
 
 | 日期 | 变更 | 作者 |
 |------|------|------|
+| 2026-07-31 | 明确 `RightDockView` 折叠态常驻与交互/无障碍隐藏组合；折叠或进入 fullscreen 必须结束 interactive resize freeze | Codex |
 | 2026-07-25 | 项目上下文条并入 28pt tab header（路径改为 tooltip、Finder 入口移到右上角），面板 header 高度与编辑器 tab 栏对齐 | Lead |
 | 2026-07-24 | Right Dock 外壳统一为平面终端工作区视觉：36pt rail、32pt tab header、40pt 项目上下文条及细活动线 | Codex |
 | 2026-07-18 | 展开态采用 Files/Git segmented header 与项目上下文架；右侧 rail 仅在折叠态作为入口 | Codex |

@@ -51,6 +51,9 @@ struct ProjectItem: Identifiable, Hashable, Codable {
 - 启动时从 UserDefaults 一次性迁移（旧版兼容）
 - 路径验证: `isReasonableProjectPath()` 要求 ≥3 个路径组件
 - 去重: `uniqued()` 基于标准化路径
+- `openowl.json` 无法读取/解码时先改名隔离；隔离成功后异步提示备份路径，并以空项目列表继续启动
+- 隔离失败时异步告警，将本 session 的 `ProjectStore` 标记为只读；后续 `persist()` 全部拒绝，原始 `openowl.json` 保持不变
+- 测试宿主的默认 store 路径位于独立临时目录，避免单元测试读写真实 `~/.openowl/openowl.json`
 
 ### 3.3 Worktree 支持
 
@@ -75,6 +78,8 @@ Worktree 目录统一存放在 `~/.openowl/workspace/projects/` 下。
 - 路径存在但未登记：不再调用 `git worktree remove`；提示用户选择将残留目录移到废纸篓或保留
 
 Project Rail popover 与 Project Session List 的归档入口共享 `ProjectStore` 中按 worktree ID 记录的 in-flight guard。相同 worktree 的重复归档会在业务入口拒绝，菜单显示 `Archiving...` 并禁用；不同 worktree 可独立归档。成功、失败或用户取消后都会释放 guard，允许后续重试。
+
+若归档目标是当前 active worktree，会在任何 `await`、创建 `GitService`、执行 Git 命令或移动文件前先调用 editor context preflight，并同步切到 parent。dirty buffer 保存失败时归档直接取消，不产生 Git/文件副作用；归档 in-flight 期间该 worktree 不可重新激活。
 
 只有 Git 删除成功、路径确认不存在，或用户明确将残留目录移到废纸篓后，才会从 openOwl 项目列表移除。失败或选择保留时继续保留侧边栏条目，避免界面状态与磁盘/Git 状态不一致。
 
@@ -112,7 +117,7 @@ openOwl/Features/Sidebar/
 └── BookmarkStore.swift
 ```
 
-worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session list 只调用它 —— 两处都提供同一操作，各自持有进行中状态会让并发的 `git worktree add` 撞上 `index.lock`。
+worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session list 只调用它 —— 两处都提供同一操作，各自持有进行中状态会让并发的 `git worktree add` 撞上 `index.lock`。异步创建在首个 Git 副作用前执行 editor context preflight；Git 成功后先将新 worktree 登记为 inactive，真正激活时再次审批。任何 pane/context veto 都保持当前项目与 terminal namespace 不变。
 
 窗口结构（`ContentView`）：
 
@@ -127,6 +132,7 @@ worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session lis
 
 - 不再使用 `NavigationSplitView` 左栏
 - 选中态：左 2px accent 竖条 + monogram 填充色
+- monogram 颜色 hash 使用 `magnitude` 计算 palette 索引，`Int.min` 也不会触发 `abs` 溢出
 - 有 terminal bell 时 monogram 角标显示未读数
 - 有 open tab 的 root 排在前面；未打开的 root 半透明
 
@@ -145,6 +151,7 @@ worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session lis
 
 | 日期 | 说明 |
 |------|------|
+| 2026-07-31 | `openowl.json` 隔离失败时本 session 改为只读且异步告警；active worktree 归档在 Git/文件副作用前执行 editor preflight；monogram hash 改用 magnitude |
 | 2026-07-31 | `openowl.json` 解码失败改为先隔离备份再继续（此前落到迁移分支后 `projects` 为空，第一次 `persist()` 就永久覆盖用户项目列表）；`removeWorktree` 不再按 git stderr 子串分类并递归删整棵工作树，改为只删 `.DS_Store` 后重试 git；两文件 NSLog 全部改 AppLogger |
 | 2026-07-31 | `detectBranchPrefix` 收进 `activeProjectID.didSet`——此前只挂在 4 个调用点，删除项目/worktree 后回落的 5 条路径漏掉，那些项目的 worktree 按钮永久禁用 |
 | 2026-07-31 | 修 `6c52eda` 回归：归档的未提交检查加目录存在性前置，恢复「目录已删除但 git 仍登记」的清理路径；删除零调用且策略相反的死属性 `ProjectStore.branchPrefix`；`branchPrefix` 检测改为在 `init`/`addOrActivateProject` 也触发，避免新加或恢复的项目 worktree 按钮永久禁用 |

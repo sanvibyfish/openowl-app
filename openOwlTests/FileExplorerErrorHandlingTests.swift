@@ -394,6 +394,49 @@ struct FileExplorerErrorHandlingTests {
         ))
     }
 
+    @Test func fileEditorAutomaticReadPolicy_enforcesTextAndImageCaps() {
+        #expect(FileEditorAutomaticReadPolicy.allowsRead(
+            fileSize: 49,
+            isImage: false,
+            hugeFileThreshold: 50,
+            imageMaxBytes: 25
+        ))
+        #expect(!FileEditorAutomaticReadPolicy.allowsRead(
+            fileSize: 50,
+            isImage: false,
+            hugeFileThreshold: 50,
+            imageMaxBytes: 25
+        ))
+        #expect(FileEditorAutomaticReadPolicy.allowsRead(
+            fileSize: 25,
+            isImage: true,
+            hugeFileThreshold: 50,
+            imageMaxBytes: 25
+        ))
+        #expect(!FileEditorAutomaticReadPolicy.allowsRead(
+            fileSize: 26,
+            isImage: true,
+            hugeFileThreshold: 50,
+            imageMaxBytes: 25
+        ))
+    }
+
+    @Test @MainActor func unsavedTabNames_aggregatesEditorsIndependently() {
+        let store = FileExplorerStore()
+        let editorA = UUID()
+        let editorB = UUID()
+
+        store.publishUnsavedTabNames(["b.swift"], for: editorA)
+        store.publishUnsavedTabNames(["a.swift"], for: editorB)
+        #expect(store.unsavedTabNames == ["a.swift", "b.swift"])
+
+        store.removeUnsavedTabNames(for: editorA)
+        #expect(store.unsavedTabNames == ["a.swift"])
+
+        store.publishUnsavedTabNames([], for: editorB)
+        #expect(store.unsavedTabNames.isEmpty)
+    }
+
     private var defaultsSuiteName: String {
         "openowl.file-editor-session.tests"
     }

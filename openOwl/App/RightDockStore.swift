@@ -43,7 +43,10 @@ final class RightDockStore {
     var isExpanded: Bool {
         didSet {
             UserDefaults.standard.set(isExpanded, forKey: Self.keyExpanded)
-            if !isExpanded { isFullscreen = false }
+            if !isExpanded {
+                endInteractiveResize()
+                isFullscreen = false
+            }
             startDockResizeAnimation()
         }
     }
@@ -58,7 +61,10 @@ final class RightDockStore {
 
     /// Fullscreen is session-scoped — not persisted across launches.
     var isFullscreen: Bool = false {
-        didSet { startDockResizeAnimation() }
+        didSet {
+            if isFullscreen { endInteractiveResize() }
+            startDockResizeAnimation()
+        }
     }
 
     /// True only during the ~400ms window after the dock starts expanding/collapsing.

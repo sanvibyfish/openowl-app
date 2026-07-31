@@ -32,13 +32,22 @@ struct ContentView: View {
                         .frame(width: rightDockStore.isFullscreen ? 0 : nil)
                         .clipped()
 
-                    if rightDockStore.isExpanded {
-                        softVerticalDivider
+                    softVerticalDivider
+                        .frame(width: rightDockStore.isExpanded ? 1 : 0)
+                        .opacity(rightDockStore.isExpanded ? 1 : 0)
 
-                        RightDockView(hostWidth: hostWidth)
-                            .frame(width: rightDockStore.effectiveWidth(hostWidth: hostWidth))
-                            .frame(maxHeight: .infinity)
-                    }
+                    RightDockView(hostWidth: hostWidth)
+                        .frame(
+                            width: rightDockStore.isExpanded
+                                ? rightDockStore.effectiveWidth(hostWidth: hostWidth)
+                                : 0
+                        )
+                        .frame(maxHeight: .infinity)
+                        .opacity(rightDockStore.isExpanded ? 1 : 0)
+                        .disabled(!rightDockStore.isExpanded)
+                        .allowsHitTesting(rightDockStore.isExpanded)
+                        .accessibilityHidden(!rightDockStore.isExpanded)
+                        .clipped()
 
                     if !rightDockStore.isExpanded {
                         RightDockRail()

@@ -361,7 +361,7 @@ private struct ProjectMonogram: View {
         for scalar in name.unicodeScalars {
             hash = hash &* 31 &+ Int(scalar.value)
         }
-        return palette[abs(hash) % palette.count]
+        return palette[Int(hash.magnitude % UInt(palette.count))]
     }
 
     var body: some View {
@@ -595,6 +595,10 @@ enum WorktreeArchive {
             return
         }
 
+        if projectStore.activeProjectID == wt.id {
+            guard projectStore.activateProject(id: parentID) else { return }
+        }
+
         let parentGit = GitService(workingDirectory: parent.url)
         do {
             // A worktree whose directory is already gone has no uncommitted work
@@ -664,9 +668,6 @@ enum WorktreeArchive {
             return
         }
 
-        if projectStore.activeProjectID == wt.id {
-            projectStore.activateProject(id: parentID)
-        }
         projectStore.removeWorktreeProject(id: wt.id)
     }
 

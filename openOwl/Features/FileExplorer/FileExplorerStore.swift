@@ -82,7 +82,10 @@ final class FileExplorerStore {
     /// view. The buffers themselves are `@State` inside that view, so this is
     /// the only handle `applicationShouldTerminate` has on them — without it,
     /// ⌘Q discarded unsaved work without asking.
-    var unsavedTabNames: [String] = []
+    private var unsavedTabNamesByEditor: [UUID: [String]] = [:]
+    var unsavedTabNames: [String] {
+        unsavedTabNamesByEditor.values.flatMap { $0 }.sorted()
+    }
     var isQuickOpenPresented = false
     var quickOpenQuery: String = "" {
         didSet {
@@ -94,6 +97,19 @@ final class FileExplorerStore {
     private(set) var nodeIndex: [String: FileExplorerNode] = [:]
     private var searchableFileNodes: [FileExplorerNode] = []
     private var watcher: FileWatcher?
+
+    func publishUnsavedTabNames(_ names: [String], for editorID: UUID) {
+        if names.isEmpty {
+            unsavedTabNamesByEditor.removeValue(forKey: editorID)
+        } else {
+            unsavedTabNamesByEditor[editorID] = names.sorted()
+        }
+    }
+
+    func removeUnsavedTabNames(for editorID: UUID) {
+        unsavedTabNamesByEditor.removeValue(forKey: editorID)
+    }
+
     func setupQueryAutoSearch() {
         // No-op: quickOpenQuery.didSet now triggers updateQuickOpenResults() directly.
         // Kept for API compatibility with callers.

@@ -391,4 +391,29 @@ struct RightDockStoreTests {
         #expect(!store.shouldFreezeTerminalResize)
         Self.clearDefaults()
     }
+
+    @Test @MainActor func collapseInterruptsInteractiveResize() {
+        Self.clearDefaults()
+        let store = RightDockStore()
+        store.expand(tab: .git)
+        store.beginInteractiveResize()
+
+        store.collapse()
+
+        #expect(!store.isInteractingWithWidthResize)
+        Self.clearDefaults()
+    }
+
+    @Test @MainActor func enteringFullscreenInterruptsInteractiveResize() {
+        Self.clearDefaults()
+        let store = RightDockStore()
+        store.expand(tab: .git)
+        store.beginInteractiveResize()
+
+        store.toggleFullscreen()
+
+        #expect(store.isFullscreen)
+        #expect(!store.isInteractingWithWidthResize)
+        Self.clearDefaults()
+    }
 }
