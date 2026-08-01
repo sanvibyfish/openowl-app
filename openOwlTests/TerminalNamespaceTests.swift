@@ -67,6 +67,39 @@ struct TerminalNamespaceTests {
         #expect(projectPanesAfterReturn.count == projectPanesAfterSeed.count)
     }
 
+    @Test @MainActor func switchNamespace_returnsToLastActiveTab() {
+        let store = TerminalWorkspaceStore()
+        let projectNS: TerminalNamespace = .project("proj-A")
+        let termNS: TerminalNamespace = .freeTerminal(UUID())
+
+        store.switchNamespace(projectNS)
+        let secondTab = store.newTab(for: projectNS)
+        store.selectTab(id: secondTab)
+        #expect(store.activeTabID == secondTab)
+
+        store.switchNamespace(termNS)
+        store.switchNamespace(projectNS)
+
+        #expect(store.activeTabID == secondTab)
+    }
+
+    @Test @MainActor func switchNamespace_fallsBackToFirstTabWhenRememberedTabClosed() {
+        let store = TerminalWorkspaceStore()
+        let projectNS: TerminalNamespace = .project("proj-A")
+        let termNS: TerminalNamespace = .freeTerminal(UUID())
+
+        store.switchNamespace(projectNS)
+        let firstTab = store.activeTabID
+        let secondTab = store.newTab(for: projectNS)
+        store.selectTab(id: secondTab)
+
+        store.switchNamespace(termNS)
+        _ = store.closeTab(id: secondTab)
+        store.switchNamespace(projectNS)
+
+        #expect(store.activeTabID == firstTab)
+    }
+
     @Test @MainActor func switchNamespace_visibleTabsReflectActive() {
         let store = TerminalWorkspaceStore()
         let projectNS: TerminalNamespace = .project("proj-A")
@@ -102,23 +135,24 @@ struct TerminalNamespaceTests {
         #expect(store.activeTabID == tab2)
     }
 
-    @Test @MainActor func switchNamespace_differentNamespace_resetsToFirstTab() {
+    @Test @MainActor func switchNamespace_differentNamespace_adoptsThatNamespacesTab() {
         // The same-namespace guard must not block legitimate cross-namespace
-        // switches: when activeTabID belongs to a different namespace, the
-        // new namespace's first tab should take over.
+        // switches: when activeTabID belongs to a different namespace, a tab
+        // from the incoming namespace has to take over. Which one is the
+        // namespace's last-active tab, not unconditionally its first.
         let store = TerminalWorkspaceStore()
         let projectNS: TerminalNamespace = .project("proj-A")
         let termNS: TerminalNamespace = .freeTerminal(UUID())
 
         let projectTab = store.newTab(for: projectNS)
-        let termTab1 = store.newTab(for: termNS)
         _ = store.newTab(for: termNS)
+        let termTab2 = store.newTab(for: termNS)
 
         store.switchNamespace(projectNS)
         #expect(store.activeTabID == projectTab)
 
         store.switchNamespace(termNS)
-        #expect(store.activeTabID == termTab1)
+        #expect(store.activeTabID == termTab2)
     }
 
     @Test @MainActor func switchNamespace_nil_clearsActive() {

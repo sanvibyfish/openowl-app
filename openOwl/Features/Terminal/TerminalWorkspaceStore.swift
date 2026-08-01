@@ -334,7 +334,16 @@ typealias TerminalNamespace = ActiveKind
 @Observable
 final class TerminalWorkspaceStore {
     private(set) var tabs: [TerminalTabState] = []
-    var activeTabID: UUID?
+    var activeTabID: UUID? {
+        didSet {
+            guard let id = activeTabID, let namespace = tabNamespaceMap[id] else { return }
+            lastActiveTabByNamespace[namespace] = id
+        }
+    }
+
+    /// Where the user last was in each namespace. Switching projects and coming
+    /// back should land on that tab, not reset to the first one.
+    private var lastActiveTabByNamespace: [TerminalNamespace: UUID] = [:]
 
     var activeFocusedPaneID: UUID? {
         guard let tab = tabs.first(where: { $0.id == activeTabID }) else { return nil }
@@ -429,6 +438,13 @@ final class TerminalWorkspaceStore {
         // pwd reports on each shell command) would reset activeTabID to the
         // first tab — making any non-first tab impossible to stay on while typing.
         if let currentID = activeTabID, tabNamespaceMap[currentID] == namespace {
+            return
+        }
+        // Coming back from another namespace: restore the tab the user left off
+        // on. Falls through to the first tab when that one has since been closed.
+        if let remembered = lastActiveTabByNamespace[namespace],
+           nsTabs.contains(where: { $0.id == remembered }) {
+            activeTabID = remembered
             return
         }
         activeTabID = nsTabs.first?.id
