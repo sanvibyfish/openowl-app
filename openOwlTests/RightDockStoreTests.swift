@@ -242,7 +242,8 @@ struct RightDockStoreTests {
         store.activeTab = .git
         store.gitShowsDiff = false
         store.setWidth(100, maxWidth: 800)
-        #expect(store.width == RightDockStore.minWidth)
+        // List-only floors at the width that mode actually renders.
+        #expect(store.width == RightDockStore.listOnlyWidth)
         Self.clearDefaults()
     }
 
@@ -267,6 +268,8 @@ struct RightDockStoreTests {
     @Test @MainActor func setWidth_handlesMaxBelowMin() {
         Self.clearDefaults()
         let store = RightDockStore()
+        store.activeTab = .git
+        store.gitShowsDiff = true
 
         store.setWidth(500, maxWidth: 100)
         #expect(store.width == RightDockStore.minWidthWithDetail)
@@ -365,8 +368,25 @@ struct RightDockStoreTests {
         store.gitShowsDiff = true
         store.width = 1000
 
+        // Literal, not maxNormalWidth(hostWidth:) — deriving the expectation
+        // from the code under test would pass for any maxWidthFraction.
+        // Tolerance because 900 * 0.55 lands on 495.00000000000006.
         let w = store.effectiveWidth(hostWidth: 900)
-        #expect(w == RightDockStore.maxNormalWidth(hostWidth: 900))
+        #expect(abs(w - 495) < 0.001)
+        Self.clearDefaults()
+    }
+
+    /// The detail floor must not push the dock past what the window allows.
+    /// Without the outer `min`, this returns 520 and the panel overflows.
+    @Test @MainActor func effectiveWidth_hostCapBeatsDetailFloor() {
+        Self.clearDefaults()
+        let store = RightDockStore()
+        store.activeTab = .git
+        store.gitShowsDiff = true
+        store.width = 320
+
+        let w = store.effectiveWidth(hostWidth: 800)
+        #expect(abs(w - 440) < 0.001) // 800 * 0.55, below minWidthWithDetail (520)
         Self.clearDefaults()
     }
 
@@ -388,9 +408,9 @@ struct RightDockStoreTests {
         store.activeTab = .files
         store.filesShowsEditor = false
 
+        // Literal rather than a copy of the branch being tested.
         let w = store.effectiveWidth(hostWidth: 420)
-        let hostMax = RightDockStore.maxNormalWidth(hostWidth: 420)
-        #expect(w == min(RightDockStore.listOnlyWidth, hostMax))
+        #expect(abs(w - 231) < 0.001) // 420 * 0.55, below listOnlyWidth
         Self.clearDefaults()
     }
 

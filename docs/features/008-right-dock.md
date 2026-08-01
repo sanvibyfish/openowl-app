@@ -193,3 +193,5 @@ GeometryReader { geo in
 | 2026-07-31 | `effectiveWidth` / `maxNormalWidth` 去掉恒为 0 的 `railWidth` 参数（展开态不显示 rail，该参数在生产环境无效果） |
 | 2026-07-31 | `GitChangesView` 提交 diff 的文件侧栏分隔线改回竖向实现——`PanelDivider` 本分支从 `Divider()` 改成写死横向 + `maxWidth: .infinity`，在 `HStack` 内会渲染成 1pt 高的横条并挤占 diff 区宽度 |
 | 2026-08-01 | Right Dock 视觉对齐主设计（Muxy / ProjectSessionList）：统一 `panelToolHeader`、列表行 `selectableRowChrome`（accent 左竖条 + 圆角选中）、去掉 content 区 `.regularMaterial`、Git/Files 工具栏与 empty state 走 `AppPalette` token |
+| 2026-08-01 | resize handle 的拖拽基准从 `dock.width` 改为 `effectiveWidth(hostWidth:)`——`width` 是存储偏好、可能被 `effectiveWidth` 上调（旧版本持久化的 420 会渲染成 520），锚在过时值上会让升级后第一次「拖窄」全程无响应 |
+| 2026-08-01 | `currentMinWidth` 的 list-only 分支改回 `listOnlyWidth`（原为 `minWidth`，与 `effectiveWidth` 实际渲染的 280 自相矛盾） |

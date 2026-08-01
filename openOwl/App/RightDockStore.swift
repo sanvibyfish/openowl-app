@@ -148,9 +148,11 @@ final class RightDockStore {
         }
     }
 
-    /// Floor for the current mode (list-only vs list+detail).
+    /// Floor for the current mode. List-only reports `listOnlyWidth` because
+    /// that is exactly what `effectiveWidth` renders in that mode — reporting
+    /// `minWidth` here would have the type contradict its own output.
     var currentMinWidth: CGFloat {
-        showsDetailForActiveTab ? Self.minWidthWithDetail : Self.minWidth
+        showsDetailForActiveTab ? Self.minWidthWithDetail : Self.listOnlyWidth
     }
 
     /// Width the dock panel actually occupies, given fullscreen state and
@@ -162,10 +164,9 @@ final class RightDockStore {
         if !showsDetailForActiveTab {
             return min(Self.listOnlyWidth, maxW)
         }
-        // Prefer the detail floor so HSplit columns aren't crushed mid-glyph,
-        // but never exceed the host cap (small windows still win).
-        let floor = min(currentMinWidth, maxW)
-        return min(max(width, floor), maxW)
+        // Prefer the detail floor so HSplit columns aren't crushed mid-glyph.
+        // The outer min still lets a small window win.
+        return min(max(width, currentMinWidth), maxW)
     }
 
     static func maxNormalWidth(hostWidth: CGFloat) -> CGFloat {

@@ -23,7 +23,12 @@ struct RightDockView: View {
             // overrides `width` with a fixed `listOnlyWidth` either way).
             if !dock.isFullscreen && dock.showsDetailForActiveTab {
                 ResizeHandle(
-                    currentWidth: dock.width,
+                    // Drag from the edge the user can actually see. `width` is a
+                    // stored preference that effectiveWidth may floor up (an
+                    // upgrade carrying the old 420 default renders at 520), and
+                    // anchoring the gesture to the stale value made the first
+                    // narrow-drag after upgrade do nothing at all.
+                    currentWidth: dock.effectiveWidth(hostWidth: hostWidth),
                     onResizeStart: {
                         dock.beginInteractiveResize()
                     },

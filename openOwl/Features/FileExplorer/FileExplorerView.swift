@@ -333,7 +333,16 @@ private class EditTracker: TextViewCoordinator {
     func textViewDidChangeSelection(controller: TextViewController, newPositions: [CursorPosition]) {}
 
     func destroy() {
-        controller = nil
+        // Deliberately does NOT clear `controller`. One EditTracker is shared by
+        // every tab's editor, and `.id(storage)` rebuilds on tab switch — SwiftUI
+        // registers the incoming controller before tearing the outgoing one down,
+        // so clearing here would null out the live controller and `relayout()`
+        // would silently no-op forever. `controller` is weak; the dying instance
+        // drops out on its own.
+        //
+        // Resetting the width is still required: without it the incoming editor
+        // gets deduped away at an identical host width and never has its insets
+        // applied.
         lastAppliedHostWidth = -1
     }
 }
@@ -685,27 +694,31 @@ struct FileExplorerView: View {
 
             ZStack {
                 editorContentArea
-
-                if let text = heavyProgressText {
-                    Color.black.opacity(0.22)
-                        .overlay {
-                            VStack(spacing: 8) {
-                                ProgressView()
-                                    .controlSize(.large)
-                                Text(text)
-                                    .font(AppFonts.caption)
-                                    .foregroundStyle(AppPalette.textSecondary)
-                            }
-                            .padding(20)
-                            .background(AppPalette.elevated)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(AppPalette.border, lineWidth: 1)
-                            )
-                        }
-                }
+                heavyProgressOverlay
             }
+        }
+    }
+
+    @ViewBuilder
+    private var heavyProgressOverlay: some View {
+        if let text = heavyProgressText {
+            Color.black.opacity(0.22)
+                .overlay {
+                    VStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text(text)
+                            .font(AppFonts.caption)
+                            .foregroundStyle(AppPalette.textSecondary)
+                    }
+                    .padding(20)
+                    .background(AppPalette.elevated)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(AppPalette.border, lineWidth: 1)
+                    )
+                }
         }
     }
 
@@ -714,26 +727,7 @@ struct FileExplorerView: View {
     private var editorPanel: some View {
         ZStack {
             editorPanelContent
-
-            if let text = heavyProgressText {
-                Color.black.opacity(0.22)
-                    .overlay {
-                        VStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.large)
-                            Text(text)
-                                .font(AppFonts.caption)
-                                .foregroundStyle(AppPalette.textSecondary)
-                        }
-                        .padding(20)
-                        .background(AppPalette.elevated)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(AppPalette.border, lineWidth: 1)
-                        )
-                    }
-            }
+            heavyProgressOverlay
         }
     }
 
