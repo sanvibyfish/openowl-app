@@ -942,8 +942,13 @@ struct GitChangesView: View {
     }
 
     private func loadFileIfNeeded() {
-        guard case .idle = fileLines,
-              let repoURL = store.repositoryURL,
+        // .failed is retryable — the read can lose a race with a write, and the
+        // expand button is the only way back in.
+        switch fileLines {
+        case .loading, .loaded: return
+        case .idle, .failed: break
+        }
+        guard let repoURL = store.repositoryURL,
               let path = store.selectedChange?.path else { return }
         let fileURL = repoURL.appendingPathComponent(path)
         fileLines = .loading // also prevents duplicate loads while async in flight

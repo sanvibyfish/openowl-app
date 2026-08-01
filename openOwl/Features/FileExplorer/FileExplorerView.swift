@@ -269,13 +269,16 @@ private class EditTracker: TextViewCoordinator {
 
     func prepareCoordinator(controller: TextViewController) {
         self.controller = controller
+        // The bounds observer can fire before this runs, while `controller` is
+        // still nil, so the first pass has to come from here.
         DispatchQueue.main.async { [weak self] in
-            self?.relayout(force: true)
+            self?.relayout()
         }
     }
 
-    /// Call when the SwiftUI host gets a real width (dock expand / drag resize).
-    func relayout(force: Bool = false) {
+    /// Re-pin insets and re-wrap against the host's current width. Cheap to
+    /// over-call: a width we already applied returns immediately.
+    func relayout() {
         guard let controller, let textView = controller.textView else { return }
         controller.view.layoutSubtreeIfNeeded()
         let hostWidth = controller.view.bounds.width
@@ -286,7 +289,7 @@ private class EditTracker: TextViewCoordinator {
             lastAppliedHostWidth = -1
             return
         }
-        if !force, abs(hostWidth - lastAppliedHostWidth) < 1 { return }
+        if abs(hostWidth - lastAppliedHostWidth) < 1 { return }
         lastAppliedHostWidth = hostWidth
 
         // 1) Minimap must not steal ~140pt of wrap width.
