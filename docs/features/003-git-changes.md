@@ -72,5 +72,7 @@ GitChangesStore (@MainActor)
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-01 | **commit diff 不再提供「展开未修改行」**：该功能从磁盘读当前工作区文件填充上下文，对历史提交是错误的数据源（正确来源是 `git show <hash>:<path>`），且 `hunkIndex` 每个文件从 0 重数会与共享的 `expandedHunks` 串台，删除文件的 hunk 还会让 `ForEach(1..<0)` 崩溃。工作区 diff 的展开不受影响 |
+| 2026-08-01 | `parseUnified` 三处解析修正：diff 尾部换行不再产生幽灵空 context 行；`\ No newline at end of file` 不再当正文渲染（它此前还推高 `prevNewEnd`，使后续 hunk 少算一行）；展开行的旧行号改由 hunk 的 old/new 起点偏移推算，不再直接复用新行号 |
 | 2026-08-01 | Right dock Diff 改为默认 **unified（单栏）+ 长行 wrap**（对齐 VS Code / GitHub 窄栏惯例）；去掉 side-by-side 半宽与按最长行撑开的横向滚动 |
 | 2026-03-16 | 创建文档 |

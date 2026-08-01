@@ -363,12 +363,10 @@ struct GitChangesView: View {
         if !hasAnyChanges {
             // Quiet inline filler — a hero empty state here used to dwarf the
             // commit graph below and read as a second logo on the panel.
-            EmptyStateView(
-                "Working tree is clean",
-                systemImage: "checkmark.circle",
-                density: .quiet
-            )
-            .padding(.top, 10)
+            // .quiet is text-only by design — passing a systemImage here did
+            // nothing.
+            EmptyStateView("Working tree is clean", density: .quiet)
+                .padding(.top, 10)
         }
     }
 
@@ -738,7 +736,7 @@ struct GitChangesView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                 } else {
-                    unifiedDiffRows(rows)
+                    unifiedDiffRows(rows, allowsExpansion: false)
                 }
             }
 
@@ -774,33 +772,43 @@ struct GitChangesView: View {
         let rows = parseUnified(diffText)
         return GeometryReader { geo in
             ScrollView(.vertical, showsIndicators: true) {
-                unifiedDiffRows(rows)
+                unifiedDiffRows(rows, allowsExpansion: true)
                     .frame(minWidth: geo.size.width, maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
             }
         }
     }
 
+    /// - Parameter allowsExpansion: only the working-tree diff can expand
+    ///   unmodified lines. `fileLines` reads the file off disk, which is the
+    ///   right source there and the wrong one for a commit — and `hunkIndex`
+    ///   restarts at 0 per file, so a commit's sections would collide on the
+    ///   shared `expandedHunks`. Expanding a commit needs `git show <hash>:<path>`;
+    ///   until that exists, don't offer the affordance.
     @ViewBuilder
-    private func unifiedDiffRows(_ rows: [UnifiedDiffRow]) -> some View {
+    private func unifiedDiffRows(
+        _ rows: [UnifiedDiffRow],
+        allowsExpansion: Bool
+    ) -> some View {
         LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(rows.indices, id: \.self) { i in
                 let row = rows[i]
                 if row.kind == .hunkHeader {
-                    if expandedHunks.contains(row.hunkIndex),
+                    if allowsExpansion,
+                       expandedHunks.contains(row.hunkIndex),
                        case .loaded(let lines) = fileLines {
-                        let fromLine = row.prevNewEnd
-                        let toLine = row.newStartLine
-                        ForEach(fromLine..<toLine, id: \.self) { lineNo in
+                        let oldOffset = row.oldStartLine - row.newStartLine
+                        ForEach(row.prevNewEnd..<row.newStartLine, id: \.self) { lineNo in
                             let idx = lineNo - 1
                             let content = idx >= 0 && idx < lines.count ? lines[idx] : ""
                             unifiedLineRow(
-                                oldLineNo: lineNo,
+                                oldLineNo: lineNo + oldOffset,
                                 newLineNo: lineNo,
                                 content: content,
                                 kind: .context
                             )
                         }
-                    } else if expandedHunks.contains(row.hunkIndex),
+                    } else if allowsExpansion,
+                              expandedHunks.contains(row.hunkIndex),
                               case .loading = fileLines {
                         HStack(spacing: 8) {
                             ProgressView()
@@ -813,7 +821,7 @@ struct GitChangesView: View {
                         .frame(height: 28)
                         .padding(.horizontal, 10)
                         .background(AppPalette.elevated)
-                    } else if row.skippedLines > 0 {
+                    } else if allowsExpansion, row.skippedLines > 0 {
                         hunkHeaderBar(skippedLines: row.skippedLines, hunkIndex: row.hunkIndex)
                     }
                 } else {
@@ -858,7 +866,7 @@ struct GitChangesView: View {
 
             Text(unifiedPrefix(kind))
                 .font(AppFonts.diffCode.weight(.semibold))
-                .foregroundStyle(unifiedPrefixColor(kind))
+                .foregroundStyle(unifiedGutterColor(kind))
                 .frame(width: 12, alignment: .center)
                 .padding(.top, 1)
 
@@ -883,14 +891,8 @@ struct GitChangesView: View {
         }
     }
 
-    private func unifiedPrefixColor(_ kind: DiffRowKind) -> Color {
-        switch kind {
-        case .added: return Color(nsColor: .systemGreen)
-        case .removed: return Color(nsColor: .systemRed)
-        case .context, .hunkHeader: return AppPalette.textTertiary
-        }
-    }
-
+    /// Also tints the +/− glyph. The context case differs on paper (tertiary vs
+    /// clear) but context's prefix is a space, which has no ink either way.
     private func unifiedGutterColor(_ kind: DiffRowKind) -> Color {
         switch kind {
         case .added: return Color(nsColor: .systemGreen)
@@ -903,8 +905,9 @@ struct GitChangesView: View {
         switch kind {
         case .added: return Color(nsColor: .systemGreen).opacity(0.12)
         case .removed: return Color(nsColor: .systemRed).opacity(0.12)
-        case .hunkHeader: return Color(nsColor: .systemBlue).opacity(0.06)
-        case .context: return diffBgColor
+        // hunkHeader never reaches here — those rows render as hunkHeaderBar,
+        // which paints its own background.
+        case .context, .hunkHeader: return diffBgColor
         }
     }
 
@@ -983,6 +986,7 @@ struct GitChangesView: View {
         var skippedLines: Int = 0
         var hunkIndex: Int = 0
         var newStartLine: Int = 0
+        var oldStartLine: Int = 0
         var prevNewEnd: Int = 0
     }
 
@@ -994,6 +998,14 @@ struct GitChangesView: View {
 
         for line in diffText.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
             if isDiffMeta(line) { continue }
+            // git diff ends with a newline, so the split yields a trailing empty
+            // element. A real blank context line arrives as " ", never "", so
+            // dropping empties here cannot swallow content.
+            if line.isEmpty { continue }
+            // "\ No newline at end of file" is an annotation, not a line of the
+            // file. Rendering it as context also pushed prevNewEnd forward and
+            // made the next hunk under-count its skipped lines.
+            if line.hasPrefix("\\") { continue }
             if line.hasPrefix("@@") {
                 let newOldStart: Int
                 let newNewStart: Int
@@ -1017,6 +1029,7 @@ struct GitChangesView: View {
                 row.skippedLines = skipped
                 row.hunkIndex = hunkIdx
                 row.newStartLine = newNewStart
+                row.oldStartLine = newOldStart
                 row.prevNewEnd = prevNewEnd
                 rows.append(row)
                 hunkIdx += 1
