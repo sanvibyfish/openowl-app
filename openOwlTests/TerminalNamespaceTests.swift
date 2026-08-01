@@ -100,6 +100,35 @@ struct TerminalNamespaceTests {
         #expect(store.activeTabID == firstTab)
     }
 
+    /// Closing the last tab of one namespace must not hand the active slot to a
+    /// different namespace's tab — the didSet would then record that tab as the
+    /// other namespace's remembered position.
+    @Test @MainActor func closeCurrent_staysInsideNamespace() {
+        let store = TerminalWorkspaceStore()
+        let projectNS: TerminalNamespace = .project("proj-A")
+        let termNS: TerminalNamespace = .freeTerminal(UUID())
+
+        store.switchNamespace(termNS)
+        _ = store.newTab(for: termNS)
+        let termTab2 = store.newTab(for: termNS)
+        store.selectTab(id: termTab2)
+
+        // Project A gets exactly one tab, then closes it.
+        store.switchNamespace(projectNS)
+        #expect(store.visibleTabs.count == 1)
+        _ = store.closeCurrent()
+
+        // A fresh tab for A, not one of termNS's.
+        #expect(store.activeNamespace == projectNS)
+        if let active = store.activeTabID {
+            #expect(store.visibleTabs.contains { $0.id == active })
+        }
+
+        // termNS's remembered position survived untouched.
+        store.switchNamespace(termNS)
+        #expect(store.activeTabID == termTab2)
+    }
+
     @Test @MainActor func switchNamespace_visibleTabsReflectActive() {
         let store = TerminalWorkspaceStore()
         let projectNS: TerminalNamespace = .project("proj-A")

@@ -70,6 +70,11 @@ targets:
       configs:
         Debug:
           ASSETCATALOG_COMPILER_APPICON_NAME: AppIconDev
+          # Separate identity from the installed Release app. macOS keys TCC
+          # grants by bundle ID plus the signing requirement recorded at grant
+          # time, so sharing one ID made the two builds invalidate each other's
+          # Documents permission and re-prompt on every switch.
+          PRODUCT_BUNDLE_IDENTIFIER: com.openowl.app.dev
         Release:
           ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:

@@ -630,16 +630,24 @@ final class TerminalWorkspaceStore {
             for pID in removedTab.splitTree.allPaneIDs {
                 destroyPaneHandler?(pID)
                 paneTitles.removeValue(forKey: pID)
-            panePwds.removeValue(forKey: pID)
-                    paneSearchStates.removeValue(forKey: pID)
+                panePwds.removeValue(forKey: pID)
+                paneSearchStates.removeValue(forKey: pID)
             }
             tabNamespaceMap.removeValue(forKey: removedTab.id)
             tabs.remove(at: index)
 
-            // Switch to next visible tab for this project
+            // Stay inside the current namespace. Falling back to `tabs.last`
+            // handed the active slot to another namespace's tab: visibleTabs
+            // went empty while activeTabID pointed elsewhere, and the didSet
+            // then overwrote that namespace's remembered tab with one the user
+            // had never opened. Seed a fresh tab instead, matching what
+            // switchNamespace does for an empty namespace.
             let visible = visibleTabs
-            let fallback = visible.first ?? tabs.last
-            activeTabID = fallback?.id
+            if visible.isEmpty, let namespace = activeNamespace {
+                _ = newTab(for: namespace)
+                return .none
+            }
+            activeTabID = visible.first?.id
 
             if let fbID = activeTabID, let fbIdx = tabs.firstIndex(where: { $0.id == fbID }) {
                 if tabs[fbIdx].focusedPaneID == nil {

@@ -16,8 +16,12 @@ while IFS= read -r found; do
   if [ -n "$found" ]; then
     TARGETS+=("$found")
   fi
+# Scoped to openOwl-* on purpose. An unscoped search also matches any OTHER
+# Xcode project that depends on CodeEditTextView, and this patch is written
+# against one specific version of Typesetter.swift — applying it there would
+# corrupt an unrelated build.
 done < <(find "$HOME/Library/Developer/Xcode/DerivedData" \
-  -path "*/SourcePackages/checkouts/CodeEditTextView/*/Typesetter/Typesetter.swift" \
+  -path "*/openOwl-*/SourcePackages/checkouts/CodeEditTextView/*/Typesetter/Typesetter.swift" \
   2>/dev/null || true)
 
 if [ ${#TARGETS[@]} -eq 0 ]; then

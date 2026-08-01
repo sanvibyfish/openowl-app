@@ -1,5 +1,4 @@
 import SwiftUI
-import UserNotifications
 
 @main
 struct openOwlApp: App {

@@ -97,7 +97,6 @@ extension TerminalWorkspaceStore {
     func switchNamespace(_ ns: TerminalNamespace?)
     func newTab(for ns: TerminalNamespace? = nil)
     func paneInfos(for ns: TerminalNamespace) -> [PaneInfo]
-    func bellCount(for ns: TerminalNamespace) -> Int
 }
 ```
 

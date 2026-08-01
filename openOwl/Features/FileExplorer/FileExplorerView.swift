@@ -255,11 +255,10 @@ private struct EditorBoundsObserver: NSViewRepresentable {
 
 /// Detects text changes in SourceEditor and marks the active tab as dirty.
 ///
-/// Also forces correct **wrap width** for the right dock. CodeEdit wraps with
-/// `viewport.width − layoutManager.edgeInsets.horizontal`, and the package sets
-/// trailing inset from the minimap (`isHidden ? 0 : frame.width`). In the dock
-/// that trailing value often stays at ~140pt (or the first layout runs at width
-/// 0 while the host is collapsed), so lines wrap every few glyphs.
+/// Also pins the **wrap width** for the right dock. CodeEdit wraps at
+/// `viewport.width − layoutManager.edgeInsets.horizontal`, and in the dock the
+/// first layout can run while the host is still collapsed at width 0 — baking a
+/// wrap point of a few glyphs that never recovers on its own.
 private class EditTracker: TextViewCoordinator {
     var onTextChanged: (() -> Void)?
     weak var controller: TextViewController?
@@ -292,17 +291,14 @@ private class EditTracker: TextViewCoordinator {
         if abs(hostWidth - lastAppliedHostWidth) < 1 { return }
         lastAppliedHostWidth = hostWidth
 
-        // 1) Minimap must not steal ~140pt of wrap width.
-        forceMinimapOff(controller)
-
-        // 2) Leading = gutter; trailing = small dock padding (not minimap ~140).
-        //    Wrap width = viewport − left − right, so this is the only right inset.
+        // Leading = gutter; trailing = small dock padding. Wrap width is
+        // viewport − left − right, so this is the only right inset.
         let leading = max(textView.textInsets.left, 40)
         let trailingPadding: CGFloat = 14
         textView.textInsets = HorizontalEdgeInsets(left: leading, right: trailingPadding)
         textView.lineBreakStrategy = .word
 
-        // 3) Match text view width to the real host, then re-wrap.
+        // Match text view width to the real host, then re-wrap.
         if abs(textView.frame.width - hostWidth) > 0.5 {
             textView.frame.size.width = hostWidth
         }
@@ -311,19 +307,6 @@ private class EditTracker: TextViewCoordinator {
         _ = textView.layoutManager.layoutLines()
         textView.needsLayout = true
         textView.needsDisplay = true
-    }
-
-    private func forceMinimapOff(_ controller: TextViewController) {
-        // Only toggle when minimap still appears enabled in config — avoid
-        // thrashing didSet on every pixel of drag-resize.
-        var config = controller.configuration
-        guard config.peripherals.showMinimap
-                || config.peripherals.showFoldingRibbon
-                || config.peripherals.showReformattingGuide else { return }
-        config.peripherals.showMinimap = false
-        config.peripherals.showFoldingRibbon = false
-        config.peripherals.showReformattingGuide = false
-        controller.configuration = config
     }
 
     func textViewDidChangeText(controller: TextViewController) {

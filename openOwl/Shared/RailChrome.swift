@@ -15,7 +15,6 @@ struct RailStripButton<Label: View>: View {
     let width: CGFloat
     let isSelected: Bool
     let help: String
-    var badge: Int = 0
     let action: () -> Void
     @ViewBuilder let label: () -> Label
 
@@ -42,15 +41,6 @@ struct RailStripButton<Label: View>: View {
                 }
                 .frame(width: width, height: RailChrome.iconRowHeight)
 
-                if badge > 0 {
-                    Text(badge > 9 ? "9+" : "\(badge)")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 3)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(AppPalette.accent))
-                        .offset(x: -6, y: 4)
-                }
             }
             .contentShape(Rectangle())
         }

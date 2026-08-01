@@ -20,7 +20,7 @@ struct GitChangesView: View {
         case idle
         case loading
         case loaded([String])
-        case failed
+        case failed(String)
     }
 
     var body: some View {
@@ -768,13 +768,16 @@ struct GitChangesView: View {
     // pane width, wrap long lines. Side-by-side needs ~2× width and forces either
     // mid-glyph truncation or a horizontal-only layout.
 
+    /// Expanding pulls context from the file on disk, so it is only correct for
+    /// the working-tree section. `.staged` diffs HEAD against the index, and the
+    /// disk copy can be ahead of the index — filling from it would present
+    /// unstaged edits as staged context, right where the user decides what to
+    /// commit. `.untracked` has no baseline to expand against.
     private func singleFileDiff(_ diffText: String) -> some View {
         let rows = parseUnified(diffText)
-        return GeometryReader { geo in
-            ScrollView(.vertical, showsIndicators: true) {
-                unifiedDiffRows(rows, allowsExpansion: true)
-                    .frame(minWidth: geo.size.width, maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
-            }
+        let canExpand = store.selectedChange?.section == .modified
+        return ScrollView(.vertical, showsIndicators: true) {
+            unifiedDiffRows(rows, allowsExpansion: canExpand)
         }
     }
 
@@ -796,33 +799,39 @@ struct GitChangesView: View {
                     if allowsExpansion,
                        expandedHunks.contains(row.hunkIndex),
                        case .loaded(let lines) = fileLines {
-                        let oldOffset = row.oldStartLine - row.newStartLine
-                        ForEach(row.prevNewEnd..<row.newStartLine, id: \.self) { lineNo in
-                            let idx = lineNo - 1
-                            let content = idx >= 0 && idx < lines.count ? lines[idx] : ""
-                            unifiedLineRow(
-                                oldLineNo: lineNo + oldOffset,
-                                newLineNo: lineNo,
-                                content: content,
-                                kind: .context
-                            )
+                        // The disk copy can be shorter than the diff expects
+                        // (file edited or truncated since the diff was taken).
+                        // Say so — filling the gap with blank lines renders as
+                        // real, line-numbered empty lines from the file.
+                        if row.newStartLine - 1 <= lines.count {
+                            let oldOffset = row.oldStartLine - row.newStartLine
+                            ForEach(row.prevNewEnd..<row.newStartLine, id: \.self) { lineNo in
+                                unifiedLineRow(
+                                    oldLineNo: lineNo + oldOffset,
+                                    newLineNo: lineNo,
+                                    content: lines[lineNo - 1],
+                                    kind: .context
+                                )
+                            }
+                        } else {
+                            hunkNoticeBar("File changed on disk — refresh to expand")
                         }
                     } else if allowsExpansion,
                               expandedHunks.contains(row.hunkIndex),
                               case .loading = fileLines {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Loading unmodified lines…")
-                                .font(AppFonts.caption)
-                                .foregroundStyle(AppPalette.textTertiary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .frame(height: 28)
-                        .padding(.horizontal, 10)
-                        .background(AppPalette.elevated)
-                    } else if allowsExpansion, row.skippedLines > 0 {
-                        hunkHeaderBar(skippedLines: row.skippedLines, hunkIndex: row.hunkIndex)
+                        hunkNoticeBar("Loading unmodified lines…", showsSpinner: true)
+                    } else if allowsExpansion,
+                              expandedHunks.contains(row.hunkIndex),
+                              case .failed(let message) = fileLines {
+                        hunkNoticeBar("\(message) — click to retry", isRetry: row.hunkIndex)
+                    } else if row.skippedLines > 0 {
+                        // Rendered even when expansion is off: this bar is the
+                        // only thing marking where the line numbers jump.
+                        hunkHeaderBar(
+                            skippedLines: row.skippedLines,
+                            hunkIndex: row.hunkIndex,
+                            isInteractive: allowsExpansion
+                        )
                     }
                 } else {
                     unifiedLineRow(
@@ -920,28 +929,76 @@ struct GitChangesView: View {
         }
     }
 
-    private func hunkHeaderBar(skippedLines: Int, hunkIndex: Int) -> some View {
-        Button {
-            loadFileIfNeeded()
-            expandedHunks.insert(hunkIndex)
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "chevron.down")
-                    .font(AppFonts.tinyIcon)
-                    .foregroundStyle(AppPalette.textTertiary)
-                Text("\(skippedLines) unmodified lines")
-                    .font(AppFonts.secondaryLabel)
-                    .foregroundStyle(AppPalette.textSecondary)
+    @ViewBuilder
+    private func hunkHeaderBar(
+        skippedLines: Int,
+        hunkIndex: Int,
+        isInteractive: Bool
+    ) -> some View {
+        let label = HStack(spacing: 8) {
+            if isInteractive {
                 Image(systemName: "chevron.down")
                     .font(AppFonts.tinyIcon)
                     .foregroundStyle(AppPalette.textTertiary)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 24)
-            .contentShape(Rectangle())
+            Text("\(skippedLines) unmodified lines")
+                .font(AppFonts.secondaryLabel)
+                .foregroundStyle(AppPalette.textSecondary)
+            if isInteractive {
+                Image(systemName: "chevron.down")
+                    .font(AppFonts.tinyIcon)
+                    .foregroundStyle(AppPalette.textTertiary)
+            }
         }
-        .buttonStyle(.plain)
-        .background(AppPalette.elevated)
+        .frame(maxWidth: .infinity)
+        .frame(height: 24)
+
+        if isInteractive {
+            Button {
+                loadFileIfNeeded()
+                expandedHunks.insert(hunkIndex)
+            } label: {
+                label.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(AppPalette.elevated)
+        } else {
+            label.background(AppPalette.elevated)
+        }
+    }
+
+    /// Inline status row occupying a hunk's slot. `isRetry` makes it re-trigger
+    /// the read for that hunk.
+    @ViewBuilder
+    private func hunkNoticeBar(
+        _ text: String,
+        showsSpinner: Bool = false,
+        isRetry: Int? = nil
+    ) -> some View {
+        let label = HStack(spacing: 8) {
+            if showsSpinner {
+                ProgressView().controlSize(.small)
+            }
+            Text(text)
+                .font(AppFonts.caption)
+                .foregroundStyle(AppPalette.textTertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 28)
+        .padding(.horizontal, 10)
+
+        if let hunkIndex = isRetry {
+            Button {
+                loadFileIfNeeded()
+                expandedHunks.insert(hunkIndex)
+            } label: {
+                label.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(AppPalette.elevated)
+        } else {
+            label.background(AppPalette.elevated)
+        }
     }
 
     private func loadFileIfNeeded() {
@@ -956,21 +1013,30 @@ struct GitChangesView: View {
         let fileURL = repoURL.appendingPathComponent(path)
         fileLines = .loading // also prevents duplicate loads while async in flight
         Task {
-            let lines = await Task.detached(priority: .userInitiated) {
-                (try? String(contentsOf: fileURL, encoding: .utf8))?.components(separatedBy: "\n")
+            // do/catch rather than try? — "permission denied" and "not valid
+            // UTF-8" need different actions from the user, and the failure state
+            // carries the message so it can be shown in place.
+            let outcome: (lines: [String]?, error: String?) = await Task.detached(
+                priority: .userInitiated
+            ) {
+                do {
+                    let text = try String(contentsOf: fileURL, encoding: .utf8)
+                    return (text.components(separatedBy: "\n"), nil)
+                } catch {
+                    return (nil, error.localizedDescription)
+                }
             }.value
-            // Guard: selection may have changed while the detached read was in flight.
-            // If so, reset to idle so the new selection's loadFileIfNeeded can run.
-            guard store.selectedChange?.path == path else {
-                fileLines = .idle
-                return
+
+            // Selection moved while the read was in flight. Return without
+            // touching state — onChange already reset it, and writing .idle here
+            // would clobber the .loading of whatever the user picked next.
+            guard store.selectedChange?.path == path else { return }
+
+            if let lines = outcome.lines {
+                fileLines = .loaded(lines)
+            } else {
+                fileLines = .failed(outcome.error ?? "Could not read \(fileURL.lastPathComponent)")
             }
-            guard let lines else {
-                fileLines = .failed
-                store.errorMessage = "Could not read \(fileURL.lastPathComponent)"
-                return
-            }
-            fileLines = .loaded(lines)
         }
     }
 
