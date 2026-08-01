@@ -791,7 +791,7 @@
 					"-lz",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.openowl.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.openowl.app.dev;
 				PRODUCT_NAME = openOwl;
 				SDKROOT = macosx;
 			};
