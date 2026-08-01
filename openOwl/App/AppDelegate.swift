@@ -341,7 +341,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Menu Actions
 
     @objc private func menuNewTab() {
+        guard canOpenNewTab else { return }
         workspaceStore?.newTab()
+    }
+
+    /// True only in the free-terminal namespace — see validateMenuItem.
+    private var canOpenNewTab: Bool {
+        guard let namespace = workspaceStore?.activeNamespace else { return false }
+        if case .freeTerminal = namespace { return true }
+        return false
     }
 
     @objc private func menuCloseTab() {
@@ -416,10 +424,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let terminalFocused = terminalOnly && NSApp.keyWindow?.firstResponder is TerminalNSView
 
         switch menuItem.action {
+        // Tabs are a free-terminal affordance — only that namespace draws a tab
+        // bar. In a project, ⌘T created a tab with no visible entry point and
+        // switched to it; projects lay out with worktrees plus splits instead.
+        case #selector(menuNewTab):
+            return terminalFocused && canOpenNewTab
+
         // These shortcuts must only fire when a terminal NSView has focus.
-        // Without the firstResponder guard, ⌘T/⌘W/⌘D/⌘F would be consumed by the
+        // Without the firstResponder guard, ⌘W/⌘D/⌘F would be consumed by the
         // menu before the search TextField ever sees them.
-        case #selector(menuNewTab), #selector(menuCloseTab),
+        case #selector(menuCloseTab),
              #selector(menuSplitHorizontal), #selector(menuSplitVertical):
             return terminalFocused
 
@@ -647,6 +661,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch chars {
         case "t":
+            // Same rule as validateMenuItem: this monitor is a second entry
+            // point for ⌘T, so graying out the menu item alone would not stop it.
+            guard canOpenNewTab else { return false }
             workspaceStore.newTab()
             return true
         case "w":
