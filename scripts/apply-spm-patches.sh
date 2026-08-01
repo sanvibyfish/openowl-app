@@ -2,20 +2,35 @@
 # Re-apply local fixes to SPM checkouts (run after package resolve / clean).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TARGET="$ROOT/build/DerivedData/SourcePackages/checkouts/CodeEditTextView/Sources/CodeEditTextView/TextLine/Typesetter/Typesetter.swift"
-# Also try default DerivedData location
-if [ ! -f "$TARGET" ]; then
-  TARGET=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path "*/SourcePackages/checkouts/CodeEditTextView/*/Typesetter.swift" 2>/dev/null | head -1 || true)
+
+# Patch EVERY checkout that could feed a build, not just the first hit. Xcode
+# GUI builds use the default DerivedData while xcodebuild may use the in-repo
+# one; patching a single match is how this fix silently missed GUI builds and
+# left the soft-wrap redraw bug live for anyone hitting Cmd+R.
+TARGETS=()
+IN_REPO="$ROOT/build/DerivedData/SourcePackages/checkouts/CodeEditTextView/Sources/CodeEditTextView/TextLine/Typesetter/Typesetter.swift"
+if [ -f "$IN_REPO" ]; then
+  TARGETS+=("$IN_REPO")
 fi
-if [ -z "${TARGET:-}" ] || [ ! -f "$TARGET" ]; then
-  echo "[patch] CodeEditTextView Typesetter.swift not found — resolve packages first"
-  exit 0
+while IFS= read -r found; do
+  if [ -n "$found" ]; then
+    TARGETS+=("$found")
+  fi
+done < <(find "$HOME/Library/Developer/Xcode/DerivedData" \
+  -path "*/SourcePackages/checkouts/CodeEditTextView/*/Typesetter/Typesetter.swift" \
+  2>/dev/null || true)
+
+if [ ${#TARGETS[@]} -eq 0 ]; then
+  echo "[patch] no CodeEditTextView checkout found — resolve packages first" >&2
+  exit 1
 fi
-if grep -q "ABSOLUTE end index" "$TARGET" 2>/dev/null; then
-  echo "[patch] Typesetter wrap-range fix already applied"
-  exit 0
+
+for TARGET in "${TARGETS[@]}"; do
+if grep -q "ABSOLUTE end index" "$TARGET"; then
+  echo "[patch] already applied: $TARGET"
+  continue
 fi
-chmod u+w "$TARGET" || true
+chmod u+w "$TARGET"
 python3 - "$TARGET" << 'PY'
 import re, sys
 from pathlib import Path
@@ -87,3 +102,4 @@ if not m:
 path.write_text(text[:m.start()] + new + text[m.end():])
 print(f"[patch] applied wrap-range fix to {path}")
 PY
+done

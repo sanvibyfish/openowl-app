@@ -41,9 +41,7 @@ struct QuickOpenPanel: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
 
-            Rectangle()
-                .fill(AppPalette.border)
-                .frame(height: 1)
+            PanelDivider()
 
             if matches.isEmpty && !store.quickOpenQuery.isEmpty {
                 Text("No matching files")

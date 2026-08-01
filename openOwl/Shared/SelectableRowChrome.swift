@@ -89,14 +89,6 @@ extension View {
 final class AccentBarTableRowView: NSTableRowView {
     static let reuseIdentifier = NSUserInterfaceItemIdentifier("AccentBarTableRowView")
 
-    override var isEmphasized: Bool {
-        get { super.isEmphasized }
-        set {
-            super.isEmphasized = newValue
-            needsDisplay = true
-        }
-    }
-
     /// Keep cell labels at normal contrast — our fill is only 12% accent,
     /// not a solid system highlight that would need inverted content.
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }

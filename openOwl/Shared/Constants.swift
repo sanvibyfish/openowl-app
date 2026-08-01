@@ -3,7 +3,6 @@ import SwiftUI
 
 enum AppConstants {
     static let appName = "openOwl"
-    static let bundleIdentifier = "com.openowl.app"
 
     // Ghostty
     static let termEnv = "xterm-ghostty"
@@ -44,20 +43,6 @@ enum AppPalette {
         static let textPrimary: NSColor = .labelColor
         static let accent: NSColor    = .controlAccentColor
     }
-}
-
-enum AppColors {
-    /// 选中/活动态背景
-    static let activeBackground = Color.accentColor.opacity(0.12)
-    /// 悬停态背景
-    static let hoverBackground = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
-    /// 选中边框
-    static let selectedBorder: Color = .accentColor
-
-    // 状态色
-    static let error = Color.red
-    static let warning = Color.orange
-    static let success = Color.green
 }
 
 enum AppFonts {
