@@ -104,7 +104,7 @@ final class AccentBarTableRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {
         guard selectionHighlightStyle != .none else { return }
 
-        let accent = NSColor.controlAccentColor
+        let accent = AppPalette.ns.accent
         let fill = accent.withAlphaComponent(SelectableRowMetrics.selectedFillOpacity)
 
         let bgRect = bounds.insetBy(

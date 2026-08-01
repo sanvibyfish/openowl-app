@@ -228,7 +228,9 @@ struct RightDockStoreTests {
     @Test @MainActor func setWidth_clampsToMin() {
         Self.clearDefaults()
         let store = RightDockStore()
-        // Default tab shows detail → floor is minWidthWithDetail, not list min.
+        // Detail visible → floor is minWidthWithDetail, not the list-only min.
+        store.activeTab = .git
+        store.gitShowsDiff = true
         store.setWidth(100, maxWidth: 800)
         #expect(store.width == RightDockStore.minWidthWithDetail)
         Self.clearDefaults()
@@ -237,6 +239,7 @@ struct RightDockStoreTests {
     @Test @MainActor func setWidth_clampsToListMinWhenDetailHidden() {
         Self.clearDefaults()
         let store = RightDockStore()
+        store.activeTab = .git
         store.gitShowsDiff = false
         store.setWidth(100, maxWidth: 800)
         #expect(store.width == RightDockStore.minWidth)

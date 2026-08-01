@@ -10,8 +10,18 @@ struct GitChangesView: View {
     @State private var selectedIDs: Set<String> = []
     @State private var lastClickedID: String?
     @State private var expandedHunks: Set<Int> = []
-    @State private var cachedFileLines: [String]?
+    @State private var fileLines: FileLinesState = .idle
     @FocusState private var commitFieldFocused: Bool
+
+    /// Backing state for "expand unmodified lines". `.failed` has to stay
+    /// distinct from `.loading` — a single empty-array sentinel meant a file we
+    /// could not read rendered a spinner forever.
+    private enum FileLinesState {
+        case idle
+        case loading
+        case loaded([String])
+        case failed
+    }
 
     var body: some View {
         Group {
@@ -34,7 +44,7 @@ struct GitChangesView: View {
         }
         .onChange(of: store.selectedChange?.id) { _, _ in
             expandedHunks.removeAll()
-            cachedFileLines = nil
+            fileLines = .idle
         }
         .alert("Confirm Action", isPresented: isShowingConfirmation, presenting: confirmationAction) { action in
             confirmationButtons(for: action)
@@ -777,8 +787,7 @@ struct GitChangesView: View {
                 let row = rows[i]
                 if row.kind == .hunkHeader {
                     if expandedHunks.contains(row.hunkIndex),
-                       let lines = cachedFileLines,
-                       !lines.isEmpty {
+                       case .loaded(let lines) = fileLines {
                         let fromLine = row.prevNewEnd
                         let toLine = row.newStartLine
                         ForEach(fromLine..<toLine, id: \.self) { lineNo in
@@ -792,8 +801,7 @@ struct GitChangesView: View {
                             )
                         }
                     } else if expandedHunks.contains(row.hunkIndex),
-                              cachedFileLines != nil,
-                              cachedFileLines?.isEmpty == true {
+                              case .loading = fileLines {
                         HStack(spacing: 8) {
                             ProgressView()
                                 .controlSize(.small)
@@ -934,25 +942,27 @@ struct GitChangesView: View {
     }
 
     private func loadFileIfNeeded() {
-        guard cachedFileLines == nil,
+        guard case .idle = fileLines,
               let repoURL = store.repositoryURL,
               let path = store.selectedChange?.path else { return }
         let fileURL = repoURL.appendingPathComponent(path)
-        cachedFileLines = [] // sentinel: prevents duplicate loads while async in flight
+        fileLines = .loading // also prevents duplicate loads while async in flight
         Task {
             let lines = await Task.detached(priority: .userInitiated) {
-                (try? String(contentsOf: fileURL, encoding: .utf8))?.components(separatedBy: "\n") ?? []
+                (try? String(contentsOf: fileURL, encoding: .utf8))?.components(separatedBy: "\n")
             }.value
             // Guard: selection may have changed while the detached read was in flight.
-            // If so, reset the sentinel so the new selection's loadFileIfNeeded can run.
+            // If so, reset to idle so the new selection's loadFileIfNeeded can run.
             guard store.selectedChange?.path == path else {
-                cachedFileLines = nil
+                fileLines = .idle
                 return
             }
-            cachedFileLines = lines
-            if lines.isEmpty {
+            guard let lines else {
+                fileLines = .failed
                 store.errorMessage = "Could not read \(fileURL.lastPathComponent)"
+                return
             }
+            fileLines = .loaded(lines)
         }
     }
 

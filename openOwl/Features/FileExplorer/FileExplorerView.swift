@@ -279,7 +279,13 @@ private class EditTracker: TextViewCoordinator {
         guard let controller, let textView = controller.textView else { return }
         controller.view.layoutSubtreeIfNeeded()
         let hostWidth = controller.view.bounds.width
-        guard hostWidth >= 100 else { return }
+        guard hostWidth >= 100 else {
+            // Collapsed dock or pre-layout: forget the applied width so the next
+            // real one re-applies. Expanding back to the same width would
+            // otherwise dedupe away, leaving wrap baked at the collapsed size.
+            lastAppliedHostWidth = -1
+            return
+        }
         if !force, abs(hostWidth - lastAppliedHostWidth) < 1 { return }
         lastAppliedHostWidth = hostWidth
 
@@ -375,8 +381,6 @@ struct FileExplorerView: View {
 
     // Dirty tracking coordinator (shared across tab switches)
     @State private var editTracker = EditTracker()
-    /// Bumped when the dock expands so SourceEditor remounts at a real width.
-    @State private var editorViewportGeneration = 0
 
     private static let imageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif", "webp", "heic", "heif", "ico", "svg", "icns"
@@ -783,67 +787,33 @@ struct FileExplorerView: View {
                     if isLargeMode {
                         largeFileBanner(for: url)
                     }
-                    // Host RightDock at width 0 while collapsed; never let the
-                    // editor first-layout there (wrap width would bake to ~0).
-                    GeometryReader { geo in
-                        if geo.size.width >= 100, geo.size.height >= 40 {
-                            SourceEditor(
-                                storage,
-                                language: isLargeMode ? CodeLanguage.default : editorLanguage(for: url),
-                                configuration: isLargeMode ? readOnlyEditorConfiguration : editorConfiguration,
-                                state: $editorState,
-                                coordinators: [editTracker]
-                            )
-                            // Storage identity + viewport generation: remount when
-                            // dock expands so wrap is measured against a real width.
-                            .id("\(ObjectIdentifier(storage))-\(editorViewportGeneration)")
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .onChange(of: Int(geo.size.width / 4)) { _, _ in
-                                // Live drag-resize: re-pin trailing inset + wrap.
-                                DispatchQueue.main.async {
-                                    editTracker.relayout(force: true)
-                                }
-                            }
-                            .onAppear {
-                                // Two ticks: first after SwiftUI applies the frame,
-                                // second after CodeEdit finishes its own layout.
-                                DispatchQueue.main.async {
-                                    editTracker.relayout(force: true)
-                                    DispatchQueue.main.async {
-                                        editTracker.relayout(force: true)
-                                    }
-                                }
-                            }
-                            .background(
-                                EditorBoundsObserver { size in
-                                    guard size.width >= 100 else { return }
-                                    editTracker.relayout()
-                                }
-                            )
-                        }
-                    }
+                    // Stays mounted even while the dock is collapsed (host width
+                    // 0). Unmounting there would rebuild the editor on every
+                    // expand, and rebuilding clears undo — see the .id note.
+                    SourceEditor(
+                        storage,
+                        language: isLargeMode ? CodeLanguage.default : editorLanguage(for: url),
+                        configuration: isLargeMode ? readOnlyEditorConfiguration : editorConfiguration,
+                        state: $editorState,
+                        coordinators: [editTracker]
+                    )
+                    // Identity tracks the storage object, not the file on disk.
+                    // A reload swaps in a new NSTextStorage and must rebuild the
+                    // editor around it; a save leaves the object alone and must
+                    // not — `write(atomically:)` replaces the inode, so keying
+                    // this on the disk signature rebuilt the editor on every ⌘S
+                    // and `setTextStorage` cleared the undo stack each time.
+                    .id(ObjectIdentifier(storage))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
-                }
-                .onChange(of: rightDockStore.isExpanded) { _, expanded in
-                    if expanded {
-                        editorViewportGeneration &+= 1
-                        DispatchQueue.main.async {
-                            editTracker.relayout(force: true)
+                    // Sole re-wrap trigger: AppKit reports real bounds after it
+                    // finishes layout, which covers dock expand, drag-resize and
+                    // tab switch without racing SwiftUI's timing.
+                    .background(
+                        EditorBoundsObserver { _ in
+                            editTracker.relayout()
                         }
-                    }
-                }
-                .onChange(of: rightDockStore.width) { _, _ in
-                    DispatchQueue.main.async {
-                        editTracker.relayout(force: true)
-                    }
-                }
-                .onChange(of: rightDockStore.activeTab) { _, tab in
-                    if tab == .files {
-                        DispatchQueue.main.async {
-                            editTracker.relayout(force: true)
-                        }
-                    }
+                    )
                 }
             }
         } else {

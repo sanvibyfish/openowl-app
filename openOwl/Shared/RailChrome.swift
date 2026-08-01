@@ -6,7 +6,7 @@ enum RailChrome {
     static let leftWidth: CGFloat = 48
     static let rightWidth: CGFloat = 40
     static let iconRowHeight: CGFloat = 40
-    static let accentBarWidth: CGFloat = 2
+    static let accentBarWidth: CGFloat = SelectableRowMetrics.accentBarWidth
     static let iconCornerRadius: CGFloat = 8
 }
 

@@ -8,9 +8,7 @@ import SwiftUI
 /// Prefer a light SF Symbol + two lines of text.
 struct EmptyStateView: View {
     enum Density {
-        /// Full-panel placeholder (file editor, no-project).
-        case regular
-        /// Dock sub-panel: smaller icon, tighter stack.
+        /// Dock sub-panel: small icon over a tight text stack.
         case compact
         /// Inline list filler: text only, no icon.
         case quiet
@@ -35,15 +33,15 @@ struct EmptyStateView: View {
 
     var body: some View {
         VStack(spacing: density == .quiet ? 4 : 6) {
-            if density != .quiet, let systemImage {
+            if density == .compact, let systemImage {
                 Image(systemName: systemImage)
-                    .font(.system(size: iconSize, weight: .light))
+                    .font(.system(size: 20, weight: .light))
                     .foregroundStyle(AppPalette.textTertiary)
                     .symbolRenderingMode(.hierarchical)
             }
 
             Text(title)
-                .font(titleFont)
+                .font(AppFonts.secondaryLabel.weight(.medium))
                 .foregroundStyle(AppPalette.textSecondary)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
@@ -60,20 +58,5 @@ struct EmptyStateView: View {
         .padding(.horizontal, density == .quiet ? 8 : 12)
         .padding(.vertical, density == .quiet ? 8 : 4)
         .accessibilityElement(children: .combine)
-    }
-
-    private var iconSize: CGFloat {
-        switch density {
-        case .regular: return 28
-        case .compact: return 20
-        case .quiet: return 0
-        }
-    }
-
-    private var titleFont: Font {
-        switch density {
-        case .regular: return AppFonts.primaryLabel
-        case .compact, .quiet: return AppFonts.secondaryLabel.weight(.medium)
-        }
     }
 }
