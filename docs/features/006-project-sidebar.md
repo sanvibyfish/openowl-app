@@ -151,6 +151,7 @@ worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session lis
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-01 | 侧栏与 rail 去掉 bell 驱动的未读角标（`SessionRow.unread`、`RailStripButton.badge`、pane 行铃铛）——随通知链路一并移除，详见 FEAT-002 |
 | 2026-08-01 | `SessionRow` / pane 行 / rail popover 行迁到共享 `selectableRowChrome`；session list header 用 `panelToolHeader` 与 right dock 对齐 |
 | 2026-07-31 | `openowl.json` 隔离失败时本 session 改为只读且异步告警；active worktree 归档在 Git/文件副作用前执行 editor preflight；monogram hash 改用 magnitude |
 | 2026-07-31 | `openowl.json` 解码失败改为先隔离备份再继续（此前落到迁移分支后 `projects` 为空，第一次 `persist()` 就永久覆盖用户项目列表）；`removeWorktree` 不再按 git stderr 子串分类并递归删整棵工作树，改为只删 `.DS_Store` 后重试 git；两文件 NSLog 全部改 AppLogger |

@@ -81,16 +81,11 @@ struct ProjectRail: View {
 
     private var freeTerminalButton: some View {
         let isSelected = projectStore.activeFreeTerminalID != nil
-        let unread: Int = {
-            guard let id = projectStore.freeTerminals.first?.id else { return 0 }
-            return workspace.bellCount(for: .freeTerminal(id))
-        }()
 
         return RailStripButton(
             width: Self.width,
             isSelected: isSelected,
             help: "Terminal",
-            badge: unread,
             action: {
                 if let id = projectStore.freeTerminals.first?.id {
                     projectStore.activate(.freeTerminal(id))
@@ -131,14 +126,6 @@ struct ProjectRail: View {
         projectStore.activeRootProject?.id == project.id
     }
 
-    private func projectUnread(_ project: ProjectItem) -> Int {
-        var total = workspace.bellCount(for: project.id)
-        for wt in projectStore.worktrees(for: project.id) {
-            total += workspace.bellCount(for: wt.id)
-        }
-        return total
-    }
-
     @ViewBuilder
     private func projectButton(_ project: ProjectItem) -> some View {
         let selected = isProjectSelected(project)
@@ -148,7 +135,6 @@ struct ProjectRail: View {
             width: Self.width,
             isSelected: selected,
             help: projectTooltip(project),
-            badge: projectUnread(project),
             action: { handleProjectClick(project) }
         ) {
             ProjectMonogram(name: project.displayName, isSelected: selected, isDimmed: dimmed)
@@ -420,7 +406,6 @@ private struct ProjectRailPopover: View {
                 subtitle: "Main working tree",
                 systemImage: "arrow.triangle.branch",
                 isActive: projectStore.activeProjectID == project.id,
-                unread: workspace.bellCount(for: project.id),
                 action: onActivateMain
             )
 
@@ -442,7 +427,6 @@ private struct ProjectRailPopover: View {
                         subtitle: nil,
                         systemImage: "arrow.triangle.branch",
                         isActive: projectStore.activeProjectID == wt.id,
-                        unread: workspace.bellCount(for: wt.id),
                         action: { onActivateWorktree(wt.id) }
                     )
                     .contextMenu {
@@ -529,7 +513,6 @@ private struct ProjectRailPopover: View {
         subtitle: String?,
         systemImage: String,
         isActive: Bool,
-        unread: Int,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -553,15 +536,6 @@ private struct ProjectRailPopover: View {
                 }
 
                 Spacer(minLength: 4)
-
-                if unread > 0 {
-                    Text("\(unread)")
-                        .font(AppFonts.badge)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(AppPalette.accent))
-                }
 
                 if isActive {
                     Image(systemName: "checkmark")

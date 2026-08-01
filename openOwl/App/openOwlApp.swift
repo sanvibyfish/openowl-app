@@ -60,36 +60,6 @@ struct openOwlApp: App {
                             workspaceStore: workspaceStore,
                             rightDockStore: rightDockStore)
                     }
-                    ghosttyManager.onPaneBell = { paneID in
-                        // Terminal occupies the center area unless the right dock is fullscreen.
-                        let isTerminalVisible = !rightDockStore.isFullscreen
-                        workspaceStore.handleBell(paneID: paneID, isTerminalVisible: isTerminalVisible)
-
-                        // System-level feedback: sound, dock bounce, notification
-                        let isPaneFocused = isTerminalVisible
-                            && workspaceStore.activeTabID != nil
-                            && workspaceStore.tabs.first(where: { $0.id == workspaceStore.activeTabID })?
-                                .focusedPaneID == paneID
-
-                        if !isPaneFocused {
-                            NotificationSound.current.play()
-                        }
-
-                        if !NSApp.isActive {
-                            NSApp.requestUserAttention(.informationalRequest)
-
-                            let content = UNMutableNotificationContent()
-                            content.title = "openOwl"
-                            content.body = workspaceStore.paneTitles[paneID] ?? "Terminal task completed"
-                            content.sound = .default
-                            let request = UNNotificationRequest(
-                                identifier: "bell-\(paneID.uuidString)",
-                                content: content,
-                                trigger: nil
-                            )
-                            UNUserNotificationCenter.current().add(request)
-                        }
-                    }
                     syncActiveProjectContext()
                     UpdateChecker.shared.checkOnLaunchIfNeeded()
                     claudeStatusStore.startPollingIfNeeded()

@@ -184,24 +184,6 @@ struct TerminalNamespaceTests {
         #expect(store.activeProjectID == nil)
     }
 
-    // MARK: - bellCount(for:)
-
-    @Test @MainActor func bellCount_namespaceVariant_matchesProjectStringVariant() {
-        let store = TerminalWorkspaceStore()
-        _ = store.newTab(for: .project("proj-A"))
-
-        #expect(store.bellCount(for: "proj-A") == store.bellCount(for: .project("proj-A")))
-    }
-
-    @Test @MainActor func bellCount_freeTerminalNamespace_isIsolated() {
-        let store = TerminalWorkspaceStore()
-        let termNS: TerminalNamespace = .freeTerminal(UUID())
-        _ = store.newTab(for: termNS)
-
-        #expect(store.bellCount(for: termNS) == 0)
-        #expect(store.bellCount(for: "unrelated") == 0)
-    }
-
     // MARK: - activeProjectID convenience
 
     @Test @MainActor func activeProjectID_isNilWhenFreeTerminalActive() {
