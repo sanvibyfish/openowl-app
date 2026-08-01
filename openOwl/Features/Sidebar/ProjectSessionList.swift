@@ -91,12 +91,8 @@ struct ProjectSessionList: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(AppPalette.border)
-                .frame(height: 1)
-        }
+        // Same tool-header chrome as right dock / Files / Git.
+        .panelToolHeader(background: AppPalette.elevated)
     }
 
     // MARK: - Free terminal (only when free terminal is selected on the rail)
@@ -136,7 +132,6 @@ struct ProjectSessionList: View {
             title: project.lastBranch ?? "main",
             path: project.path,
             isSelected: mainSelected,
-            unread: workspace.bellCount(for: project.id),
             shortcutNumber: shortcuts[project.id],
             onSelect: { projectStore.activateProject(id: project.id) },
             extraMenuItems: { EmptyView() }
@@ -157,7 +152,6 @@ struct ProjectSessionList: View {
                 title: wt.worktreeBranch ?? wt.name,
                 path: wt.path,
                 isSelected: wtSelected,
-                unread: workspace.bellCount(for: wt.id),
                 shortcutNumber: shortcuts[wt.id],
                 onSelect: { projectStore.activateProject(id: wt.id) },
                 extraMenuItems: {
@@ -220,7 +214,6 @@ private struct SessionRow<ExtraMenu: View>: View {
     let title: String
     let path: String
     let isSelected: Bool
-    let unread: Int
     var shortcutNumber: Int?
     let onSelect: () -> Void
     @ViewBuilder let extraMenuItems: () -> ExtraMenu
@@ -260,15 +253,6 @@ private struct SessionRow<ExtraMenu: View>: View {
 
             Spacer(minLength: 2)
 
-            if unread > 0 {
-                Text("\(unread)")
-                    .font(AppFonts.badge)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(Capsule().fill(AppPalette.accent))
-            }
-
             if let n = shortcutNumber {
                 Text("\u{2318}\(n)")
                     .font(AppFonts.badge)
@@ -277,20 +261,7 @@ private struct SessionRow<ExtraMenu: View>: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isSelected
-                      ? AppPalette.accent.opacity(0.12)
-                      : (hovering ? AppPalette.surface : Color.clear))
-        )
-        .overlay(alignment: .leading) {
-            if isSelected {
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(AppPalette.accent)
-                    .frame(width: 2, height: 14)
-                    .padding(.leading, 2)
-            }
-        }
+        .selectableRowChrome(isSelected: isSelected, isHovering: hovering)
         .contentShape(Rectangle())
     }
 }
@@ -320,40 +291,30 @@ private struct SessionPaneRow: View {
         } label: {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(info.hasBell
-                          ? AppPalette.accent
-                          : (isFocused ? AppPalette.accent.opacity(0.7) : AppPalette.textTertiary.opacity(0.5)))
+                    .fill(isFocused ? AppPalette.accent.opacity(0.7) : AppPalette.textTertiary.opacity(0.5))
                     .frame(width: 6, height: 6)
 
                 Text(info.title)
                     .font(AppFonts.secondaryLabel)
-                    .foregroundStyle(
-                        info.hasBell || isFocused
-                        ? AppPalette.textPrimary
-                        : AppPalette.textSecondary
-                    )
+                    .foregroundStyle(isFocused ? AppPalette.textPrimary : AppPalette.textSecondary)
                     .lineLimit(1)
 
                 Spacer(minLength: 2)
-
-                if info.hasBell {
-                    Image(systemName: "bell.fill")
-                        .font(AppFonts.smallIcon)
-                        .foregroundStyle(AppPalette.accent)
-                }
             }
             .padding(.leading, 22)
             .padding(.trailing, 8)
             .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(hovering || isFocused ? AppPalette.surface : Color.clear)
+            .selectableRowChrome(
+                isSelected: isFocused,
+                isHovering: hovering,
+                cornerRadius: AppSpacing.cornerRadiusSmall,
+                accentBarHeight: 10
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(info.hasBell ? "\(info.title) — notification" : info.title)
-        .accessibilityLabel(info.hasBell ? "\(info.title), has notification" : info.title)
+        .help(info.title)
+        .accessibilityLabel(info.title)
     }
 }

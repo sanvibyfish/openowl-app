@@ -1,6 +1,7 @@
 # Xcode & build output
 build/
 *.dmg
+build-dmg-*.log
 DerivedData/
 *.xcuserstate
 *.xcworkspace/xcuserdata/
@@ -36,3 +37,12 @@ ghostty-resources
 *.key
 *.p12
 *.pfx
+
+# Downloaded archives / binaries dropped in the repo root
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+
+# Workflow scratch output
+.kickoff/

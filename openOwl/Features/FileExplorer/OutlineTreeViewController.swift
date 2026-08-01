@@ -70,7 +70,8 @@ final class OutlineTreeViewController: NSViewController {
         outlineView.intercellSpacing = NSSize(width: 0, height: 0)
         outlineView.usesAlternatingRowBackgroundColors = false
         // Flat list (not sourceList) — sourceList paints a loud system slab
-        // that fights the dock's base surface.
+        // that fights the dock's base surface. Selection paint is custom
+        // via AccentBarTableRowView (same chrome as SwiftUI session/git rows).
         outlineView.selectionHighlightStyle = .regular
         outlineView.backgroundColor = .clear
         outlineView.floatsGroupRows = false
@@ -465,6 +466,20 @@ extension OutlineTreeViewController: NSOutlineViewDelegate {
         }
 
         return cell
+    }
+
+    /// Custom row so selection matches SwiftUI `selectableRowChrome` (accent bar
+    /// + soft fill) instead of the system blue slab.
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+        if let reused = outlineView.makeView(
+            withIdentifier: AccentBarTableRowView.reuseIdentifier,
+            owner: self
+        ) as? AccentBarTableRowView {
+            return reused
+        }
+        let row = AccentBarTableRowView()
+        row.identifier = AccentBarTableRowView.reuseIdentifier
+        return row
     }
 
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {

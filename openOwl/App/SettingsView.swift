@@ -51,49 +51,6 @@ enum AppAppearance: String, CaseIterable, Identifiable {
 
 // MARK: - Notification Sound
 
-enum NotificationSound: String, CaseIterable, Identifiable {
-    case none = "none"
-    case basso = "Basso"
-    case blow = "Blow"
-    case bottle = "Bottle"
-    case frog = "Frog"
-    case funk = "Funk"
-    case glass = "Glass"
-    case hero = "Hero"
-    case morse = "Morse"
-    case ping = "Ping"
-    case pop = "Pop"
-    case purr = "Purr"
-    case sosumi = "Sosumi"
-    case submarine = "Submarine"
-    case tink = "Tink"
-
-    var id: String { rawValue }
-
-    var label: String {
-        self == .none ? "None" : rawValue
-    }
-
-    static let defaultsKey = "openowl.notificationSound"
-
-    static var current: NotificationSound {
-        guard let raw = UserDefaults.standard.string(forKey: defaultsKey),
-              let value = NotificationSound(rawValue: raw) else { return .submarine }
-        return value
-    }
-
-    static func apply(_ sound: NotificationSound) {
-        UserDefaults.standard.set(sound.rawValue, forKey: defaultsKey)
-    }
-
-    /// Play the sound. Returns immediately if set to .none.
-    func play() {
-        guard self != .none else { return }
-        let path = "/System/Library/Sounds/\(rawValue).aiff"
-        NSSound(contentsOfFile: path, byReference: true)?.play()
-    }
-}
-
 // MARK: - Settings View
 
 struct SettingsView: View {
@@ -101,7 +58,6 @@ struct SettingsView: View {
     @State private var terminalTheme: String = GhosttyConfig.readOverride(key: "theme") ?? ""
     @State private var themeSearchQuery = ""
     @State private var showRestartHint = false
-    @State private var notificationSound: NotificationSound = .current
 
     private var availableThemes: [String] {
         let themes = Self.loadThemeList()
@@ -121,18 +77,6 @@ struct SettingsView: View {
                 .pickerStyle(.inline)
                 .onChange(of: appearance) { _, newValue in
                     AppAppearance.apply(newValue)
-                }
-            }
-
-            Section("Notifications") {
-                Picker("Alert Sound", selection: $notificationSound) {
-                    ForEach(NotificationSound.allCases) { sound in
-                        Text(sound.label).tag(sound)
-                    }
-                }
-                .onChange(of: notificationSound) { _, newValue in
-                    NotificationSound.apply(newValue)
-                    newValue.play()
                 }
             }
 

@@ -122,6 +122,8 @@ classifyGitState: GitFileChange → FileGitState
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-01 | `EditTracker.destroy()` 不再清空 `controller`——单个 tracker 被所有 tab 的编辑器共用，而 SwiftUI 在 `.id(storage)` 重建时先注册新 controller、后拆卸旧的，清空会把活着的实例置 nil，使 `relayout()` 此后永久静默失效（软换行宽度再也修不上）；`controller` 是 weak，无需手动清 |
+| 2026-08-01 | 文件树 outline 选中改用 `AccentBarTableRowView`（accent 左竖条 + 浅色圆角底），与 SwiftUI `selectableRowChrome` 共用 `SelectableRowMetrics`，去掉系统蓝高亮 |
 | 2026-07-31 | 上下文切换/删除改为副作用前同步 editor preflight；补齐 dock 折叠常驻、三保存出口签名冲突否决、tab 关闭后正常切换/reload、自动读取上限、open/restore 失败持久化差异与 unsaved names 生命周期 |
 | 2026-07-31 | `fileSize(for:)` 改返回 `Int?`——`?? 0` 会同时废掉 large-mode、50MB 确认框和图片上限三道保护；未知大小改为按大文件保守处理 |
 | 2026-07-31 | 8 条读取失败路径统一到 `failFileRead`（此前三种契约互不一致）；关 tab 保存失败不再销毁 buffer；错误横幅在 editor-only 模式也渲染；⌘Q 增加未保存守卫；`saveAllDirtyTabs` 元组改具名 `SaveFailure` |

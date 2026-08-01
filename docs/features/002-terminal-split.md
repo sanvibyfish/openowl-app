@@ -10,7 +10,7 @@
 
 ## 2. 用户流程
 
-1. **新建标签**: Cmd+T 创建新终端标签（按项目自动编号 "Tab 1", "Tab 2"）
+1. **新建标签**: Cmd+T 创建新终端标签，**仅在 free terminal 下可用**（项目 namespace 不绘制 tab bar，标签没有可见入口，故菜单项置灰）
 2. **分屏**: Cmd+D 水平分屏 / Cmd+Shift+D 垂直分屏
 3. **切换焦点**: Cmd+Option+方向键 在窗格间导航
 4. **调整大小**: 拖拽分割线，双击分割线均分所有窗格
@@ -66,6 +66,11 @@ indirect enum TerminalSplitNode: Equatable {
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-01 | `closeCurrent()` 不再跨 namespace 兜底到 `tabs.last`：关掉某 namespace 最后一个 tab 会把活动槽交给另一个 namespace 的 tab，`activeTabID.didSet` 随即把那个 namespace 的记忆改写成用户从未打开过的 tab。现改为就地新建 tab，与 `switchNamespace` 对空 namespace 的处理一致 |
+| 2026-08-01 | 移除 bell 生产端残留：`GhosttyConfig` 不再请求 `notify-on-command-finish`，`onPaneBell` 钩子删除，`RING_BELL` 显式吞掉以免落回系统 beep |
+| 2026-08-01 | 项目 namespace 禁用 ⌘T（菜单项置灰 + 键盘监听一并拦截）——只有 free terminal 会绘制 tab bar，项目里建出的 tab 没有任何可见入口，切过去后只能靠侧栏 pane 行找回来。项目布局仍走 worktree + 分屏（⌘D / ⇧⌘D） |
+| 2026-08-01 | 移除 bell 通知整条链路：`paneBellStates` / `handleBell` / `clearBell` / `bellCount`、侧栏 pane 行的铃铛与高亮、rail 与 session 行的未读角标、提示音与系统通知，以及设置里的 Notifications 分区。实现效果不佳，通知方案待重新设计。Ghostty 层的 `onPaneBell` 桥接与 `notify-on-command-finish-action` 配置保留，重做时可直接复用 |
+| 2026-08-01 | 每个 namespace 记住各自最后活动的 tab：切到别的项目再切回来会落回原来那个 tab，而不是一律跳到第一个。记录挂在 `activeTabID` 的 `didSet`，恢复前校验该 tab 仍存在（已关闭则回落到第一个） |
 | 2026-07-29 | 拆分 AppKit 焦点回报与侧栏主动聚焦；点击终端条目时同步切换 namespace 和具体分屏，修复闪屏与跨 worktree 空白 |
 | 2026-07-24 | 统一终端工作区视觉：平面标签栏、语义分隔线和低干扰 pane 焦点提示 |
 | 2026-03-16 | 创建文档 |

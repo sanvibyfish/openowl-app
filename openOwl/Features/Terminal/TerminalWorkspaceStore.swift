@@ -48,9 +48,7 @@ struct PaneInfo: Identifiable {
     let paneID: UUID
     let tabID: UUID
     let title: String
-    let bellTime: Date?   // nil = running, non-nil = bell received
     var id: UUID { paneID }
-    var hasBell: Bool { bellTime != nil }
 }
 
 indirect enum TerminalSplitNode: Equatable {
@@ -334,7 +332,16 @@ typealias TerminalNamespace = ActiveKind
 @Observable
 final class TerminalWorkspaceStore {
     private(set) var tabs: [TerminalTabState] = []
-    var activeTabID: UUID?
+    var activeTabID: UUID? {
+        didSet {
+            guard let id = activeTabID, let namespace = tabNamespaceMap[id] else { return }
+            lastActiveTabByNamespace[namespace] = id
+        }
+    }
+
+    /// Where the user last was in each namespace. Switching projects and coming
+    /// back should land on that tab, not reset to the first one.
+    private var lastActiveTabByNamespace: [TerminalNamespace: UUID] = [:]
 
     var activeFocusedPaneID: UUID? {
         guard let tab = tabs.first(where: { $0.id == activeTabID }) else { return nil }
@@ -376,8 +383,6 @@ final class TerminalWorkspaceStore {
     // free-terminal namespace is active.
     private(set) var panePwds: [UUID: String] = [:]
 
-    // Pane bell notification state (paneID → last bell time)
-    private(set) var paneBellStates: [UUID: Date] = [:]
 
 
     // Per-namespace terminal tracking. A namespace is either a project (worktree)
@@ -429,6 +434,13 @@ final class TerminalWorkspaceStore {
         // pwd reports on each shell command) would reset activeTabID to the
         // first tab — making any non-first tab impossible to stay on while typing.
         if let currentID = activeTabID, tabNamespaceMap[currentID] == namespace {
+            return
+        }
+        // Coming back from another namespace: restore the tab the user left off
+        // on. Falls through to the first tab when that one has since been closed.
+        if let remembered = lastActiveTabByNamespace[namespace],
+           nsTabs.contains(where: { $0.id == remembered }) {
+            activeTabID = remembered
             return
         }
         activeTabID = nsTabs.first?.id
@@ -583,7 +595,6 @@ final class TerminalWorkspaceStore {
             destroyPaneHandler?(pID)
             paneTitles.removeValue(forKey: pID)
             panePwds.removeValue(forKey: pID)
-            paneBellStates.removeValue(forKey: pID)
             paneSearchStates.removeValue(forKey: pID)
         }
         let removedNamespace = tabNamespaceMap[removed.id]
@@ -619,17 +630,24 @@ final class TerminalWorkspaceStore {
             for pID in removedTab.splitTree.allPaneIDs {
                 destroyPaneHandler?(pID)
                 paneTitles.removeValue(forKey: pID)
-            panePwds.removeValue(forKey: pID)
-                paneBellStates.removeValue(forKey: pID)
+                panePwds.removeValue(forKey: pID)
                 paneSearchStates.removeValue(forKey: pID)
             }
             tabNamespaceMap.removeValue(forKey: removedTab.id)
             tabs.remove(at: index)
 
-            // Switch to next visible tab for this project
+            // Stay inside the current namespace. Falling back to `tabs.last`
+            // handed the active slot to another namespace's tab: visibleTabs
+            // went empty while activeTabID pointed elsewhere, and the didSet
+            // then overwrote that namespace's remembered tab with one the user
+            // had never opened. Seed a fresh tab instead, matching what
+            // switchNamespace does for an empty namespace.
             let visible = visibleTabs
-            let fallback = visible.first ?? tabs.last
-            activeTabID = fallback?.id
+            if visible.isEmpty, let namespace = activeNamespace {
+                _ = newTab(for: namespace)
+                return .none
+            }
+            activeTabID = visible.first?.id
 
             if let fbID = activeTabID, let fbIdx = tabs.firstIndex(where: { $0.id == fbID }) {
                 if tabs[fbIdx].focusedPaneID == nil {
@@ -773,8 +791,6 @@ final class TerminalWorkspaceStore {
     /// This must not request first responder again: TerminalNSView calls this
     /// from becomeFirstResponder(), so requesting focus here creates a loop.
     func focusPane(_ paneID: UUID) {
-        clearBell(paneID: paneID)
-
         for index in tabs.indices {
             guard tabs[index].splitTree.containsPane(paneID) else { continue }
             let targetTabID = tabs[index].id
@@ -832,21 +848,6 @@ final class TerminalWorkspaceStore {
         state.selected = nil
     }
 
-    func handleBell(paneID: UUID, isTerminalVisible: Bool) {
-        // Only suppress if user is actually looking at the terminal AND this pane is focused
-        if isTerminalVisible,
-           let activeTabID,
-           let tab = tabs.first(where: { $0.id == activeTabID }),
-           tab.focusedPaneID == paneID {
-            return
-        }
-        paneBellStates[paneID] = Date()
-    }
-
-    func clearBell(paneID: UUID) {
-        paneBellStates.removeValue(forKey: paneID)
-    }
-
     /// Pane info for a specific project (used by Sidebar).
     func paneInfos(for projectID: String) -> [PaneInfo] {
         paneInfos(for: .project(projectID))
@@ -859,28 +860,10 @@ final class TerminalWorkspaceStore {
                 PaneInfo(
                     paneID: paneID,
                     tabID: tab.id,
-                    title: paneTitles[paneID] ?? tab.title,
-                    bellTime: paneBellStates[paneID]
+                    title: paneTitles[paneID] ?? tab.title
                 )
             }
         }
-    }
-
-    /// Bell count for a project — lightweight alternative to paneInfos(for:).filter(\.hasBell).count.
-    /// Only reads tabs and paneBellStates (not paneTitles), reducing observation dependencies.
-    func bellCount(for projectID: String) -> Int {
-        bellCount(for: .project(projectID))
-    }
-
-    func bellCount(for namespace: TerminalNamespace) -> Int {
-        let nsTabs = tabs.filter { tabNamespaceMap[$0.id] == namespace }
-        var count = 0
-        for tab in nsTabs {
-            for paneID in tab.splitTree.allPaneIDs where paneBellStates[paneID] != nil {
-                count += 1
-            }
-        }
-        return count
     }
 
     func isPaneVisible(_ paneID: UUID, in tabID: UUID) -> Bool {
@@ -910,7 +893,6 @@ final class TerminalWorkspaceStore {
         destroyPaneHandler?(currentPane)
         paneTitles.removeValue(forKey: currentPane)
         panePwds.removeValue(forKey: currentPane)
-        paneBellStates.removeValue(forKey: currentPane)
         paneSearchStates.removeValue(forKey: currentPane)
 
         tab.splitTree = newTree

@@ -25,7 +25,6 @@ final class GhosttyAppManager {
     )
     var onPaneTitleChanged: ((UUID, String) -> Void)?
     var onPanePwdChanged: ((UUID, String) -> Void)?
-    var onPaneBell: ((UUID) -> Void)?
     /// Called when ghostty wants to open a URL/path (cmd+click on a hyperlink
     /// or detected path). Return `true` if the host handled it (suppresses
     /// ghostty's default `NSWorkspace.open`); return `false` to let ghostty's
@@ -397,8 +396,9 @@ final class GhosttyAppManager {
             return true
 
         case GHOSTTY_ACTION_RING_BELL:
-            guard let paneID = paneID(for: target) else { return false }
-            onPaneBell?(paneID)
+            // Swallowed on purpose. Notification handling was removed; claiming
+            // it keeps libghostty from falling back to a system beep when a
+            // stray BEL byte comes through the terminal.
             return true
 
         case GHOSTTY_ACTION_START_SEARCH:

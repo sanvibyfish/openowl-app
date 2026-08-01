@@ -1,0 +1,62 @@
+--- a/Sources/CodeEditTextView/TextLine/Typesetter/Typesetter.swift
++++ b/Sources/CodeEditTextView/TextLine/Typesetter/Typesetter.swift
+@@ -170,35 +170,56 @@ final public class Typesetter {
+         let substring = string.attributedSubstring(from: range)
+ 
+         // Layout as many fragments as possible in this content run
+         while context.currentPosition < range.max {
+-            // The line break indicates the distance from the range we’re typesetting on that should be broken at.
+-            // It's relative to the range being typeset, not the line
+-            let lineBreak = typesetter.suggestLineBreak(
++            let relativeStart = context.currentPosition - range.location
++            let remaining = range.length - relativeStart
++            guard remaining > 0 else { break }
++
++            let availableWidth = displayData.maxWidth - context.fragmentContext.width
++            if availableWidth <= 0 {
++                context.popCurrentData()
++                continue
++            }
++
++            // suggestLineBreak returns an absolute end index in `substring`, not a length.
++            let breakEnd = typesetter.suggestLineBreak(
+                 using: substring,
+                 strategy: displayData.breakStrategy,
+-                subrange: NSRange(start: context.currentPosition - range.location, end: range.length),
+-                constrainingWidth: displayData.maxWidth - context.fragmentContext.width
++                subrange: NSRange(location: relativeStart, length: remaining),
++                constrainingWidth: availableWidth
+             )
+-
+-            // Indicates the subrange on the range that the typesetter knows about. This may not be the entire line
+-            let typesetSubrange = NSRange(location: context.currentPosition - range.location, length: lineBreak)
++            let breakLength = max(0, breakEnd - relativeStart)
++            let fragmentLength = max(breakLength, 1)
++            let typesetSubrange = NSRange(location: relativeStart, length: fragmentLength)
+             let typesetData = typesetLine(typesetter: typesetter, range: typesetSubrange)
+ 
+             // The typesetter won't tell us if 0 characters can fit in the constrained space. This checks to
+             // make sure we can fit something. If not, we pop and continue
+-            if lineBreak == 1 && context.fragmentContext.width + typesetData.width > displayData.maxWidth {
++            if fragmentLength == 1
++                && context.fragmentContext.width > 0
++                && context.fragmentContext.width + typesetData.width > displayData.maxWidth {
+                 context.popCurrentData()
+                 continue
+             }
+ 
+-            // Amend the current line data to include this line, popping the current line afterwards
+-            context.appendText(typesettingRange: range, lineBreak: lineBreak, typesetData: typesetData)
++            let absoluteEndInSubstring = relativeStart + fragmentLength
++            context.appendText(
++                typesettingRange: range,
++                lineBreak: absoluteEndInSubstring,
++                typesetData: typesetData
++            )
+ 
+             // If this isn't the end of the line, we should break so we pop the context and start a new fragment.
+             if context.currentPosition != range.max {
+                 context.popCurrentData()
+             }
+         }
+     }

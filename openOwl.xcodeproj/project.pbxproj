@@ -88,6 +88,7 @@
 		F7A0E506981153607E812058 /* BookmarkStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EA6C0B7C4F7B3B1E84C0C91 /* BookmarkStoreTests.swift */; };
 		F809C182203DC5D122B19DB8 /* GraphLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE352528571824276B013180 /* GraphLayoutTests.swift */; };
 		F9DFB41D15D5628E3305431E /* CommitMessageGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6607398740E9040BA756684C /* CommitMessageGenerator.swift */; };
+		FA74C49292D00D1B1654BC01 /* SelectableRowChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47FBEED930CEBFE305680520 /* SelectableRowChrome.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -123,6 +124,7 @@
 		3C32FF68B777207179BFEFB0 /* BranchNameGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BranchNameGenerator.swift; sourceTree = "<group>"; };
 		3EA6C0B7C4F7B3B1E84C0C91 /* BookmarkStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkStoreTests.swift; sourceTree = "<group>"; };
 		46C97B681433B80851C4C8B2 /* TerminalSplitNodeExtraTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSplitNodeExtraTests.swift; sourceTree = "<group>"; };
+		47FBEED930CEBFE305680520 /* SelectableRowChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectableRowChrome.swift; sourceTree = "<group>"; };
 		482BCD458AD47827F0591A74 /* RightDockStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RightDockStore.swift; sourceTree = "<group>"; };
 		490E3122E814DA28B0734EF6 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		4F692AB2575EE0D90EDAE529 /* StatusBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarView.swift; sourceTree = "<group>"; };
@@ -246,6 +248,7 @@
 				AAF45F9E4541BB9F66DC113E /* PanelDivider.swift */,
 				00D2782FE44356BA1DC6F8B8 /* RailChrome.swift */,
 				D3F88A4C649AE808F422E1D1 /* SectionTitle.swift */,
+				47FBEED930CEBFE305680520 /* SelectableRowChrome.swift */,
 				61BBAD397E75BD6423E0EB63 /* SpinningIcon.swift */,
 				E8DDBDFCC91E18EF5D1F8EA3 /* WindowAccessor.swift */,
 			);
@@ -581,6 +584,7 @@
 				D79A8C2EED7A6227E6DFF3AD /* RightDockStore.swift in Sources */,
 				8542D038455206037150C4FE /* RightDockView.swift in Sources */,
 				F043F631A3AD286B260541AB /* SectionTitle.swift in Sources */,
+				FA74C49292D00D1B1654BC01 /* SelectableRowChrome.swift in Sources */,
 				521860E4905A1AFE5052874D /* SettingsView.swift in Sources */,
 				6BBD6B72F4001B15A9D35F94 /* SpinningIcon.swift in Sources */,
 				465C4C06EEE907C3154E2329 /* StatusBarView.swift in Sources */,
@@ -705,7 +709,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = openOwl/Resources/openOwl.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(PROJECT_DIR)",
 				);
@@ -723,7 +727,7 @@
 				LIBRARY_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.1.2;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-framework Metal",
@@ -752,7 +756,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconDev;
 				CODE_SIGN_ENTITLEMENTS = openOwl/Resources/openOwl.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(PROJECT_DIR)",
 				);
@@ -770,7 +774,7 @@
 				LIBRARY_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
-				MARKETING_VERSION = 1.1.1;
+				MARKETING_VERSION = 1.1.2;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-framework Metal",
@@ -787,7 +791,7 @@
 					"-lz",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.openowl.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.openowl.app.dev;
 				PRODUCT_NAME = openOwl;
 				SDKROOT = macosx;
 			};

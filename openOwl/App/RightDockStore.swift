@@ -27,11 +27,14 @@ enum RightDockTab: String, CaseIterable, Hashable, Identifiable {
 @Observable
 final class RightDockStore {
     static let minWidth: CGFloat = 320
-    static let defaultWidth: CGFloat = 420
+    /// When Files editor / Git diff is visible, dock must be wide enough that
+    /// neither the list column nor the detail column gets crushed mid-glyph.
+    static let minWidthWithDetail: CGFloat = 520
+    static let defaultWidth: CGFloat = 520
     /// Width used when the active tab's detail panel is hidden — narrow enough
     /// to comfortably fit just the tree/changes list without dead space.
-    static let listOnlyWidth: CGFloat = 260
-    static let maxWidthFraction: CGFloat = 0.5
+    static let listOnlyWidth: CGFloat = 280
+    static let maxWidthFraction: CGFloat = 0.55
 
     private static let keyExpanded = "openowl.rightDock.isExpanded"
     private static let keyActiveTab = "openowl.rightDock.activeTab"
@@ -145,13 +148,25 @@ final class RightDockStore {
         }
     }
 
+    /// Floor for the current mode. List-only reports `listOnlyWidth` because
+    /// that is exactly what `effectiveWidth` renders in that mode — reporting
+    /// `minWidth` here would have the type contradict its own output.
+    var currentMinWidth: CGFloat {
+        showsDetailForActiveTab ? Self.minWidthWithDetail : Self.listOnlyWidth
+    }
+
     /// Width the dock panel actually occupies, given fullscreen state and
     /// whether the active tab is showing its detail pane. The host passes its
     /// own width so fullscreen can stretch to fill it.
     func effectiveWidth(hostWidth: CGFloat) -> CGFloat {
         if isFullscreen { return max(0, hostWidth) }
-        let candidate = showsDetailForActiveTab ? width : Self.listOnlyWidth
-        return min(candidate, Self.maxNormalWidth(hostWidth: hostWidth))
+        let maxW = Self.maxNormalWidth(hostWidth: hostWidth)
+        if !showsDetailForActiveTab {
+            return min(Self.listOnlyWidth, maxW)
+        }
+        // Prefer the detail floor so HSplit columns aren't crushed mid-glyph.
+        // The outer min still lets a small window win.
+        return min(max(width, currentMinWidth), maxW)
     }
 
     static func maxNormalWidth(hostWidth: CGFloat) -> CGFloat {
@@ -188,9 +203,11 @@ final class RightDockStore {
         isFullscreen.toggle()
     }
 
-    /// Clamp width to [minWidth, maxWidth]. Caller passes the live maxWidth derived from the host window.
+    /// Clamp width to [currentMinWidth, maxWidth]. Caller passes the live maxWidth
+    /// derived from the host window.
     func setWidth(_ newWidth: CGFloat, maxWidth: CGFloat) {
-        let clampedMax = max(Self.minWidth, maxWidth)
-        width = min(max(Self.minWidth, newWidth), clampedMax)
+        let floor = currentMinWidth
+        let clampedMax = max(floor, maxWidth)
+        width = min(max(floor, newWidth), clampedMax)
     }
 }

@@ -23,7 +23,12 @@ struct RightDockView: View {
             // overrides `width` with a fixed `listOnlyWidth` either way).
             if !dock.isFullscreen && dock.showsDetailForActiveTab {
                 ResizeHandle(
-                    currentWidth: dock.width,
+                    // Drag from the edge the user can actually see. `width` is a
+                    // stored preference that effectiveWidth may floor up (an
+                    // upgrade carrying the old 420 default renders at 520), and
+                    // anchoring the gesture to the stale value made the first
+                    // narrow-drag after upgrade do nothing at all.
+                    currentWidth: dock.effectiveWidth(hostWidth: hostWidth),
                     onResizeStart: {
                         dock.beginInteractiveResize()
                     },
@@ -51,8 +56,8 @@ struct RightDockView: View {
 
     private var dockHeader: some View {
         HStack(spacing: 0) {
-            // Flat underline tabs — no floating pill border (that read as a
-            // detached chip on the left of the Files panel).
+            // Flat underline tabs — same quiet inspector language as the
+            // left session list headers (no floating pill chrome).
             ForEach(RightDockTab.allCases) { tab in
                 let selected = dock.activeTab == tab
                 Button {
@@ -136,13 +141,8 @@ struct RightDockView: View {
             .accessibilityLabel("Collapse panel")
         }
         .padding(.trailing, 4)
-        .frame(height: AppSpacing.headerHeight)
-        .background(AppPalette.base)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(AppPalette.border)
-                .frame(height: 1)
-        }
+        // Elevated to pair with left ProjectSessionList header surface.
+        .panelToolHeader(background: AppPalette.elevated)
     }
 
     private var activeProject: ProjectItem? {

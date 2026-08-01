@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import CodeEditSourceEditor
 import CodeEditLanguages
+import CodeEditTextView
 
 let editorConfiguration = SourceEditorConfiguration(
     appearance: .init(
@@ -26,7 +27,18 @@ let editorConfiguration = SourceEditorConfiguration(
         font: .monospacedSystemFont(ofSize: 12, weight: .regular),
         wrapLines: true
     ),
-    peripherals: .init(showMinimap: false)
+    // Right dock is narrow: keep soft-wrap, kill chrome that steals width or
+    // paints over the leading glyphs (fold ribbon sits in the gutter and was
+    // covering the first characters of tree lines like `│   ├──`).
+    layout: .init(
+        additionalTextInsets: NSEdgeInsets(top: 2, left: 0, bottom: 2, right: 10)
+    ),
+    peripherals: .init(
+        showGutter: true,
+        showMinimap: false,
+        showReformattingGuide: false,
+        showFoldingRibbon: false
+    )
 )
 
 /// Configuration used when a file is opened in "large file" mode: same visual
@@ -207,23 +219,94 @@ enum FileEditorSessionPersistence {
     }
 }
 
+// MARK: - Bounds observer (AppKit → SwiftUI)
+
+/// Reports NSView bounds after AppKit layout — more reliable than GeometryReader
+/// alone when the host RightDock animates from width 0.
+private struct EditorBoundsObserver: NSViewRepresentable {
+    var onChange: (CGSize) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = LayoutWatchView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? LayoutWatchView)?.onChange = onChange
+    }
+
+    private final class LayoutWatchView: NSView {
+        var onChange: ((CGSize) -> Void)?
+        private var last: CGSize = .zero
+
+        override func layout() {
+            super.layout()
+            let size = bounds.size
+            guard abs(size.width - last.width) > 0.5
+                    || abs(size.height - last.height) > 0.5 else { return }
+            last = size
+            onChange?(size)
+        }
+    }
+}
+
 // MARK: - Dirty Tracking Coordinator
 
 /// Detects text changes in SourceEditor and marks the active tab as dirty.
+///
+/// Also pins the **wrap width** for the right dock. CodeEdit wraps at
+/// `viewport.width − layoutManager.edgeInsets.horizontal`, and in the dock the
+/// first layout can run while the host is still collapsed at width 0 — baking a
+/// wrap point of a few glyphs that never recovers on its own.
 private class EditTracker: TextViewCoordinator {
     var onTextChanged: (() -> Void)?
+    weak var controller: TextViewController?
+
+    /// Last host width we applied — avoids redundant work during live resize.
+    private var lastAppliedHostWidth: CGFloat = -1
 
     func prepareCoordinator(controller: TextViewController) {
-        // Remove minimap and floating views that intercept clicks on the right side.
-        // Iterate a snapshot to avoid mutating subviews during enumeration.
-        if let scrollView = controller.view.subviews.first as? NSScrollView {
-            for subview in Array(scrollView.subviews) {
-                let name = type(of: subview).description()
-                if name.contains("Minimap") || name.contains("Reformat") {
-                    subview.removeFromSuperview()
-                }
-            }
+        self.controller = controller
+        // The bounds observer can fire before this runs, while `controller` is
+        // still nil, so the first pass has to come from here.
+        DispatchQueue.main.async { [weak self] in
+            self?.relayout()
         }
+    }
+
+    /// Re-pin insets and re-wrap against the host's current width. Cheap to
+    /// over-call: a width we already applied returns immediately.
+    func relayout() {
+        guard let controller, let textView = controller.textView else { return }
+        controller.view.layoutSubtreeIfNeeded()
+        let hostWidth = controller.view.bounds.width
+        guard hostWidth >= 100 else {
+            // Collapsed dock or pre-layout: forget the applied width so the next
+            // real one re-applies. Expanding back to the same width would
+            // otherwise dedupe away, leaving wrap baked at the collapsed size.
+            lastAppliedHostWidth = -1
+            return
+        }
+        if abs(hostWidth - lastAppliedHostWidth) < 1 { return }
+        lastAppliedHostWidth = hostWidth
+
+        // Leading = gutter; trailing = small dock padding. Wrap width is
+        // viewport − left − right, so this is the only right inset.
+        let leading = max(textView.textInsets.left, 40)
+        let trailingPadding: CGFloat = 14
+        textView.textInsets = HorizontalEdgeInsets(left: leading, right: trailingPadding)
+        textView.lineBreakStrategy = .word
+
+        // Match text view width to the real host, then re-wrap.
+        if abs(textView.frame.width - hostWidth) > 0.5 {
+            textView.frame.size.width = hostWidth
+        }
+        _ = textView.updateFrameIfNeeded()
+        textView.layoutManager.setNeedsLayout()
+        _ = textView.layoutManager.layoutLines()
+        textView.needsLayout = true
+        textView.needsDisplay = true
     }
 
     func textViewDidChangeText(controller: TextViewController) {
@@ -232,7 +315,19 @@ private class EditTracker: TextViewCoordinator {
 
     func textViewDidChangeSelection(controller: TextViewController, newPositions: [CursorPosition]) {}
 
-    func destroy() {}
+    func destroy() {
+        // Deliberately does NOT clear `controller`. One EditTracker is shared by
+        // every tab's editor, and `.id(storage)` rebuilds on tab switch — SwiftUI
+        // registers the incoming controller before tearing the outgoing one down,
+        // so clearing here would null out the live controller and `relayout()`
+        // would silently no-op forever. `controller` is weak; the dying instance
+        // drops out on its own.
+        //
+        // Resetting the width is still required: without it the incoming editor
+        // gets deduped away at an identical host width and never has its insets
+        // applied.
+        lastAppliedHostWidth = -1
+    }
 }
 
 // MARK: - FileExplorerView
@@ -491,19 +586,18 @@ struct FileExplorerView: View {
                 .accessibilityLabel(rightDockStore.filesShowsEditor ? "Hide editor" : "Show editor")
             }
             .padding(.horizontal, 6)
-            .frame(height: AppSpacing.headerHeight)
-            .background(AppPalette.base)
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(AppPalette.border)
-                    .frame(height: 1)
-            }
+            .panelToolHeader(background: AppPalette.base)
 
             errorBanner
 
             if store.rootNodes.isEmpty {
                 Spacer()
-                EmptyStateView("No files", subtitle: "Open a project to browse files")
+                EmptyStateView(
+                    "No files",
+                    subtitle: "Open a project to browse files",
+                    systemImage: "folder",
+                    density: .compact
+                )
                 Spacer()
             } else {
                 OutlineTreeView(
@@ -560,51 +654,54 @@ struct FileExplorerView: View {
 
     private var editorOnlyPanel: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
+            HStack(spacing: 2) {
                 Button {
                     rightDockStore.filesShowsTree = true
                 } label: {
                     Image(systemName: "sidebar.left")
-                        .font(AppFonts.secondaryLabel)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.icon(font: AppFonts.toolbarIcon, size: 24))
                 .help("Show explorer")
                 .accessibilityLabel("Show explorer")
-                .padding(.leading, AppSpacing.panelPadding)
-                .padding(.trailing, 4)
+                .padding(.leading, 4)
 
                 if !openTabs.isEmpty {
-                    editorTabBar
+                    editorTabBarContent
                 } else {
                     Spacer()
                 }
             }
-            .frame(height: AppSpacing.editorTabBarHeight)
-            .background(AppPalette.surface)
-
-            PanelDivider()
+            .panelToolHeader(height: AppSpacing.editorTabBarHeight, background: AppPalette.elevated)
 
             errorBanner
 
             ZStack {
                 editorContentArea
-
-                if let text = heavyProgressText {
-                    Color.black.opacity(0.25)
-                        .overlay {
-                            VStack(spacing: 8) {
-                                ProgressView()
-                                    .controlSize(.large)
-                                Text(text)
-                                    .font(AppFonts.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(20)
-                            .background(.regularMaterial)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                        }
-                }
+                heavyProgressOverlay
             }
+        }
+    }
+
+    @ViewBuilder
+    private var heavyProgressOverlay: some View {
+        if let text = heavyProgressText {
+            Color.black.opacity(0.22)
+                .overlay {
+                    VStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text(text)
+                            .font(AppFonts.caption)
+                            .foregroundStyle(AppPalette.textSecondary)
+                    }
+                    .padding(20)
+                    .background(AppPalette.elevated)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(AppPalette.border, lineWidth: 1)
+                    )
+                }
         }
     }
 
@@ -613,22 +710,7 @@ struct FileExplorerView: View {
     private var editorPanel: some View {
         ZStack {
             editorPanelContent
-
-            if let text = heavyProgressText {
-                Color.black.opacity(0.25)
-                    .overlay {
-                        VStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.large)
-                            Text(text)
-                                .font(AppFonts.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(20)
-                        .background(.regularMaterial)
-                        .cornerRadius(8)
-                    }
-            }
+            heavyProgressOverlay
         }
     }
 
@@ -661,8 +743,6 @@ struct FileExplorerView: View {
                 editorTabBar
             }
 
-            PanelDivider()
-
             editorContentArea
         }
     }
@@ -680,13 +760,16 @@ struct FileExplorerView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
-                .background(Color(nsColor: .windowBackgroundColor))
+                .background(AppPalette.base)
             } else if !isActiveTabImage, let storage = tabStorages[url] {
                 let isLargeMode = largeModeTabs.contains(url)
                 VStack(spacing: 0) {
                     if isLargeMode {
                         largeFileBanner(for: url)
                     }
+                    // Stays mounted even while the dock is collapsed (host width
+                    // 0). Unmounting there would rebuild the editor on every
+                    // expand, and rebuilding clears undo — see the .id note.
                     SourceEditor(
                         storage,
                         language: isLargeMode ? CodeLanguage.default : editorLanguage(for: url),
@@ -703,12 +786,25 @@ struct FileExplorerView: View {
                     .id(ObjectIdentifier(storage))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
+                    // Sole re-wrap trigger: AppKit reports real bounds after it
+                    // finishes layout, which covers dock expand, drag-resize and
+                    // tab switch without racing SwiftUI's timing.
+                    .background(
+                        EditorBoundsObserver { _ in
+                            editTracker.relayout()
+                        }
+                    )
                 }
             }
         } else {
             Spacer()
-            EmptyStateView("Select a file to edit", subtitle: "Click a file in the explorer or use ⌘P")
-                .frame(maxWidth: .infinity)
+            EmptyStateView(
+                "Select a file to edit",
+                subtitle: "Click a file in the explorer or use ⌘P",
+                systemImage: "doc.text",
+                density: .compact
+            )
+            .frame(maxWidth: .infinity)
             Spacer()
         }
     }
@@ -719,7 +815,7 @@ struct FileExplorerView: View {
 
     private var treePanelDivider: some View {
         Rectangle()
-            .fill(Color.secondary.opacity(0.2))
+            .fill(AppPalette.border)
             .frame(width: 1)
             .overlay {
                 Rectangle()
@@ -747,7 +843,9 @@ struct FileExplorerView: View {
 
     // MARK: - Tab Bar
 
-    private var editorTabBar: some View {
+    /// Tab pills only — used inside chrome-bearing headers so we don't stack
+    /// elevated backgrounds / hairlines twice (editor-only mode).
+    private var editorTabBarContent: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
                 ForEach(openTabs) { tab in
@@ -762,13 +860,11 @@ struct FileExplorerView: View {
             }
             .padding(.horizontal, 6)
         }
-        .frame(height: AppSpacing.editorTabBarHeight)
-        .background(AppPalette.elevated)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(AppPalette.border)
-                .frame(height: 1)
-        }
+    }
+
+    private var editorTabBar: some View {
+        editorTabBarContent
+            .panelToolHeader(height: AppSpacing.editorTabBarHeight, background: AppPalette.elevated)
     }
 
     // MARK: - Tab Management
@@ -1624,7 +1720,7 @@ struct FileExplorerView: View {
                 .font(AppFonts.toolbarIcon)
             Text("Large file — syntax highlighting and editing disabled.")
                 .font(AppFonts.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppPalette.textSecondary)
             Spacer(minLength: 8)
             Button("Enable Anyway") {
                 largeModeTabs.remove(url)
@@ -1921,13 +2017,13 @@ private struct EditorTabButton: View {
         .padding(.horizontal, 8)
         .frame(height: AppSpacing.editorTabBarHeight - 8)
         .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            RoundedRectangle(cornerRadius: AppSpacing.cornerRadius, style: .continuous)
                 .fill(isActive
                       ? AppPalette.base
                       : (isHovering ? AppPalette.surface : Color.clear))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            RoundedRectangle(cornerRadius: AppSpacing.cornerRadius, style: .continuous)
                 .strokeBorder(isActive ? AppPalette.border : Color.clear, lineWidth: 1)
         )
         .padding(.vertical, 4)
@@ -1941,14 +2037,14 @@ private struct EditorTabButton: View {
     private var closeOrDirtyIndicator: some View {
         if isDirty && !isHovering {
             Circle()
-                .fill(Color.primary.opacity(0.6))
+                .fill(AppPalette.textSecondary)
                 .frame(width: 6, height: 6)
                 .frame(width: 16, height: 16)
         } else if isHovering || isActive {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(AppFonts.tinyIcon.weight(.bold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(AppPalette.textTertiary)
                     .frame(width: 16, height: 16)
                     .contentShape(Rectangle())
             }

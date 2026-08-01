@@ -72,4 +72,10 @@ GitChangesStore (@MainActor)
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-01 | 「展开未修改行」限定到工作区 section：`.staged` 的 diff 是 HEAD vs index，而上下文从磁盘读取——磁盘副本可能领先于 index，会把未暂存的改动当作已暂存的上下文呈现在用户决定提交内容的地方。`.untracked` 无基线可展开 |
+| 2026-08-01 | commit diff 恢复 hunk 分隔条：此前「禁用展开」误把分隔条一起去掉，两个 hunk 上下紧贴、行号突然跳跃却无任何提示。现在不可展开时渲染为静态条 |
+| 2026-08-01 | 磁盘副本短于 diff 预期时明确提示「文件已变化」，不再逐行填空字符串（会渲染成带真实行号的空行，与文件里真正的空行无法区分）；`.failed` 携带具体错误并就地渲染为可重试行，不再借用会被 `refresh()` 清空的全局 error banner；过期的异步读取直接返回，不再把新选择的 `.loading` 覆盖成 `.idle` |
+| 2026-08-01 | **commit diff 不再提供「展开未修改行」**：该功能从磁盘读当前工作区文件填充上下文，对历史提交是错误的数据源（正确来源是 `git show <hash>:<path>`），且 `hunkIndex` 每个文件从 0 重数会与共享的 `expandedHunks` 串台，删除文件的 hunk 还会让 `ForEach(1..<0)` 崩溃。工作区 diff 的展开不受影响 |
+| 2026-08-01 | `parseUnified` 三处解析修正：diff 尾部换行不再产生幽灵空 context 行；`\ No newline at end of file` 不再当正文渲染（它此前还推高 `prevNewEnd`，使后续 hunk 少算一行）；展开行的旧行号改由 hunk 的 old/new 起点偏移推算，不再直接复用新行号 |
+| 2026-08-01 | Right dock Diff 改为默认 **unified（单栏）+ 长行 wrap**（对齐 VS Code / GitHub 窄栏惯例）；去掉 side-by-side 半宽与按最长行撑开的横向滚动 |
 | 2026-03-16 | 创建文档 |

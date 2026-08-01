@@ -67,6 +67,68 @@ struct TerminalNamespaceTests {
         #expect(projectPanesAfterReturn.count == projectPanesAfterSeed.count)
     }
 
+    @Test @MainActor func switchNamespace_returnsToLastActiveTab() {
+        let store = TerminalWorkspaceStore()
+        let projectNS: TerminalNamespace = .project("proj-A")
+        let termNS: TerminalNamespace = .freeTerminal(UUID())
+
+        store.switchNamespace(projectNS)
+        let secondTab = store.newTab(for: projectNS)
+        store.selectTab(id: secondTab)
+        #expect(store.activeTabID == secondTab)
+
+        store.switchNamespace(termNS)
+        store.switchNamespace(projectNS)
+
+        #expect(store.activeTabID == secondTab)
+    }
+
+    @Test @MainActor func switchNamespace_fallsBackToFirstTabWhenRememberedTabClosed() {
+        let store = TerminalWorkspaceStore()
+        let projectNS: TerminalNamespace = .project("proj-A")
+        let termNS: TerminalNamespace = .freeTerminal(UUID())
+
+        store.switchNamespace(projectNS)
+        let firstTab = store.activeTabID
+        let secondTab = store.newTab(for: projectNS)
+        store.selectTab(id: secondTab)
+
+        store.switchNamespace(termNS)
+        _ = store.closeTab(id: secondTab)
+        store.switchNamespace(projectNS)
+
+        #expect(store.activeTabID == firstTab)
+    }
+
+    /// Closing the last tab of one namespace must not hand the active slot to a
+    /// different namespace's tab — the didSet would then record that tab as the
+    /// other namespace's remembered position.
+    @Test @MainActor func closeCurrent_staysInsideNamespace() {
+        let store = TerminalWorkspaceStore()
+        let projectNS: TerminalNamespace = .project("proj-A")
+        let termNS: TerminalNamespace = .freeTerminal(UUID())
+
+        store.switchNamespace(termNS)
+        _ = store.newTab(for: termNS)
+        let termTab2 = store.newTab(for: termNS)
+        store.selectTab(id: termTab2)
+
+        // Project A gets exactly one tab, then closes it.
+        store.switchNamespace(projectNS)
+        #expect(store.visibleTabs.count == 1)
+        _ = store.closeCurrent()
+
+        // A fresh tab for A, not one of termNS's.
+        #expect(store.activeNamespace == projectNS)
+        if let active = store.activeTabID {
+            #expect(store.visibleTabs.contains { $0.id == active })
+        }
+
+        // termNS's remembered position survived untouched.
+        store.switchNamespace(termNS)
+        #expect(store.activeTabID == termTab2)
+    }
+
     @Test @MainActor func switchNamespace_visibleTabsReflectActive() {
         let store = TerminalWorkspaceStore()
         let projectNS: TerminalNamespace = .project("proj-A")
@@ -102,23 +164,24 @@ struct TerminalNamespaceTests {
         #expect(store.activeTabID == tab2)
     }
 
-    @Test @MainActor func switchNamespace_differentNamespace_resetsToFirstTab() {
+    @Test @MainActor func switchNamespace_differentNamespace_adoptsThatNamespacesTab() {
         // The same-namespace guard must not block legitimate cross-namespace
-        // switches: when activeTabID belongs to a different namespace, the
-        // new namespace's first tab should take over.
+        // switches: when activeTabID belongs to a different namespace, a tab
+        // from the incoming namespace has to take over. Which one is the
+        // namespace's last-active tab, not unconditionally its first.
         let store = TerminalWorkspaceStore()
         let projectNS: TerminalNamespace = .project("proj-A")
         let termNS: TerminalNamespace = .freeTerminal(UUID())
 
         let projectTab = store.newTab(for: projectNS)
-        let termTab1 = store.newTab(for: termNS)
         _ = store.newTab(for: termNS)
+        let termTab2 = store.newTab(for: termNS)
 
         store.switchNamespace(projectNS)
         #expect(store.activeTabID == projectTab)
 
         store.switchNamespace(termNS)
-        #expect(store.activeTabID == termTab1)
+        #expect(store.activeTabID == termTab2)
     }
 
     @Test @MainActor func switchNamespace_nil_clearsActive() {
@@ -148,24 +211,6 @@ struct TerminalNamespaceTests {
 
         #expect(store.activeNamespace == nil)
         #expect(store.activeProjectID == nil)
-    }
-
-    // MARK: - bellCount(for:)
-
-    @Test @MainActor func bellCount_namespaceVariant_matchesProjectStringVariant() {
-        let store = TerminalWorkspaceStore()
-        _ = store.newTab(for: .project("proj-A"))
-
-        #expect(store.bellCount(for: "proj-A") == store.bellCount(for: .project("proj-A")))
-    }
-
-    @Test @MainActor func bellCount_freeTerminalNamespace_isIsolated() {
-        let store = TerminalWorkspaceStore()
-        let termNS: TerminalNamespace = .freeTerminal(UUID())
-        _ = store.newTab(for: termNS)
-
-        #expect(store.bellCount(for: termNS) == 0)
-        #expect(store.bellCount(for: "unrelated") == 0)
     }
 
     // MARK: - activeProjectID convenience

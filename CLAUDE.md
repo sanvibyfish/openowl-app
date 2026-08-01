@@ -24,6 +24,11 @@ openOwl — macOS 原生 Git GUI + Terminal 桌面应用。基于 Swift + libgho
 ## Common Commands
 
 ```bash
+# 解析完 SPM 依赖后必须跑一次（clean build / 新 clone / 改 Package 之后同理）
+# CodeEditTextView 的软换行修复住在 SPM checkout 里，会被 resolve 覆盖掉。
+# 不跑的话右侧编辑器长行会重绘出先前的字符（"...AppKi" + "AppKit..."）。
+./scripts/apply-spm-patches.sh
+
 # Build (命令行)
 xcodebuild -scheme openOwl -configuration Debug build
 

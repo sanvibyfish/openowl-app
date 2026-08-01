@@ -3,8 +3,12 @@ import Foundation
 /// File logger → ~/Library/Logs/openOwl/openowl.log
 ///
 /// Noisy tags are off by default. Enable with:
-///   defaults write com.openowl.app log.resizeDiag -bool YES
-///   defaults write com.openowl.app log.keyboardRouting -bool YES
+///   defaults write com.openowl.app.dev log.resizeDiag -bool YES
+///   defaults write com.openowl.app.dev log.keyboardRouting -bool YES
+///
+/// Note the `.dev` suffix: these tags are only useful in Debug builds, and
+/// Debug ships as com.openowl.app.dev with its own UserDefaults domain.
+/// Release builds read com.openowl.app.
 enum AppLogger {
     private static let queue = DispatchQueue(label: "com.openowl.logger", qos: .utility)
     private static let maxFileSize: UInt64 = 10 * 1024 * 1024 // 10 MB
