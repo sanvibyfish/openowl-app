@@ -51,8 +51,8 @@ struct RightDockView: View {
 
     private var dockHeader: some View {
         HStack(spacing: 0) {
-            // Flat underline tabs — no floating pill border (that read as a
-            // detached chip on the left of the Files panel).
+            // Flat underline tabs — same quiet inspector language as the
+            // left session list headers (no floating pill chrome).
             ForEach(RightDockTab.allCases) { tab in
                 let selected = dock.activeTab == tab
                 Button {
@@ -136,13 +136,8 @@ struct RightDockView: View {
             .accessibilityLabel("Collapse panel")
         }
         .padding(.trailing, 4)
-        .frame(height: AppSpacing.headerHeight)
-        .background(AppPalette.base)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(AppPalette.border)
-                .frame(height: 1)
-        }
+        // Elevated to pair with left ProjectSessionList header surface.
+        .panelToolHeader(background: AppPalette.elevated)
     }
 
     private var activeProject: ProjectItem? {

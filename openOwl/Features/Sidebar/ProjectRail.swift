@@ -571,7 +571,7 @@ private struct ProjectRailPopover: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            .background(isActive ? AppPalette.accent.opacity(0.10) : Color.clear)
+            .selectableRowChrome(isSelected: isActive, accentBarHeight: 12)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

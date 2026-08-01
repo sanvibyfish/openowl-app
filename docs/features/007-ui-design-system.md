@@ -221,3 +221,5 @@ VStack(spacing: 12) {
 | 2026-03-16 | 创建设计方案 |
 | 2026-07-28 | 信息架构对齐 Muxy：左栏改为 `ProjectRail`（见 FEAT-006）；调色盘/选中竖条等 Phase 1 token 部分落地 |
 | 2026-07-31 | `RailChrome.hairline` / `RailChrome.background` 并入 `AppPalette.border` / `AppPalette.elevated`——两者取值相同，保留两个 token 会在调色时漂移；`RailChrome` 只保留尺寸常量 |
+| 2026-08-01 | 抽出 `SelectableRowChrome` + `panelToolHeader` 共享修饰器；Right Dock Files/Git 列表选中态与工具栏 chrome 对齐 `ProjectSessionList` |
+| 2026-08-01 | SSOT 闭环：`SelectableRowMetrics` + AppKit `AccentBarTableRowView`（文件树 outline 去掉系统蓝选中）；`ProjectSessionList` / rail popover 迁到同一 `selectableRowChrome` |

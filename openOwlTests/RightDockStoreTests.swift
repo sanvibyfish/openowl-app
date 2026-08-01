@@ -228,7 +228,16 @@ struct RightDockStoreTests {
     @Test @MainActor func setWidth_clampsToMin() {
         Self.clearDefaults()
         let store = RightDockStore()
+        // Default tab shows detail → floor is minWidthWithDetail, not list min.
+        store.setWidth(100, maxWidth: 800)
+        #expect(store.width == RightDockStore.minWidthWithDetail)
+        Self.clearDefaults()
+    }
 
+    @Test @MainActor func setWidth_clampsToListMinWhenDetailHidden() {
+        Self.clearDefaults()
+        let store = RightDockStore()
+        store.gitShowsDiff = false
         store.setWidth(100, maxWidth: 800)
         #expect(store.width == RightDockStore.minWidth)
         Self.clearDefaults()
@@ -247,8 +256,8 @@ struct RightDockStoreTests {
         Self.clearDefaults()
         let store = RightDockStore()
 
-        store.setWidth(400, maxWidth: 800)
-        #expect(store.width == 400)
+        store.setWidth(600, maxWidth: 800)
+        #expect(store.width == 600)
         Self.clearDefaults()
     }
 
@@ -257,7 +266,7 @@ struct RightDockStoreTests {
         let store = RightDockStore()
 
         store.setWidth(500, maxWidth: 100)
-        #expect(store.width == RightDockStore.minWidth)
+        #expect(store.width == RightDockStore.minWidthWithDetail)
         Self.clearDefaults()
     }
 
@@ -327,10 +336,22 @@ struct RightDockStoreTests {
         let store = RightDockStore()
         store.activeTab = .git
         store.gitShowsDiff = true
-        store.width = 480
+        store.width = 560
 
         let w = store.effectiveWidth(hostWidth: 1200)
-        #expect(w == 480)
+        #expect(w == 560)
+        Self.clearDefaults()
+    }
+
+    @Test @MainActor func effectiveWidth_floorsBelowDetailMin() {
+        Self.clearDefaults()
+        let store = RightDockStore()
+        store.activeTab = .git
+        store.gitShowsDiff = true
+        store.width = 320 // below minWidthWithDetail
+
+        let w = store.effectiveWidth(hostWidth: 1200)
+        #expect(w == RightDockStore.minWidthWithDetail)
         Self.clearDefaults()
     }
 
@@ -342,7 +363,7 @@ struct RightDockStoreTests {
         store.width = 1000
 
         let w = store.effectiveWidth(hostWidth: 900)
-        #expect(w == CGFloat(450))
+        #expect(w == RightDockStore.maxNormalWidth(hostWidth: 900))
         Self.clearDefaults()
     }
 
@@ -365,7 +386,8 @@ struct RightDockStoreTests {
         store.filesShowsEditor = false
 
         let w = store.effectiveWidth(hostWidth: 420)
-        #expect(w == CGFloat(210))
+        let hostMax = RightDockStore.maxNormalWidth(hostWidth: 420)
+        #expect(w == min(RightDockStore.listOnlyWidth, hostMax))
         Self.clearDefaults()
     }
 

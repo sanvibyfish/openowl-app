@@ -26,8 +26,8 @@ struct QuickOpenPanel: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(AppPalette.textTertiary)
 
                 TextField("Go to File", text: $store.quickOpenQuery)
                     .textFieldStyle(.plain)
@@ -41,18 +41,20 @@ struct QuickOpenPanel: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
 
-            Divider()
+            Rectangle()
+                .fill(AppPalette.border)
+                .frame(height: 1)
 
             if matches.isEmpty && !store.quickOpenQuery.isEmpty {
                 Text("No matching files")
                     .font(AppFonts.body)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppPalette.textSecondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 20)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: 0) {
+                        LazyVStack(spacing: 2) {
                             ForEach(Array(visibleMatches.enumerated()), id: \.element.id) { index, match in
                                 QuickOpenRow(
                                     node: match.node,
@@ -65,6 +67,8 @@ struct QuickOpenPanel: View {
                                 .onTapGesture { openMatch(match) }
                             }
                         }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 6)
                     }
                     .frame(maxHeight: 340)
                     .onChange(of: safeSelectedIndex) { _, newIndex in
@@ -78,13 +82,13 @@ struct QuickOpenPanel: View {
         }
         .frame(width: 500)
         .background(AppPalette.elevated)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .glassEffectIfAvailable(in: RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .glassEffectIfAvailable(in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(AppPalette.border, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.4), radius: 20, y: 8)
+        .shadow(color: .black.opacity(0.35), radius: 20, y: 8)
         .background {
             Button("") { store.dismissQuickOpen() }
                 .keyboardShortcut(.escape, modifiers: [])
@@ -146,13 +150,13 @@ private struct QuickOpenRow: View {
 
             Text(relativePath)
                 .font(AppFonts.secondaryLabel)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(AppPalette.textTertiary)
                 .lineLimit(1)
                 .truncationMode(.head)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .background(isSelected ? AppColors.activeBackground : Color.clear)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .selectableRowChrome(isSelected: isSelected, accentBarHeight: 14)
     }
 
     private var highlightedName: Text {
@@ -162,7 +166,7 @@ private struct QuickOpenRow: View {
         for (i, ch) in chars.enumerated() {
             let piece = Text(String(ch))
                 .font(.system(size: 13, weight: matchSet.contains(i) ? .bold : .regular))
-                .foregroundColor(matchSet.contains(i) ? Color.accentColor : .primary)
+                .foregroundColor(matchSet.contains(i) ? AppPalette.accent : AppPalette.textPrimary)
             result = result + piece
         }
         return result

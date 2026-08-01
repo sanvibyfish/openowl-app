@@ -72,4 +72,5 @@ GitChangesStore (@MainActor)
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-01 | Right dock Diff 改为默认 **unified（单栏）+ 长行 wrap**（对齐 VS Code / GitHub 窄栏惯例）；去掉 side-by-side 半宽与按最长行撑开的横向滚动 |
 | 2026-03-16 | 创建文档 |

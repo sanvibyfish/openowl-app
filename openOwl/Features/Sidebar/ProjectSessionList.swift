@@ -91,12 +91,8 @@ struct ProjectSessionList: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(AppPalette.border)
-                .frame(height: 1)
-        }
+        // Same tool-header chrome as right dock / Files / Git.
+        .panelToolHeader(background: AppPalette.elevated)
     }
 
     // MARK: - Free terminal (only when free terminal is selected on the rail)
@@ -277,20 +273,7 @@ private struct SessionRow<ExtraMenu: View>: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isSelected
-                      ? AppPalette.accent.opacity(0.12)
-                      : (hovering ? AppPalette.surface : Color.clear))
-        )
-        .overlay(alignment: .leading) {
-            if isSelected {
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(AppPalette.accent)
-                    .frame(width: 2, height: 14)
-                    .padding(.leading, 2)
-            }
-        }
+        .selectableRowChrome(isSelected: isSelected, isHovering: hovering)
         .contentShape(Rectangle())
     }
 }
@@ -345,9 +328,11 @@ private struct SessionPaneRow: View {
             .padding(.leading, 22)
             .padding(.trailing, 8)
             .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(hovering || isFocused ? AppPalette.surface : Color.clear)
+            .selectableRowChrome(
+                isSelected: isFocused,
+                isHovering: hovering,
+                cornerRadius: AppSpacing.cornerRadiusSmall,
+                accentBarHeight: 10
             )
             .contentShape(Rectangle())
         }
