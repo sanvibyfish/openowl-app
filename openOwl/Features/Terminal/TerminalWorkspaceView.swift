@@ -31,14 +31,13 @@ struct TerminalWorkspaceView: View {
             }
 
             ZStack {
-                // Mount every visible tab — switching active is just an
-                // opacity flip, so no SwiftUI dismantle and no
-                // viewDidMoveToWindow nil/window thrashing on the inactive
-                // tab's TerminalNSView. Each pane's metalLayer is hidden
-                // when its tab isn't active, so background tabs don't
-                // render but their surfaces stay alive (and OSC 7 still
-                // updates their pwd).
-                ForEach(workspace.visibleTabs) { tab in
+                // Mount every terminal tab across namespaces — switching tabs
+                // or projects is just an opacity flip, so SwiftUI never detaches
+                // the inactive TerminalNSView from its window. Each pane's
+                // metalLayer is hidden when its tab isn't active, so background
+                // tabs don't render but their surfaces stay alive (and OSC 7
+                // still updates their pwd).
+                ForEach(workspace.tabs) { tab in
                     let isActiveTab = tab.id == workspace.activeTabID
                     TerminalTabContentView(
                         ghosttyApp: ghosttyApp,
