@@ -503,12 +503,6 @@ final class TerminalWorkspaceStore {
         onContextDidChange?()
     }
 
-    /// Check if a tab belongs to the active namespace
-    func isTabVisible(_ tabID: UUID) -> Bool {
-        guard let activeNamespace else { return true }
-        return tabNamespaceMap[tabID] == activeNamespace
-    }
-
     func ensureInitialTab() {
         guard tabs.isEmpty else { return }
         _ = newTab()
@@ -751,14 +745,6 @@ final class TerminalWorkspaceStore {
         tab.focusedPaneID = sourceID
         tabs[index] = tab
         requestFocus(for: sourceID)
-    }
-
-    func swapPanes(_ a: UUID, _ b: UUID) {
-        guard a != b else { return }
-        guard let index = activeTabIndex else { return }
-        var tab = tabs[index]
-        tab.splitTree = tab.splitTree.swappingPanes(a, b)
-        tabs[index] = tab
     }
 
     func equalizeSplits() {

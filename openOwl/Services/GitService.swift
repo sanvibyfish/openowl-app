@@ -163,32 +163,6 @@ final class GitService {
         }
     }
 
-    func branches() async throws -> [String] {
-        let output = try await runGit(["for-each-ref", "--format=%(refname:short)", "refs/heads"])
-        return output
-            .split(whereSeparator: \.isNewline)
-            .map(String.init)
-            .filter { !$0.isEmpty }
-            .sorted()
-    }
-
-    func checkout(branch: String) async throws {
-        let trimmed = branch.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        _ = try await runGit(["checkout", trimmed])
-    }
-
-    func createBranch(name: String, checkout: Bool = true) async throws {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        if checkout {
-            _ = try await runGit(["switch", "-c", trimmed])
-        } else {
-            _ = try await runGit(["branch", trimmed])
-        }
-    }
-
     func deleteBranch(name: String, force: Bool = false) async throws {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -270,11 +244,6 @@ final class GitService {
     /// Full diff for a single commit.
     func showCommit(hash: String) async throws -> String {
         try await runGit(["show", "--format=", "--patch", hash])
-    }
-
-    /// Diff for a single file within a commit.
-    func showCommitFile(hash: String, path: String) async throws -> String {
-        try await runGit(["show", "--format=", "--patch", hash, "--", path])
     }
 
     // MARK: - Log
@@ -458,11 +427,6 @@ final class GitService {
         let service = GitService(workingDirectory: path)
         let output = try await service.runGit(["status", "--porcelain"])
         return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    func getCurrentBranch() async throws -> String {
-        let output = try await runGit(["rev-parse", "--abbrev-ref", "HEAD"])
-        return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Extract GitHub/GitLab username from remote origin URL.

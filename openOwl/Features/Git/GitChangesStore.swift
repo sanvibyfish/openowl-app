@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import Observation
 
@@ -7,10 +6,6 @@ import Observation
 final class GitChangesStore {
     private(set) var repositoryURL: URL?
     private(set) var statusSnapshot: GitStatusSnapshot?
-    private(set) var branches: [String] = []
-    var selectedBranch: String = ""
-    var newBranchName: String = ""
-
     var selectedChange: GitFileChange?
     private(set) var selectedDiffText: String = ""
 
@@ -29,16 +24,10 @@ final class GitChangesStore {
     private(set) var commitDiffText: String = ""
     private let logPageSize = 50
 
-    var hasDiscardableChanges: Bool {
-        guard let statusSnapshot else { return false }
-        return !statusSnapshot.modified.isEmpty || !statusSnapshot.untracked.isEmpty
-    }
-
     private(set) var isGeneratingMessage = false
 
     private var gitService: GitService?
     private var watcher: FileWatcher?
-    private var hasStarted = false
     private let commitMessageGenerator = CommitMessageGenerator()
     private var generateTask: Task<Void, Never>?
     private var commitDetailTask: Task<Void, Never>?
@@ -50,18 +39,9 @@ final class GitChangesStore {
         self.preferredDirectory = initialDirectory.standardizedFileURL
     }
 
-    func startIfNeeded() {
-        guard !hasStarted else { return }
-        hasStarted = true
-
-        openPreferredDirectory(preferredDirectory)
-    }
-
     func setPreferredDirectory(_ directoryURL: URL) {
         let standardized = directoryURL.standardizedFileURL
         preferredDirectory = standardized
-        hasStarted = true
-
         openPreferredDirectory(standardized)
     }
 
@@ -74,21 +54,6 @@ final class GitChangesStore {
             if openingDirectory == directoryURL {
                 openingDirectory = nil
             }
-        }
-    }
-
-    func chooseRepository() {
-        let panel = NSOpenPanel()
-        panel.title = "Select Git Repository"
-        panel.message = "Choose a folder that contains a .git directory"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        Task {
-            await openRepository(at: url)
         }
     }
 
@@ -108,7 +73,6 @@ final class GitChangesStore {
             commitFiles = []
             commitDiffText = ""
             commitDetailTask?.cancel()
-            newBranchName = ""
             errorMessage = nil
             infoMessage = nil
 
@@ -117,8 +81,6 @@ final class GitChangesStore {
         } catch {
             repositoryURL = nil
             statusSnapshot = nil
-            branches = []
-            selectedBranch = ""
             selectedChange = nil
             selectedDiffText = ""
             selectedCommitHash = nil
@@ -140,10 +102,8 @@ final class GitChangesStore {
         do {
             let snapshot = try await gitService.status()
             statusSnapshot = snapshot
-            selectedBranch = snapshot.branch
             errorMessage = nil
 
-            try await loadBranches(using: gitService)
             await ensureSelectedDiffIsFresh(using: gitService)
             await loadLog(using: gitService, reset: true)
         } catch {
@@ -260,11 +220,6 @@ final class GitChangesStore {
         stage(paths: Array(paths).sorted())
     }
 
-    func discardAll() {
-        guard let snapshot = statusSnapshot else { return }
-        discard(changes: snapshot.modified + snapshot.untracked)
-    }
-
     func unstageAll() {
         guard let gitService else { return }
 
@@ -325,32 +280,6 @@ final class GitChangesStore {
             self.commitMessage = ""
             self.infoMessage = autoStage ? "Committed (auto-staged all changes)." : "Committed."
         }
-    }
-
-    func checkoutSelectedBranch() {
-        guard let gitService else { return }
-        let targetBranch = selectedBranch
-
-        runCommand {
-            try await gitService.checkout(branch: targetBranch)
-            self.infoMessage = "Switched to branch: \(targetBranch)"
-        }
-    }
-
-    func createBranchFromInput(checkout: Bool = true) {
-        guard let gitService else { return }
-        let name = newBranchName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-
-        runCommand {
-            try await gitService.createBranch(name: name, checkout: checkout)
-            self.newBranchName = ""
-            self.infoMessage = checkout ? "Created and switched to branch: \(name)" : "Created branch: \(name)"
-        }
-    }
-
-    func deleteSelectedBranch(force: Bool = false) {
-        deleteBranch(name: selectedBranch, force: force)
     }
 
     func deleteBranch(name: String, force: Bool = false) {
@@ -501,16 +430,6 @@ final class GitChangesStore {
                   repositoryURL.path)
         }
         watcher?.start()
-    }
-
-    private func loadBranches(using gitService: GitService) async throws {
-        let list = try await gitService.branches()
-        branches = list
-
-        // Detached HEAD or remote-only refs may not be in local branch list.
-        if !selectedBranch.isEmpty && !branches.contains(selectedBranch) {
-            branches = ([selectedBranch] + branches).uniqued()
-        }
     }
 
     private func loadDiff(for change: GitFileChange) async {

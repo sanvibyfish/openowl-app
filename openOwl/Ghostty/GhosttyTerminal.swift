@@ -30,7 +30,6 @@ class TerminalNSView: NSView {
     /// Passed directly to ghostty_surface_config — avoids changing the app's process cwd
     /// which triggers macOS TCC prompts in dev builds.
     var initialWorkingDirectory: String?
-    var paneIdentifier: UUID { paneID }
     /// Whether Metal is currently rendering (layer not hidden).
     var isRenderingActive: Bool { !(metalLayer?.isHidden ?? true) }
     var acceptsTerminalKeyboardInput: Bool {
@@ -504,7 +503,6 @@ class TerminalNSView: NSView {
         // callback chain through read_clipboard_cb that depends on activeSurface
         // being set correctly; direct injection is more reliable.
         if flags == .command, event.charactersIgnoringModifiers == "v" {
-            guard surface != nil else { return false }
             pasteFromClipboard()
             return true
         }

@@ -33,7 +33,6 @@ final class OutlineTreeViewController: NSViewController {
     var onCopy: (([URL]) -> Void)?
     var onCut: (([URL]) -> Void)?
     var onPaste: ((URL) -> Void)?
-    var onRevealInFinder: ((URL) -> Void)?
     var onCopyPath: ((URL) -> Void)?
     var onDropFiles: ((URL, [URL]) -> Void)?
     var onExpandDirectory: ((String) -> Void)?
@@ -150,13 +149,6 @@ final class OutlineTreeViewController: NSViewController {
         self.nodeIndex = nodeIndex
     }
 
-    func expandTopLevel() {
-        guard outlineView != nil else { return }
-        for node in rootNodes where node.isDirectory {
-            outlineView.expandItem(node.id as NSString, expandChildren: false)
-        }
-    }
-
     // MARK: - State Save/Restore
 
     private func saveExpandedState() -> Set<String> {
@@ -254,13 +246,6 @@ final class OutlineTreeViewController: NSViewController {
             guard let item = outlineView.item(atRow: row) as? NSString,
                   let node = nodeIndex[item as String] else { return nil }
             return node.url
-        }
-    }
-
-    private func selectedNodes() -> [FileExplorerNode] {
-        outlineView.selectedRowIndexes.compactMap { row in
-            guard let item = outlineView.item(atRow: row) as? NSString else { return nil }
-            return nodeIndex[item as String]
         }
     }
 

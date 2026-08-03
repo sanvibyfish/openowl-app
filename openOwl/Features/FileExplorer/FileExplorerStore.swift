@@ -352,10 +352,6 @@ final class FileExplorerStore {
         }
     }
 
-    func selectQuickOpenResult(_ resultID: String?) {
-        quickOpenSelectionID = resultID
-    }
-
     func syncQuickOpenSelection() {
         let matches = quickOpenMatches
         guard !matches.isEmpty else {
@@ -369,16 +365,6 @@ final class FileExplorerStore {
         }
 
         quickOpenSelectionID = matches[0].id
-    }
-
-    func openQuickOpenSelection() -> FileExplorerNode? {
-        let targetID = quickOpenSelectionID ?? quickOpenMatches.first?.id
-        guard let targetID,
-              let node = nodeIndex[targetID] else { return nil }
-
-        selectNode(targetID)
-        dismissQuickOpen()
-        return node
     }
 
     func isChangedFile(_ node: FileExplorerNode) -> Bool {
@@ -516,19 +502,6 @@ final class FileExplorerStore {
                 errorMessage = "无法删除：\(failedNames.joined(separator: "、"))"
                 refreshNow()  // re-scan to restore failed items in the tree
             }
-        }
-    }
-
-    func openInTerminal(_ node: FileExplorerNode) {
-        let target = node.isDirectory ? node.url : node.url.deletingLastPathComponent()
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-a", "Terminal", target.path]
-
-        do {
-            try process.run()
-        } catch {
-            errorMessage = error.localizedDescription
         }
     }
 

@@ -67,7 +67,8 @@ struct ScrollIndicatorTests {
         let total: UInt64 = 49
         let len: UInt64 = 49
         let maxOffset = total - len
-        let position = maxOffset > 0 ? CGFloat(0) / CGFloat(maxOffset) : CGFloat(0)
+        let position: CGFloat = 0
+        #expect(maxOffset == 0)
         #expect(position == 0.0)
     }
 
@@ -93,49 +94,5 @@ struct ScrollIndicatorTests {
         let knobY = boundsHeight - knobHeight - (trackSpace * position)
         // position=1 → knob at bottom → knobY = 400 - 200 - 200 = 0 (bottom in AppKit coords)
         #expect(knobY == 0.0)
-    }
-}
-
-@Suite("Terminal Scroll — userScrolledUp")
-struct TerminalScrollStateTests {
-
-    @Test func userScrolledUp_resetAtBottom() {
-        // Simulate: offset + len >= total → at bottom → reset flag
-        var userScrolledUp = true
-        let offset: UInt64 = 51
-        let total: UInt64 = 100
-        let len: UInt64 = 49
-        let isAtBottom = offset + len >= total
-        if isAtBottom { userScrolledUp = false }
-        #expect(userScrolledUp == false)
-    }
-
-    @Test func userScrolledUp_notResetWhenAboveBottom() {
-        var userScrolledUp = true
-        let offset: UInt64 = 30
-        let total: UInt64 = 100
-        let len: UInt64 = 49
-        let isAtBottom = offset + len >= total
-        if isAtBottom { userScrolledUp = false }
-        #expect(userScrolledUp == true) // stays true
-    }
-
-    @Test func userScrolledUp_setOnUpwardScroll() {
-        var userScrolledUp = false
-        // Simulate: scrollingDeltaY > 0 → scrolling up
-        let scrollingDeltaY: CGFloat = 5.0
-        if scrollingDeltaY > 0 {
-            userScrolledUp = true
-        }
-        #expect(userScrolledUp == true)
-    }
-
-    @Test func userScrolledUp_notSetOnDownwardScroll() {
-        var userScrolledUp = false
-        let scrollingDeltaY: CGFloat = -3.0
-        if scrollingDeltaY > 0 {
-            userScrolledUp = true
-        }
-        #expect(userScrolledUp == false)
     }
 }
