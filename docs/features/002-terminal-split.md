@@ -14,8 +14,9 @@
 2. **分屏**: Cmd+D 水平分屏 / Cmd+Shift+D 垂直分屏
 3. **切换焦点**: Cmd+Option+方向键 在窗格间导航
 4. **调整大小**: 拖拽分割线，双击分割线均分所有窗格
-5. **关闭窗格**: Cmd+W 关闭当前窗格（最后一个窗格时关闭标签）
-6. **交换窗格**: 拖拽窗格到另一个窗格的边缘区域（左/右/上/下/中心）
+5. **放大/还原**: 双击窗格顶部的三点手柄，或 Cmd+Shift+Return（菜单 Terminal → Maximize Pane，标题随状态切换 Restore Pane）。放大态下手柄保留——那是鼠标唯一的返回入口——但不再可拖动
+6. **关闭窗格**: Cmd+W 关闭当前窗格；最后一个窗格时关闭标签。关掉的是某个 namespace 的最后一个标签时按 namespace 分流——项目：留空并让项目变非激活（见 FEAT-006）；free terminal：关窗口
+7. **交换窗格**: 拖拽窗格到另一个窗格的边缘区域（左/右/上/下/中心）
 
 ## 3. 技术实现
 
@@ -49,6 +50,16 @@ indirect enum TerminalSplitNode: Equatable {
 
 每个 pane UUID 对应一个 `ghostty_surface_t`（由 GhosttyAppManager 管理）。
 
+### 3.5 放大 / 还原
+
+`maximizedPaneID` 是独立于 `splitTree` 的一个字段——放大**不改动分割树**，只在渲染那一帧把该 pane 的 frame 换成整个 `bounds`，其余 pane `opacity 0` + `allowsHitTesting(false)`，分割线隐藏。因此：
+
+- **surface 不销毁**：兄弟 pane 的 shell 进程照常运行，被盖住期间的输出还原后全部可见
+- **PTY 尺寸保持**：隐藏 pane 不被缩到 0，vim/htop 这类尺寸敏感的 TUI 不会重排；重新可见时 `syncSurfaceSize(force:)` 强制重同步
+- **比例原样回来**：frame 每帧由 `splitTree.paneFrames(in:)` 现算，还原即换回，用户拖过的 ratio 不丢
+
+`toggleMaximizeCurrentPane(paneID:)` 的参数区分两个入口：手柄双击传具体 pane（不一定是焦点所在），键盘/菜单传 nil 走焦点 pane。`switchNamespace` 会重置放大态——切项目再切回是还原态。
+
 ## 4. 注意事项
 
 - 分割线宽度 1px，热区 8px（方便拖拽）
@@ -66,7 +77,9 @@ indirect enum TerminalSplitNode: Equatable {
 
 | 日期 | 说明 |
 |------|------|
-| 2026-08-01 | `closeCurrent()` 不再跨 namespace 兜底到 `tabs.last`：关掉某 namespace 最后一个 tab 会把活动槽交给另一个 namespace 的 tab，`activeTabID.didSet` 随即把那个 namespace 的记忆改写成用户从未打开过的 tab。现改为就地新建 tab，与 `switchNamespace` 对空 namespace 的处理一致 |
+| 2026-08-03 | 三点手柄支持双击放大/还原——放大能力本就存在（`maximizedPaneID` + ⇧⌘↩），缺的只是鼠标入口。手柄改为在放大态也渲染（否则鼠标回不去）并在该态去掉 `.onDrag`；`toggleMaximizeCurrentPane` 加可选 `paneID`，因为手柄是 per-pane 的，点谁放大谁，而不是放大当前焦点 pane |
+| 2026-08-01 | `closeCurrent()` 关掉项目最后一个 tab 时不再补新 tab，改为清空 `activeTabID` 并返回新的 `.projectEmptied`，由宿主把选中态切到 free terminal。上一条的「就地新建 tab」让 `hasTabs` 恒为 true，项目再也无法变成非激活。free terminal 的最后一个 tab 仍返回 `.closeWindow` |
+| 2026-08-01 | `closeCurrent()` 不再跨 namespace 兜底到 `tabs.last`：关掉某 namespace 最后一个 tab 会把活动槽交给另一个 namespace 的 tab，`activeTabID.didSet` 随即把那个 namespace 的记忆改写成用户从未打开过的 tab。现改为就地新建 tab，与 `switchNamespace` 对空 namespace 的处理一致（当日被上一条取代） |
 | 2026-08-01 | 移除 bell 生产端残留：`GhosttyConfig` 不再请求 `notify-on-command-finish`，`onPaneBell` 钩子删除，`RING_BELL` 显式吞掉以免落回系统 beep |
 | 2026-08-01 | 项目 namespace 禁用 ⌘T（菜单项置灰 + 键盘监听一并拦截）——只有 free terminal 会绘制 tab bar，项目里建出的 tab 没有任何可见入口，切过去后只能靠侧栏 pane 行找回来。项目布局仍走 worktree + 分屏（⌘D / ⇧⌘D） |
 | 2026-08-01 | 移除 bell 通知整条链路：`paneBellStates` / `handleBell` / `clearBell` / `bellCount`、侧栏 pane 行的铃铛与高亮、rail 与 session 行的未读角标、提示音与系统通知，以及设置里的 Notifications 分区。实现效果不佳，通知方案待重新设计。Ghostty 层的 `onPaneBell` 桥接与 `notify-on-command-finish-action` 配置保留，重做时可直接复用 |

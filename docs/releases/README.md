@@ -8,7 +8,8 @@
 
 | 版本 | 状态 | 发布日期 | 文档 |
 |------|------|----------|------|
-| v1.1.2 | 🟢 Ready | 2026-08-01 | [Release Notes](v1.1.2.md) |
+| v1.1.3 | 🟢 Ready | 2026-08-03 | [Release Notes](v1.1.3.md) |
+| v1.1.2 | ✅ Done | 2026-08-01 | [Release Notes](v1.1.2.md) |
 | v1.1.1 | 🟢 Ready | 2026-07-30 | [Release Notes](v1.1.1.md) |
 | v1.1.0 | ✅ Done | 2026-06-16 | [Release Notes](v1.1.0.md) |
 | v1.0.9 | ✅ Done | 2026-05-30 | [Release Notes](v1.0.9.md) |

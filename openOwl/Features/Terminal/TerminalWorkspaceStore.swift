@@ -42,6 +42,10 @@ enum PaneDropZone: Equatable {
 enum TerminalCloseAction {
     case none
     case closeWindow
+    /// A project namespace just lost its last tab. The host moves the sidebar
+    /// selection off that project so it reads as inactive — the store can't do
+    /// it itself without depending on ProjectStore.
+    case projectEmptied
 }
 
 struct PaneInfo: Identifiable {
@@ -625,42 +629,46 @@ final class TerminalWorkspaceStore {
             return .none
         }
 
-        if tabs.count > 1 {
-            let removedTab = tabs[index]
-            for pID in removedTab.splitTree.allPaneIDs {
-                destroyPaneHandler?(pID)
-                paneTitles.removeValue(forKey: pID)
-                panePwds.removeValue(forKey: pID)
-                paneSearchStates.removeValue(forKey: pID)
-            }
-            tabNamespaceMap.removeValue(forKey: removedTab.id)
-            tabs.remove(at: index)
-
-            // Stay inside the current namespace. Falling back to `tabs.last`
-            // handed the active slot to another namespace's tab: visibleTabs
-            // went empty while activeTabID pointed elsewhere, and the didSet
-            // then overwrote that namespace's remembered tab with one the user
-            // had never opened. Seed a fresh tab instead, matching what
-            // switchNamespace does for an empty namespace.
-            let visible = visibleTabs
-            if visible.isEmpty, let namespace = activeNamespace {
-                _ = newTab(for: namespace)
-                return .none
-            }
-            activeTabID = visible.first?.id
-
-            if let fbID = activeTabID, let fbIdx = tabs.firstIndex(where: { $0.id == fbID }) {
-                if tabs[fbIdx].focusedPaneID == nil {
-                    tabs[fbIdx].focusedPaneID = tabs[fbIdx].splitTree.firstPaneID
-                }
-                if let paneID = tabs[fbIdx].focusedPaneID {
-                    requestFocus(for: paneID)
-                }
-            }
-            return .none
+        // Emptying a project namespace is how a project goes inactive — the
+        // sidebar reads `hasTabs`. Free terminals keep the ghostty rule: their
+        // last tab closes the window.
+        let isLastInNamespace = visibleTabs.count <= 1
+        if isLastInNamespace && activeProjectID == nil {
+            return .closeWindow
         }
 
-        return .closeWindow
+        let removedTab = tabs[index]
+        for pID in removedTab.splitTree.allPaneIDs {
+            destroyPaneHandler?(pID)
+            paneTitles.removeValue(forKey: pID)
+            panePwds.removeValue(forKey: pID)
+            paneSearchStates.removeValue(forKey: pID)
+        }
+        tabNamespaceMap.removeValue(forKey: removedTab.id)
+        tabs.remove(at: index)
+
+        if isLastInNamespace {
+            // Deliberately left with no active tab: the host is about to switch
+            // namespaces, and switchNamespace picks the destination's tab. A
+            // fallback to `tabs.last` would hand the active slot to another
+            // namespace, whose didSet then overwrites that namespace's
+            // remembered position with a tab the user never opened.
+            activeTabID = nil
+            return .projectEmptied
+        }
+
+        // Stay inside the current namespace.
+        activeTabID = visibleTabs.first?.id
+
+        if let fbID = activeTabID, let fbIdx = tabs.firstIndex(where: { $0.id == fbID }) {
+            if tabs[fbIdx].focusedPaneID == nil {
+                tabs[fbIdx].focusedPaneID = tabs[fbIdx].splitTree.firstPaneID
+            }
+            if let paneID = tabs[fbIdx].focusedPaneID {
+                requestFocus(for: paneID)
+            }
+        }
+        return .none
     }
 
     func focusNeighbor(_ direction: TerminalFocusDirection) {
@@ -760,16 +768,18 @@ final class TerminalWorkspaceStore {
         tabs[index] = tab
     }
 
-    /// Toggle maximize for the focused pane. If already maximized, restore.
-    func toggleMaximizeCurrentPane() {
+    /// Toggle maximize. If already maximized, restore. `paneID` names the pane to
+    /// blow up — the drag handle that was double-clicked, which is not
+    /// necessarily the focused one. Nil targets the focused pane (⌘⇧Return, menu).
+    func toggleMaximizeCurrentPane(paneID: UUID? = nil) {
         guard let index = activeTabIndex else { return }
         let tab = tabs[index]
         guard tab.splitTree.leafCount > 1 else { return }
 
         if let current = maximizedPaneID, tab.splitTree.containsPane(current) {
             maximizedPaneID = nil
-        } else if let focusedPane = tab.focusedPaneID ?? tab.splitTree.firstPaneID {
-            maximizedPaneID = focusedPane
+        } else if let target = paneID ?? tab.focusedPaneID ?? tab.splitTree.firstPaneID {
+            maximizedPaneID = target
         }
     }
 
