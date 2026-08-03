@@ -15,7 +15,7 @@
 3. **切换焦点**: Cmd+Option+方向键 在窗格间导航
 4. **调整大小**: 拖拽分割线，双击分割线均分所有窗格
 5. **放大/还原**: 双击窗格顶部的三点手柄，或 Cmd+Shift+Return（菜单 Terminal → Maximize Pane，标题随状态切换 Restore Pane）。放大态下手柄保留——那是鼠标唯一的返回入口——但不再可拖动
-6. **关闭窗格**: Cmd+W 关闭当前窗格；最后一个窗格时关闭标签。关掉的是某个 namespace 的最后一个标签时按 namespace 分流——项目：留空并让项目变非激活（见 FEAT-006）；free terminal：关窗口
+6. **关闭窗格**: Cmd+W 关闭当前窗格；最后一个窗格时关闭标签。关掉的是某个 namespace 的最后一个标签时按 namespace 分流——项目：先审批 context 切换，成功后留空并让项目变非激活（见 FEAT-006），审批失败则保持原 terminal；free terminal：关窗口
 7. **交换窗格**: 拖拽窗格到另一个窗格的边缘区域（左/右/上/下/中心）
 
 ## 3. 技术实现
@@ -35,7 +35,7 @@ indirect enum TerminalSplitNode: Equatable {
 
 ### 3.2 渲染方式
 
-采用 **flat 布局** 而非嵌套 View：`paneFrames(in:)` 递归计算每个 leaf 的绝对 CGRect，所有窗格用 `.frame()` + `.position()` 平铺在 GeometryReader 中。
+采用 **flat 布局** 而非嵌套 View：`paneFrames(in:)` 递归计算每个 leaf 的绝对 CGRect，所有窗格用 `.frame()` + `.position()` 平铺在 GeometryReader 中。所有 namespace 中已创建的 tab 保持挂载；切项目只切换 opacity / hit testing / accessibility，后台 pane 暂停 Metal 渲染，不再把 `TerminalNSView` 从 window 上拆下再插回。
 
 优势：避免 SwiftUI 在树结构变更时销毁重建 NSView（会导致终端状态丢失）。
 
@@ -56,6 +56,7 @@ indirect enum TerminalSplitNode: Equatable {
 
 - **surface 不销毁**：兄弟 pane 的 shell 进程照常运行，被盖住期间的输出还原后全部可见
 - **PTY 尺寸保持**：隐藏 pane 不被缩到 0，vim/htop 这类尺寸敏感的 TUI 不会重排；重新可见时 `syncSurfaceSize(force:)` 强制重同步
+- **辅助功能与可见性一致**：最大化隐藏的兄弟 pane 使用 `.accessibilityHidden(true)`，VoiceOver 不会聚焦到屏幕上看不见的手柄或 terminal
 - **比例原样回来**：frame 每帧由 `splitTree.paneFrames(in:)` 现算，还原即换回，用户拖过的 ratio 不丢
 
 `toggleMaximizeCurrentPane(paneID:)` 的参数区分两个入口：手柄双击传具体 pane（不一定是焦点所在），键盘/菜单传 nil 走焦点 pane。`switchNamespace` 会重置放大态——切项目再切回是还原态。
@@ -65,6 +66,7 @@ indirect enum TerminalSplitNode: Equatable {
 - 分割线宽度 1px，热区 8px（方便拖拽）
 - 多窗格仅轻微弱化非 focused pane，不绘制焦点边框，避免分隔边缘出现突兀的 accent 高亮
 - `TerminalNSView` 的焦点回调只同步 `focusedPaneID`；侧栏点击 pane 时先切换到所属 main/worktree namespace，再选中对应分屏并单次请求 first responder，避免跨 worktree 显示空白或焦点请求自循环造成终端闪屏
+- 项目最后一个 terminal 的关闭是事务性操作：`closeCurrent` 在销毁 surface 前调用宿主审批 closure；如果 editor 无法保存 dirty tab 并拒绝 context 切换，tab、selection 和 surface 全部保持原状
 - Free Terminal 标签采用 28pt 平面连续 tab bar，active tab 通过背景层级与终端内容连接
 - 关闭窗格后焦点转移到最近的邻居（Euclidean 距离）
 - 标签按项目隔离：切换项目只显示该项目的标签
@@ -77,6 +79,8 @@ indirect enum TerminalSplitNode: Equatable {
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-03 | 修复项目切换时 terminal 闪烁：从只挂载当前 namespace 的 tab 改为所有已创建 tab 持续挂载，切换时只改可见性；非活动 tab 同步从 accessibility 树隐藏 |
+| 2026-08-03 | 项目最后一个 terminal 改为「context 审批成功 → 销毁 surface」；审批失败不再先关 terminal 再留下空 namespace。最大化隐藏 pane 显式移出 accessibility 树 |
 | 2026-08-03 | 三点手柄支持双击放大/还原——放大能力本就存在（`maximizedPaneID` + ⇧⌘↩），缺的只是鼠标入口。手柄改为在放大态也渲染（否则鼠标回不去）并在该态去掉 `.onDrag`；`toggleMaximizeCurrentPane` 加可选 `paneID`，因为手柄是 per-pane 的，点谁放大谁，而不是放大当前焦点 pane |
 | 2026-08-01 | `closeCurrent()` 关掉项目最后一个 tab 时不再补新 tab，改为清空 `activeTabID` 并返回新的 `.projectEmptied`，由宿主把选中态切到 free terminal。上一条的「就地新建 tab」让 `hasTabs` 恒为 true，项目再也无法变成非激活。free terminal 的最后一个 tab 仍返回 `.closeWindow` |
 | 2026-08-01 | `closeCurrent()` 不再跨 namespace 兜底到 `tabs.last`：关掉某 namespace 最后一个 tab 会把活动槽交给另一个 namespace 的 tab，`activeTabID.didSet` 随即把那个 namespace 的记忆改写成用户从未打开过的 tab。现改为就地新建 tab，与 `switchNamespace` 对空 namespace 的处理一致（当日被上一条取代） |

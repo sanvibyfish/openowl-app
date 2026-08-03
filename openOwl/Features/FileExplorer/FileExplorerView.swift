@@ -1978,10 +1978,6 @@ struct FileExplorerView: View {
         FileIcons.iconColor(for: url)
     }
 
-    private func fileIcon(for node: FileExplorerNode) -> String {
-        if node.isDirectory { return "folder.fill" }
-        return Self.fileIconName(for: node.url)
-    }
 }
 
 // MARK: - Editor Tab Button

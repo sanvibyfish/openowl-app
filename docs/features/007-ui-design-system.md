@@ -22,7 +22,7 @@
 
 根据 Apple Human Interface Guidelines：
 
-- **Materials**: 应使用系统材质创建深度和层次，同时保持清晰度 → openOwl 侧边栏已用 `EffectView(.sidebar, .behindWindow)` 但内容区无层次
+- **Materials**: 应使用系统材质创建深度和层次，同时保持清晰度 → openOwl 当前使用语义调色盘的 base/surface/elevated 层次；旧的 `EffectView` 包装已移除
 - **Color**: 颜色应表达交互性和视觉连续性 → openOwl 缺少统一的调色盘，颜色分散在各处硬编码
 - **Layout**: 一致的布局让用户更自信 → openOwl 各面板内边距不一致（有的 8px、有的 10px、有的 12px）
 - **Custom Interfaces**: 自定义界面应与平台惯例保持一致 → Tab 栏风格偏移了 macOS 原生感

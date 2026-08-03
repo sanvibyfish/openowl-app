@@ -232,10 +232,6 @@ final class GhosttyAppManager {
         backgroundTickTimer = nil
     }
 
-    var configSnapshot: GhosttyConfigSnapshot? {
-        config?.snapshot
-    }
-
     func register(surface: ghostty_surface_t, for paneID: UUID, view: TerminalNSView) {
         paneSurfaceMap[paneID] = surface
         paneViewMap[paneID] = WeakTerminalView(view)
@@ -472,9 +468,6 @@ struct GhosttyLaunchProfile {
     let configCommand: String?
     let fallbackShell: String
 
-    var shouldInjectFallbackShell: Bool {
-        configCommand == nil
-    }
 }
 
 private final class WeakTerminalView {

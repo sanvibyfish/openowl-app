@@ -2,14 +2,11 @@ import Foundation
 import SwiftUI
 
 enum AppConstants {
-    static let appName = "openOwl"
-
     // Ghostty
     static let termEnv = "xterm-ghostty"
     static let ghosttyResourcesDirEnv = "GHOSTTY_RESOURCES_DIR"
 
     // Layout
-    static let contentMinWidth: CGFloat = 400
     static let windowMinWidth: CGFloat = 800
     static let windowMinHeight: CGFloat = 500
 }
@@ -31,7 +28,6 @@ enum AppPalette {
 
     // 边框 — hairline-soft so chrome recedes (Muxy-style); hover still a bit stronger
     static let border      = Color.primary.opacity(0.08)
-    static let borderHover = Color.primary.opacity(0.14)
 
     // 强调色（respects user's system accent color）
     static let accent: Color = .accentColor
@@ -69,10 +65,6 @@ enum AppFonts {
         if #available(macOS 26, *) { return .callout }
         return .system(size: 12)
     }
-    static var mono: Font {
-        if #available(macOS 26, *) { return .system(.subheadline, design: .monospaced) }
-        return .system(size: 11, design: .monospaced)
-    }
     static var caption: Font {
         if #available(macOS 26, *) { return .caption }
         return .system(size: 10)
@@ -100,8 +92,6 @@ enum AppFonts {
 enum AppSpacing {
     static let cornerRadius: CGFloat = 6
     static let cornerRadiusSmall: CGFloat = 4
-    static let itemGap: CGFloat = 6
-    static let panelPadding: CGFloat = 12
     /// Matches `editorTabBarHeight` so a panel's tool header and the editor /
     /// diff tab bar beside it sit on the same baseline — a 32/28 mismatch put
     /// a visible step in the divider between the two columns.

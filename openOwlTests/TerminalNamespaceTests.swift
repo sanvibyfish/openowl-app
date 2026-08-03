@@ -117,7 +117,7 @@ struct TerminalNamespaceTests {
         // Project A gets exactly one tab, then closes it.
         store.switchNamespace(projectNS)
         #expect(store.visibleTabs.count == 1)
-        #expect(store.closeCurrent() == .projectEmptied)
+        #expect(store.closeCurrent(approveProjectDeactivation: { true }) == .projectEmptied)
 
         // No replacement tab: the project now reads as inactive.
         #expect(store.hasTabs(for: projectNS) == false)
@@ -138,11 +138,11 @@ struct TerminalNamespaceTests {
         _ = store.newTab(for: projectNS)
         #expect(store.visibleTabs.count == 2)
 
-        #expect(store.closeCurrent() == .none)
+        #expect(store.closeCurrent(approveProjectDeactivation: { true }) == .none)
         #expect(store.visibleTabs.count == 1)
         #expect(store.hasTabs(for: projectNS))
 
-        #expect(store.closeCurrent() == .projectEmptied)
+        #expect(store.closeCurrent(approveProjectDeactivation: { true }) == .projectEmptied)
         #expect(store.hasTabs(for: projectNS) == false)
     }
 
@@ -155,8 +155,54 @@ struct TerminalNamespaceTests {
         store.switchNamespace(termNS)
         #expect(store.visibleTabs.count == 1)
 
-        #expect(store.closeCurrent() == .closeWindow)
+        #expect(store.closeCurrent(approveProjectDeactivation: { true }) == .closeWindow)
         #expect(store.hasTabs(for: termNS))
+    }
+
+    @Test @MainActor func closeCurrent_vetoedProjectDeactivationKeepsLastTerminal() {
+        let projectStore = makeIsolatedProjectStore()
+        let projectID = "test-close-veto-project-\(UUID().uuidString)"
+        projectStore.activeProjectID = projectID
+        let freeTerminalID = projectStore.freeTerminals.first!.id
+        let approverID = UUID()
+        projectStore.registerActiveContextChangeApprover(id: approverID) { false }
+
+        let store = TerminalWorkspaceStore()
+        let namespace: TerminalNamespace = .project(projectID)
+        store.switchNamespace(namespace)
+        let activeTabID = store.activeTabID
+        var destroyedPaneIDs: [UUID] = []
+        store.destroyPaneHandler = { destroyedPaneIDs.append($0) }
+
+        let action = store.closeCurrent(approveProjectDeactivation: {
+            projectStore.activate(.freeTerminal(freeTerminalID))
+        })
+
+        #expect(action == .none)
+        #expect(projectStore.activeProjectID == projectID)
+        #expect(store.activeTabID == activeTabID)
+        #expect(store.hasTabs(for: namespace))
+        #expect(destroyedPaneIDs.isEmpty)
+    }
+
+    @Test @MainActor func closeCurrent_approvedProjectDeactivationCommitsBothStores() {
+        let projectStore = makeIsolatedProjectStore()
+        let projectID = "test-close-approved-project-\(UUID().uuidString)"
+        projectStore.activeProjectID = projectID
+        let freeTerminalID = projectStore.freeTerminals.first!.id
+
+        let store = TerminalWorkspaceStore()
+        let namespace: TerminalNamespace = .project(projectID)
+        store.switchNamespace(namespace)
+
+        let action = store.closeCurrent(approveProjectDeactivation: {
+            projectStore.activate(.freeTerminal(freeTerminalID))
+        })
+
+        #expect(action == .projectEmptied)
+        #expect(projectStore.activeFreeTerminalID == freeTerminalID)
+        #expect(!store.hasTabs(for: namespace))
+        #expect(store.activeTabID == nil)
     }
 
     @Test @MainActor func switchNamespace_visibleTabsReflectActive() {

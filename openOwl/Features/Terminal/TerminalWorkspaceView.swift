@@ -47,6 +47,7 @@ struct TerminalWorkspaceView: View {
                     )
                     .opacity(isActiveTab ? 1 : 0)
                     .allowsHitTesting(isActiveTab)
+                    .accessibilityHidden(!isVisible || !isActiveTab)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -175,6 +176,7 @@ private struct TerminalTabContentView: View {
                     // click-to-focus) from reaching the TerminalNSView below.
                     .opacity(isHiddenByMaximize ? 0 : 1)
                     .allowsHitTesting(!isHiddenByMaximize)
+                    .accessibilityHidden(isHiddenByMaximize)
                     .overlay {
                         // 非聚焦 pane 仅做轻微弱化，不绘制焦点边框。
                         if isMultiPane && !isMaximized, !workspace.isFocusedPane(paneID, in: tab.id) {
