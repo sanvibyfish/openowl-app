@@ -100,10 +100,11 @@ struct TerminalNamespaceTests {
         #expect(store.activeTabID == firstTab)
     }
 
-    /// Closing the last tab of one namespace must not hand the active slot to a
-    /// different namespace's tab — the didSet would then record that tab as the
-    /// other namespace's remembered position.
-    @Test @MainActor func closeCurrent_staysInsideNamespace() {
+    /// Closing a project's last tab leaves it with none — that's the signal the
+    /// sidebar reads to show the project as inactive. It must not hand the
+    /// active slot to a different namespace's tab either: the didSet would then
+    /// record that tab as the other namespace's remembered position.
+    @Test @MainActor func closeCurrent_emptiesProjectWithoutTouchingOtherNamespace() {
         let store = TerminalWorkspaceStore()
         let projectNS: TerminalNamespace = .project("proj-A")
         let termNS: TerminalNamespace = .freeTerminal(UUID())
@@ -116,17 +117,46 @@ struct TerminalNamespaceTests {
         // Project A gets exactly one tab, then closes it.
         store.switchNamespace(projectNS)
         #expect(store.visibleTabs.count == 1)
-        _ = store.closeCurrent()
+        #expect(store.closeCurrent() == .projectEmptied)
 
-        // A fresh tab for A, not one of termNS's.
-        #expect(store.activeNamespace == projectNS)
-        if let active = store.activeTabID {
-            #expect(store.visibleTabs.contains { $0.id == active })
-        }
+        // No replacement tab: the project now reads as inactive.
+        #expect(store.hasTabs(for: projectNS) == false)
+        #expect(store.activeTabID == nil)
 
         // termNS's remembered position survived untouched.
         store.switchNamespace(termNS)
         #expect(store.activeTabID == termTab2)
+    }
+
+    /// A project with several tabs closes them one at a time; only the last one
+    /// empties the namespace.
+    @Test @MainActor func closeCurrent_removesOneProjectTabAtATime() {
+        let store = TerminalWorkspaceStore()
+        let projectNS: TerminalNamespace = .project("proj-A")
+
+        store.switchNamespace(projectNS)
+        _ = store.newTab(for: projectNS)
+        #expect(store.visibleTabs.count == 2)
+
+        #expect(store.closeCurrent() == .none)
+        #expect(store.visibleTabs.count == 1)
+        #expect(store.hasTabs(for: projectNS))
+
+        #expect(store.closeCurrent() == .projectEmptied)
+        #expect(store.hasTabs(for: projectNS) == false)
+    }
+
+    /// Free terminals keep the ghostty rule — their last tab closes the window
+    /// rather than emptying the namespace.
+    @Test @MainActor func closeCurrent_lastFreeTerminalTabClosesWindow() {
+        let store = TerminalWorkspaceStore()
+        let termNS: TerminalNamespace = .freeTerminal(UUID())
+
+        store.switchNamespace(termNS)
+        #expect(store.visibleTabs.count == 1)
+
+        #expect(store.closeCurrent() == .closeWindow)
+        #expect(store.hasTabs(for: termNS))
     }
 
     @Test @MainActor func switchNamespace_visibleTabsReflectActive() {

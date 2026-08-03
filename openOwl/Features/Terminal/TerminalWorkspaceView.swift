@@ -31,14 +31,13 @@ struct TerminalWorkspaceView: View {
             }
 
             ZStack {
-                // Mount every visible tab — switching active is just an
-                // opacity flip, so no SwiftUI dismantle and no
-                // viewDidMoveToWindow nil/window thrashing on the inactive
-                // tab's TerminalNSView. Each pane's metalLayer is hidden
-                // when its tab isn't active, so background tabs don't
-                // render but their surfaces stay alive (and OSC 7 still
-                // updates their pwd).
-                ForEach(workspace.visibleTabs) { tab in
+                // Mount every terminal tab across namespaces — switching tabs
+                // or projects is just an opacity flip, so SwiftUI never detaches
+                // the inactive TerminalNSView from its window. Each pane's
+                // metalLayer is hidden when its tab isn't active, so background
+                // tabs don't render but their surfaces stay alive (and OSC 7
+                // still updates their pwd).
+                ForEach(workspace.tabs) { tab in
                     let isActiveTab = tab.id == workspace.activeTabID
                     TerminalTabContentView(
                         ghosttyApp: ghosttyApp,
@@ -146,8 +145,12 @@ private struct TerminalTabContentView: View {
                     let frame = isMaximizedPane ? bounds : (frames[paneID] ?? .zero)
 
                     VStack(spacing: 0) {
-                        if isMultiPane && !isMaximized {
-                            PaneDragHandle(paneID: paneID)
+                        // Kept while maximized: the handle is the only way back
+                        // for the mouse. Reordering panes makes no sense with
+                        // one on screen, so it drops the drag and keeps the
+                        // double-click.
+                        if isMultiPane {
+                            PaneDragHandle(paneID: paneID, isMaximized: isMaximized)
                         }
 
                         TerminalPanel(
@@ -346,36 +349,32 @@ private struct DropZoneHighlightView: View {
 
 private struct PaneDragHandle: View {
     let paneID: UUID
+    let isMaximized: Bool
 
     @State private var isHovered = false
     @Environment(TerminalWorkspaceStore.self) private var workspace
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 3) {
-                ForEach(0..<3, id: \.self) { _ in
-                    Circle()
-                        .fill(Color.secondary.opacity(isHovered ? 1 : 0.6))
-                        .frame(width: 3, height: 3)
+            // The drag modifier is applied on the branch rather than
+            // conditionally inside one: `.onDrag` has no "disabled" form, and an
+            // empty NSItemProvider would still start a drag with a blank image.
+            if isMaximized {
+                handleBar
+            } else {
+                handleBar.onDrag {
+                    workspace.draggingPaneID = paneID
+                    NSLog("openOwl: [PaneDrag] drag started pane=%@", paneID.uuidString)
+                    // Use private UTType — prevents TerminalScrollView (.string acceptor)
+                    // from intercepting this drag through the AppKit layer.
+                    let provider = NSItemProvider()
+                    let data = paneID.uuidString.data(using: .utf8)!
+                    provider.registerDataRepresentation(
+                        forTypeIdentifier: paneDragTypeID,
+                        visibility: .all
+                    ) { completion in completion(data, nil); return nil }
+                    return provider
                 }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 12)
-            .background(AppPalette.elevated)
-            .contentShape(Rectangle())
-            .onHover { isHovered = $0 }
-            .onDrag {
-                workspace.draggingPaneID = paneID
-                NSLog("openOwl: [PaneDrag] drag started pane=%@", paneID.uuidString)
-                // Use private UTType — prevents TerminalScrollView (.string acceptor)
-                // from intercepting this drag through the AppKit layer.
-                let provider = NSItemProvider()
-                let data = paneID.uuidString.data(using: .utf8)!
-                provider.registerDataRepresentation(
-                    forTypeIdentifier: paneDragTypeID,
-                    visibility: .all
-                ) { completion in completion(data, nil); return nil }
-                return provider
             }
 
             // Bottom separator
@@ -383,6 +382,30 @@ private struct PaneDragHandle: View {
                 .fill(AppPalette.border)
                 .frame(height: 1)
         }
+    }
+
+    private var handleBar: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { _ in
+                Circle()
+                    .fill(Color.secondary.opacity(isHovered ? 1 : 0.6))
+                    .frame(width: 3, height: 3)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 12)
+        .background(AppPalette.elevated)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+        // Declared inside the shared bar so it sits below `.onDrag` in the
+        // modifier chain and gets first crack at the click.
+        .onTapGesture(count: 2) {
+            workspace.toggleMaximizeCurrentPane(paneID: paneID)
+        }
+        .help(isMaximized
+              ? "Double-click to restore split (⇧⌘↩)"
+              : "Double-click to maximize (⇧⌘↩) · drag to move pane")
+        .accessibilityLabel(isMaximized ? "Restore split" : "Maximize pane")
     }
 }
 

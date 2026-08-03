@@ -19,6 +19,7 @@
 5. **移除项目**: popover → Remove（只从列表移除，不删磁盘文件）
 6. **归档 worktree**: popover 内 worktree 行右键 → Archive Worktree
 7. **状态感知**: Claude incident 时 rail 底部黄三角；点击打开 status 页，右键可 dismiss
+8. **关闭项目**: `Cmd+W` 关掉项目最后一个终端 → 该项目变为非激活，从 rail 消失、回到 `+` 菜单列表，选中态切回 free terminal
 
 ## 3. 技术实现
 
@@ -134,11 +135,13 @@ worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session lis
 - 选中态：左 2px accent 竖条 + monogram 填充色
 - monogram 颜色 hash 使用 `magnitude` 计算 palette 索引，`Int.min` 也不会触发 `abs` 溢出
 - 有 terminal bell 时 monogram 角标显示未读数
-- 有 open tab 的 root 排在前面；未打开的 root 半透明
+- rail 只列「激活」的 root：本 session 有 terminal tab 的，加上当前选中的那个（选中态先于 tab 创建生效，不带这一条会闪一下）
 
 ## 4. 注意事项
 
-- 项目顺序：root 保持 `ProjectStore` 持久化顺序；rail 仅把「本 session 有 tab 的 root」提到前面
+- **激活 = 有终端**：`ProjectRail.isProjectActive` 实时查 `TerminalWorkspaceStore.hasTabs`，没有独立的持久化字段。项目自身或其任一 worktree 有 tab 即算激活
+- 关掉项目最后一个终端后，`AppDelegate` 把选中态切到 free terminal。留在原项目上会让下一次 `syncActiveProjectContext` 经 `switchNamespace` 给它补一个 tab，项目立刻「复活」，非激活就永远做不到
+- 项目顺序：root 保持 `ProjectStore` 持久化顺序，rail 不重排
 - 从 Project Rail 切回某个 root 时，恢复该 root 最近一次选中的 main/worktree；用户明确切回 main 后，后续继续保持 main
 - 删除根项目时同时移除所有子 worktree
 
@@ -151,6 +154,7 @@ worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session lis
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-01 | 恢复「关掉项目最后一个终端 → 项目变非激活」：`closeCurrent` 不再给空掉的项目 namespace 补 tab，改为返回 `.projectEmptied`，由 `AppDelegate` 把选中态切到 free terminal。`82a8a8c` 的补 tab 兜底把这条路堵死了，`hasTabs` 恒为 true |
 | 2026-08-01 | 侧栏与 rail 去掉 bell 驱动的未读角标（`SessionRow.unread`、`RailStripButton.badge`、pane 行铃铛）——随通知链路一并移除，详见 FEAT-002 |
 | 2026-08-01 | `SessionRow` / pane 行 / rail popover 行迁到共享 `selectableRowChrome`；session list header 用 `panelToolHeader` 与 right dock 对齐 |
 | 2026-07-31 | `openowl.json` 隔离失败时本 session 改为只读且异步告警；active worktree 归档在 Git/文件副作用前执行 editor preflight；monogram hash 改用 magnitude |
