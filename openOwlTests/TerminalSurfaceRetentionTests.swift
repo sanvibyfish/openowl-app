@@ -25,7 +25,7 @@ struct DestroyPaneHandlerTests {
         let focusedPane = tab.focusedPaneID!
 
         // Close the focused pane (still has a sibling, so tab stays)
-        let action = store.closeCurrent()
+        let action = store.closeCurrent(approveProjectDeactivation: { true })
 
         #expect(action == .none)
         #expect(destroyedPaneIDs == [focusedPane])
@@ -47,7 +47,7 @@ struct DestroyPaneHandlerTests {
             destroyedPaneIDs.append(paneID)
         }
 
-        let action = store.closeCurrent()
+        let action = store.closeCurrent(approveProjectDeactivation: { true })
 
         #expect(action == .none)
         #expect(destroyedPaneIDs == [expectedPaneID])
@@ -65,7 +65,7 @@ struct DestroyPaneHandlerTests {
             destroyCalled = true
         }
 
-        let action = store.closeCurrent()
+        let action = store.closeCurrent(approveProjectDeactivation: { true })
 
         #expect(action == .closeWindow)
         #expect(!destroyCalled)

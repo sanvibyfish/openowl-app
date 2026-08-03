@@ -613,7 +613,9 @@ final class TerminalWorkspaceStore {
         return true
     }
 
-    func closeCurrent() -> TerminalCloseAction {
+    func closeCurrent(
+        approveProjectDeactivation: () -> Bool
+    ) -> TerminalCloseAction {
         guard let index = activeTabIndex else { return .closeWindow }
         var tab = tabs[index]
 
@@ -629,6 +631,14 @@ final class TerminalWorkspaceStore {
         let isLastInNamespace = visibleTabs.count <= 1
         if isLastInNamespace && activeProjectID == nil {
             return .closeWindow
+        }
+
+        // Project deactivation crosses into ProjectStore, where an editor may
+        // reject the context change if dirty files cannot be saved. Get that
+        // approval before destroying the terminal surface so a rejection leaves
+        // the project selection and its last session intact.
+        if isLastInNamespace, !approveProjectDeactivation() {
+            return .none
         }
 
         let removedTab = tabs[index]

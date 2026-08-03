@@ -140,7 +140,7 @@ worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session lis
 ## 4. 注意事项
 
 - **激活 = 有终端**：`ProjectRail.isProjectActive` 实时查 `TerminalWorkspaceStore.hasTabs`，没有独立的持久化字段。项目自身或其任一 worktree 有 tab 即算激活
-- 关掉项目最后一个终端后，`AppDelegate` 把选中态切到 free terminal。留在原项目上会让下一次 `syncActiveProjectContext` 经 `switchNamespace` 给它补一个 tab，项目立刻「复活」，非激活就永远做不到
+- 关掉项目最后一个终端前，`TerminalWorkspaceStore` 通过 `AppDelegate` 提供的 closure 先请求 `ProjectStore` 切到 free terminal。只有 editor context 审批成功才销毁 terminal；审批失败时选中态与 session 都不变。留在已空项目上会让下一次 `syncActiveProjectContext` 经 `switchNamespace` 给它补一个 tab，所以这两个状态必须一次提交
 - 项目顺序：root 保持 `ProjectStore` 持久化顺序，rail 不重排
 - 从 Project Rail 切回某个 root 时，恢复该 root 最近一次选中的 main/worktree；用户明确切回 main 后，后续继续保持 main
 - 删除根项目时同时移除所有子 worktree
@@ -154,6 +154,7 @@ worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session lis
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-03 | 项目失活改为事务性顺序：先完成 editor context 审批并切到 free terminal，再删除项目最后一个 terminal；审批失败时不再产生空 namespace 或销毁 surface |
 | 2026-08-01 | 恢复「关掉项目最后一个终端 → 项目变非激活」：`closeCurrent` 不再给空掉的项目 namespace 补 tab，改为返回 `.projectEmptied`，由 `AppDelegate` 把选中态切到 free terminal。`82a8a8c` 的补 tab 兜底把这条路堵死了，`hasTabs` 恒为 true |
 | 2026-08-01 | 侧栏与 rail 去掉 bell 驱动的未读角标（`SessionRow.unread`、`RailStripButton.badge`、pane 行铃铛）——随通知链路一并移除，详见 FEAT-002 |
 | 2026-08-01 | `SessionRow` / pane 行 / rail popover 行迁到共享 `selectableRowChrome`；session list header 用 `panelToolHeader` 与 right dock 对齐 |

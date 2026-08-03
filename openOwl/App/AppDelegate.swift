@@ -359,19 +359,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Shared by the Close Tab menu item and the ⌘W local monitor.
     private func closeCurrentTerminal() {
         guard let workspaceStore else { return }
-        switch workspaceStore.closeCurrent() {
+        switch workspaceStore.closeCurrent(approveProjectDeactivation: {
+            guard let projectStore,
+                  let freeTerminalID = projectStore.freeTerminals.first?.id else {
+                return false
+            }
+            return projectStore.activate(.freeTerminal(freeTerminalID))
+        }) {
         case .none:
             break
         case .closeWindow:
             NSApp.keyWindow?.performClose(nil)
         case .projectEmptied:
-            // The project has no terminal left, so it now reads as inactive and
-            // drops off the rail. Move the selection to the free terminal —
-            // leaving it selected would have syncActiveProjectContext seed the
-            // project a replacement tab, undoing the close.
-            guard let projectStore,
-                  let freeTerminalID = projectStore.freeTerminals.first?.id else { return }
-            _ = projectStore.activate(.freeTerminal(freeTerminalID))
+            break
         }
     }
 
