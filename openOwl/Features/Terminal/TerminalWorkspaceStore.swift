@@ -35,8 +35,18 @@ struct SplitDividerInfo: Identifiable {
     let splitRect: CGRect
 }
 
-enum PaneDropZone: Equatable {
+enum PaneDropZone: Equatable, CustomStringConvertible {
     case left, right, top, bottom, center
+
+    var description: String {
+        switch self {
+        case .left: return "left"
+        case .right: return "right"
+        case .top: return "top"
+        case .bottom: return "bottom"
+        case .center: return "center"
+        }
+    }
 }
 
 enum TerminalCloseAction {
@@ -819,15 +829,35 @@ final class TerminalWorkspaceStore {
 
     // MARK: - Drag
 
+    /// Per-tab AppKit hosts for the drag drop-zone highlight. The highlight is
+    /// drawn by an NSView (not a SwiftUI overlay) because SwiftUI's view
+    /// updates are frozen for the whole NSDraggingSession — overlay state
+    /// writes from DropDelegate callbacks never reach the SwiftUI layer.
+    private(set) var dropHighlightHosts: [UUID: DragZoneHighlightNSView] = [:]
+
+    func registerDropHighlight(_ host: DragZoneHighlightNSView, forTab tabID: UUID) {
+        dropHighlightHosts[tabID] = host
+    }
+
+    func showDropHighlight(targetPaneID: UUID, zone: PaneDropZone) {
+        guard let tab = tabs.first(where: { $0.splitTree.containsPane(targetPaneID) }) else { return }
+        dropHighlightHosts[tab.id]?.show(zone: zone, targetPaneID: targetPaneID)
+    }
+
+    func hideDropHighlight() {
+        for host in dropHighlightHosts.values { host.hide() }
+    }
+
     /// Called when a pane drag ends without a valid drop target (drag cancelled).
     /// In the success path, `PaneDropDelegate.cleanup()` clears state first and
     /// this becomes a no-op.
     func cancelDragIfActive() {
         guard draggingPaneID != nil else { return }
-        NSLog("openOwl: [PaneDrag] drag cancelled (no performDrop) — clearing state")
+        AppLogger.log("pane-drag", "drag cancelled (no performDrop) — clearing state")
         draggingPaneID = nil
         dragOverPaneID = nil
         dropZone = nil
+        hideDropHighlight()
     }
 
     // MARK: - Search

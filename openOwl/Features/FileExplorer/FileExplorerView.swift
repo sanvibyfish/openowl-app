@@ -830,7 +830,12 @@ struct FileExplorerView: View {
                         }
                     }
                     .gesture(
-                        DragGesture(minimumDistance: 1)
+                        // .global is required: the divider sits between the two
+                        // panels, so widening the tree moves the divider itself.
+                        // In .local coords the origin travels with it, cancelling
+                        // out the translation every frame — the drag oscillates
+                        // instead of tracking the mouse.
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
                             .onChanged { value in
                                 if dragStartWidth == nil { dragStartWidth = treePanelWidth }
                                 let newWidth = (dragStartWidth ?? 240) + value.translation.width

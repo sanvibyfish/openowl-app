@@ -116,6 +116,19 @@ trap cleanup EXIT
 
 echo "=== Building $DISPLAY_NAME v$VERSION ==="
 
+# Bump CFBundleVersion (build number) so every archive/DMG is unique.
+# Override with BUILD_NUMBER=123 to pin a specific value (e.g. CI restore).
+# project.yml is the source of truth — xcodegen regenerates the pbxproj
+# from it right below, so the archive carries the bumped value.
+if [ -z "${BUILD_NUMBER:-}" ]; then
+    BUILD_NUMBER=$(grep 'CURRENT_PROJECT_VERSION' "$PROJECT_DIR/project.yml" | head -1 | sed 's/.*: *"\(.*\)"/\1/')
+    BUILD_NUMBER=$((BUILD_NUMBER + 1))
+    echo ">>> Build number auto-bumped to $BUILD_NUMBER"
+else
+    echo ">>> Build number pinned to $BUILD_NUMBER"
+fi
+sed -i '' "s/CURRENT_PROJECT_VERSION: *\"[0-9]*\"/CURRENT_PROJECT_VERSION: \"$BUILD_NUMBER\"/" "$PROJECT_DIR/project.yml"
+
 detach_existing_dmg
 mkdir -p "$BUILD_DIR"
 find "$BUILD_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
