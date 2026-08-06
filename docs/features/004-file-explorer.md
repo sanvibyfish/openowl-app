@@ -122,6 +122,7 @@ classifyGitState: GitFileChange → FileGitState
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-04 | 文件树/编辑器分隔条的 `DragGesture` 补上 `coordinateSpace: .global`。分隔条夹在两个面板之间，拖宽文件树会带着分隔条一起右移，`.local` 的坐标原点跟着走、每帧把 translation 抵消掉，拖动因此原地振荡。RightDock 的宽度手柄早修过同款问题并留了注释，这处漏改 |
 | 2026-08-01 | `EditTracker.destroy()` 不再清空 `controller`——单个 tracker 被所有 tab 的编辑器共用，而 SwiftUI 在 `.id(storage)` 重建时先注册新 controller、后拆卸旧的，清空会把活着的实例置 nil，使 `relayout()` 此后永久静默失效（软换行宽度再也修不上）；`controller` 是 weak，无需手动清 |
 | 2026-08-01 | 文件树 outline 选中改用 `AccentBarTableRowView`（accent 左竖条 + 浅色圆角底），与 SwiftUI `selectableRowChrome` 共用 `SelectableRowMetrics`，去掉系统蓝高亮 |
 | 2026-07-31 | 上下文切换/删除改为副作用前同步 editor preflight；补齐 dock 折叠常驻、三保存出口签名冲突否决、tab 关闭后正常切换/reload、自动读取上限、open/restore 失败持久化差异与 unsaved names 生命周期 |

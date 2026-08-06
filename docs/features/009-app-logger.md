@@ -62,6 +62,7 @@ AppLogger.log("resize-diag", "frame=%.1fx%.1f", width, height)
 - `TerminalScrollView.layout` 只记录尺寸发生变化的 layout；无尺寸变化的 terminal layout 不落盘，避免 terminal 输出热路径被诊断日志拖慢
 - `syncSurfaceSize skipped ... hostVisible=false/tiny ...` 表示 pane 当前隐藏或尺寸未稳定，openOwl 会保留上一次可用 PTY 尺寸，恢复显示后再同步
 - `[file-editor-state] restore-skip ...` 表示 editor tab session 恢复时跳过不存在文件、目录或超过图片解码上限的图片
+- `[pane-drag]` 记录窗格拖拽重排全链路：`drag started` → `dropEntered` / `zone changed` / `dropExited` → `performDrop` 或 `drag cancelled`。非 opt-in（拖拽是低频操作），落盘后可脱离 Xcode 排查拖拽状态残留
 
 ## 5. 相关需求
 
@@ -71,6 +72,7 @@ AppLogger.log("resize-diag", "frame=%.1fx%.1f", width, height)
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-04 | 窗格拖拽埋点从裸 `NSLog` 迁到 `AppLogger`（tag `pane-drag`）。之前拖拽日志只进系统日志不落盘，导致排查拖拽 bug 时日志文件里查无此事 |
 | 2026-06-25 | `resize-diag` layout 日志降噪，只记录尺寸变化，避免终端输出热路径重复写日志 |
 | 2026-06-05 | 新增 file-editor-state 示例与恢复跳过语义 |
 | 2026-06-04 | resize-diag 示例更新为 `syncSurfaceSize`，补充隐藏 pane 尺寸跳过语义 |

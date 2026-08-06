@@ -185,12 +185,6 @@ private struct TerminalTabContentView: View {
                         }
                     }
                     .overlay {
-                        if !isMaximized, workspace.dragOverPaneID == paneID, let zone = workspace.dropZone {
-                            DropZoneHighlightView(zone: zone)
-                                .allowsHitTesting(false)
-                        }
-                    }
-                    .overlay {
                         // Only register drop target when a pane drag is actually in progress
                         // and this pane is not the drag source.
                         // Previously used `draggingPaneID != paneID` which is true even
@@ -253,6 +247,15 @@ private struct TerminalTabContentView: View {
                             }
                     }
                 }
+
+                // Drop-zone highlight host — topmost, drawn directly by AppKit.
+                // A SwiftUI overlay can't show it: view updates are frozen for
+                // the whole NSDraggingSession, so dropEntered/dropUpdated writes
+                // never re-render an overlay. Mutating this NSView's layers
+                // bypasses SwiftUI and renders immediately.
+                DragZoneHighlightHostView(tabID: tab.id)
+                    .frame(width: bounds.width, height: bounds.height)
+                    .allowsHitTesting(false)
             }
             .coordinateSpace(name: "splitContainer")
         }
@@ -309,44 +312,128 @@ private extension NSCursor {
     }
 }
 
-private struct DropZoneHighlightView: View {
-    let zone: PaneDropZone
+/// AppKit-hosted drop-zone highlight for pane rearrangement.
+///
+/// SwiftUI overlays are frozen for the whole `NSDraggingSession`: state writes
+/// from `DropDelegate` callbacks never reach the SwiftUI layer, so a SwiftUI
+/// highlight can never appear mid-drag. This view sidesteps SwiftUI entirely —
+/// the drag callbacks mutate its CALayers directly, which AppKit renders
+/// immediately even while the dragging session owns the event loop.
+final class DragZoneHighlightNSView: NSView {
+    weak var workspace: TerminalWorkspaceStore?
+    var tabID: UUID?
 
-    var body: some View {
-        switch zone {
-        case .left:
-            HStack(spacing: 0) {
-                dropZoneContent
-                Color.clear
-            }
-        case .right:
-            HStack(spacing: 0) {
-                Color.clear
-                dropZoneContent
-            }
-        case .top:
-            VStack(spacing: 0) {
-                dropZoneContent
-                Color.clear
-            }
-        case .bottom:
-            VStack(spacing: 0) {
-                Color.clear
-                dropZoneContent
-            }
-        case .center:
-            Color.accentColor.opacity(0.15)
+    private let fillLayer = CALayer()
+    private let borderLayer = CAShapeLayer()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    private func setup() {
+        // Top-left origin, matching SwiftUI's paneFrames coordinates.
+        wantsLayer = true
+
+        fillLayer.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.25).cgColor
+        fillLayer.cornerRadius = 6
+        fillLayer.isHidden = true
+
+        borderLayer.strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.75).cgColor
+        borderLayer.lineWidth = 2
+        borderLayer.lineDashPattern = [6, 4]
+        borderLayer.fillColor = nil
+        borderLayer.isHidden = true
+
+        layer?.addSublayer(fillLayer)
+        layer?.addSublayer(borderLayer)
+    }
+
+    func show(zone: PaneDropZone, targetPaneID: UUID) {
+        guard let workspace, let tabID,
+              let tab = workspace.tabs.first(where: { $0.id == tabID }),
+              let frame = tab.splitTree.paneFrames(in: bounds)[targetPaneID] else {
+            hide()
+            return
         }
+
+        let rect: CGRect
+        switch zone {
+        case .left:   rect = CGRect(x: frame.minX, y: frame.minY, width: frame.width * 0.5, height: frame.height)
+        case .right:  rect = CGRect(x: frame.midX, y: frame.minY, width: frame.width * 0.5, height: frame.height)
+        case .top:    rect = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height * 0.5)
+        case .bottom: rect = CGRect(x: frame.minX, y: frame.midY, width: frame.width, height: frame.height * 0.5)
+        case .center: rect = frame.insetBy(dx: frame.width * 0.12, dy: frame.height * 0.12)
+        }
+
+        let inset = rect.insetBy(dx: 3, dy: 3)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fillLayer.frame = inset
+        borderLayer.frame = bounds
+        borderLayer.path = CGPath(roundedRect: inset, cornerWidth: 6, cornerHeight: 6, transform: nil)
+        fillLayer.isHidden = false
+        borderLayer.isHidden = false
+        CATransaction.commit()
     }
 
-    private var dropZoneContent: some View {
-        Color.accentColor.opacity(0.2)
-            .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .strokeBorder(Color.accentColor.opacity(0.4), style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-                    .padding(4)
-            )
+    func hide() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fillLayer.isHidden = true
+        borderLayer.isHidden = true
+        CATransaction.commit()
     }
+
+    /// Top-left origin, matching SwiftUI's paneFrames coordinates.
+    override var isFlipped: Bool { true }
+
+    /// Pure overlay — never intercept mouse events.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+struct DragZoneHighlightHostView: NSViewRepresentable {
+    let tabID: UUID
+
+    @Environment(TerminalWorkspaceStore.self) private var workspace
+
+    func makeNSView(context: Context) -> DragZoneHighlightNSView {
+        let view = DragZoneHighlightNSView()
+        view.workspace = workspace
+        view.tabID = tabID
+        workspace.registerDropHighlight(view, forTab: tabID)
+        return view
+    }
+
+    func updateNSView(_ nsView: DragZoneHighlightNSView, context: Context) {
+        nsView.workspace = workspace
+    }
+}
+
+/// Polls the mouse button until the pane drag ends.
+///
+/// SwiftUI's `.onDrag` has no drag-ended callback, and an NSEvent monitor is no
+/// help either: once AppKit opens an `NSDraggingSession` it runs its own event
+/// loop and consumes the mouseUp without ever going through `NSApp.sendEvent`.
+/// The button state is the only signal left. Without it a cancelled drag (Esc,
+/// released outside a target, dropped back on the source) leaves
+/// `draggingPaneID` set, and every other pane keeps its `contentShape` drop
+/// overlay — swallowing clicks and text selection until the app restarts.
+private func watchForPaneDragEnd(_ workspace: TerminalWorkspaceStore) {
+    guard NSEvent.pressedMouseButtons == 0 else {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            watchForPaneDragEnd(workspace)
+        }
+        return
+    }
+    // One more hop so a successful drop — AppKit calls performDrop as the
+    // session ends — clears the state first, leaving this a no-op.
+    DispatchQueue.main.async { workspace.cancelDragIfActive() }
 }
 
 private struct PaneDragHandle: View {
@@ -366,7 +453,8 @@ private struct PaneDragHandle: View {
             } else {
                 handleBar.onDrag {
                     workspace.draggingPaneID = paneID
-                    NSLog("openOwl: [PaneDrag] drag started pane=%@", paneID.uuidString)
+                    watchForPaneDragEnd(workspace)
+                    AppLogger.log("pane-drag", "drag started pane=\(paneID.uuidString)")
                     // Use private UTType — prevents TerminalScrollView (.string acceptor)
                     // from intercepting this drag through the AppKit layer.
                     let provider = NSItemProvider()
@@ -422,9 +510,9 @@ private struct PaneDropDelegate: DropDelegate {
     let viewSize: CGSize
 
     func dropEntered(info: DropInfo) {
-        NSLog("openOwl: [PaneDropDelegate] dropEntered target=%@ draggingPane=%@",
-              targetPaneID.uuidString, workspace.draggingPaneID?.uuidString ?? "nil")
+        AppLogger.log("pane-drag", "dropEntered target=\(targetPaneID.uuidString) dragging=\(workspace.draggingPaneID?.uuidString ?? "nil")")
         workspace.dragOverPaneID = targetPaneID
+        workspace.showDropHighlight(targetPaneID: targetPaneID, zone: detectZone(at: info.location))
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
@@ -438,33 +526,32 @@ private struct PaneDropDelegate: DropDelegate {
         workspace.dragOverPaneID = targetPaneID
         let newZone = detectZone(at: info.location)
         if newZone != workspace.dropZone {
-            NSLog("openOwl: [PaneDropDelegate] zone changed target=%@ zone=%@",
-                  targetPaneID.uuidString, "\(newZone)")
+            AppLogger.log("pane-drag", "zone changed target=\(targetPaneID.uuidString) zone=\(newZone)")
             workspace.dropZone = newZone
+            workspace.showDropHighlight(targetPaneID: targetPaneID, zone: newZone)
         }
         return DropProposal(operation: .move)
     }
 
     func dropExited(info: DropInfo) {
         if workspace.dragOverPaneID == targetPaneID {
-            NSLog("openOwl: [PaneDropDelegate] dropExited target=%@", targetPaneID.uuidString)
+            AppLogger.log("pane-drag", "dropExited target=\(targetPaneID.uuidString)")
             workspace.dragOverPaneID = nil
             workspace.dropZone = nil
+            workspace.hideDropHighlight()
         }
     }
 
     func performDrop(info: DropInfo) -> Bool {
         guard let sourceID = workspace.draggingPaneID,
               sourceID != targetPaneID else {
-            NSLog("openOwl: [PaneDropDelegate] performDrop SKIPPED target=%@ draggingPane=%@",
-                  targetPaneID.uuidString, workspace.draggingPaneID?.uuidString ?? "nil")
+            AppLogger.log("pane-drag", "performDrop SKIPPED target=\(targetPaneID.uuidString) dragging=\(workspace.draggingPaneID?.uuidString ?? "nil")")
             cleanup()
             return false
         }
 
         let zone = workspace.dropZone ?? .center
-        NSLog("openOwl: [PaneDropDelegate] performDrop source=%@ target=%@ zone=%@",
-              sourceID.uuidString, targetPaneID.uuidString, "\(zone)")
+        AppLogger.log("pane-drag", "performDrop source=\(sourceID.uuidString) target=\(targetPaneID.uuidString) zone=\(zone)")
         workspace.movePaneToTarget(sourceID: sourceID, targetID: targetPaneID, zone: zone)
         cleanup()
         return true
@@ -494,5 +581,6 @@ private struct PaneDropDelegate: DropDelegate {
         workspace.draggingPaneID = nil
         workspace.dragOverPaneID = nil
         workspace.dropZone = nil
+        workspace.hideDropHighlight()
     }
 }

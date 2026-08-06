@@ -535,23 +535,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func installLocalKeyMonitor() {
-        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseUp]) { [weak self] event in
+        // Pane-drag cleanup used to hang off .leftMouseUp here, but AppKit's
+        // dragging session never routes that event through NSApp.sendEvent, so
+        // the monitor never fired. TerminalWorkspaceView polls the button state
+        // instead — see watchForPaneDragEnd.
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             guard let self else { return event }
-            switch event.type {
-            case .keyDown:
-                return self.handleLocalKeyDown(event) ? nil : event
-            case .leftMouseUp:
-                // Deferred so PaneDropDelegate.performDrop() (called synchronously by
-                // AppKit during the same event dispatch) runs first. For successful
-                // drops cleanup() already clears draggingPaneID and this is a no-op.
-                // For cancelled drags (no valid target), this clears the stuck overlay.
-                Task { @MainActor [weak self] in
-                    self?.workspaceStore?.cancelDragIfActive()
-                }
-                return event
-            default:
-                return event
-            }
+            return self.handleLocalKeyDown(event) ? nil : event
         }
     }
 
