@@ -422,15 +422,14 @@ final class TerminalWorkspaceStore {
         }
     }
 
-    /// Switch the visible namespace. Drops drag state and creates an initial tab if needed.
+    /// Switch the visible namespace. Drops drag state only when the namespace changes
+    /// and creates an initial tab if needed.
     func switchNamespace(_ namespace: TerminalNamespace?) {
+        if activeNamespace != namespace || namespace == nil {
+            cancelDragIfActive()
+        }
         activeNamespace = namespace
         maximizedPaneID = nil  // Reset maximize when switching namespaces
-        // Clear stale drag state: dragging a pane then switching namespace would leave
-        // the ContentShape overlay on every non-source pane in the new namespace's tab.
-        draggingPaneID = nil
-        dragOverPaneID = nil
-        dropZone = nil
 
         // Create initial tab if namespace has none.
         // Intentionally does NOT fire `onContextDidChange` — the host's
@@ -860,11 +859,13 @@ final class TerminalWorkspaceStore {
     }
 
     /// Clears drag state if still active. Called from the handle's
-    /// `NSDraggingSource` end callback; success path already cleared via
-    /// `PaneDropDelegate.cleanup()`, so this is then a no-op.
+    /// `NSDraggingSource` end callback; success path already cleared by
+    /// TerminalScrollView, so this is then a no-op.
     func cancelDragIfActive() {
-        guard draggingPaneID != nil else { return }
-        AppLogger.log("pane-drag", "drag cancelled (no performDrop) — clearing state")
+        guard draggingPaneID != nil || dragOverPaneID != nil || dropZone != nil else { return }
+        if draggingPaneID != nil {
+            AppLogger.log("pane-drag", "drag cancelled (no performDrop) — clearing state")
+        }
         draggingPaneID = nil
         dragOverPaneID = nil
         dropZone = nil

@@ -10,6 +10,7 @@ struct TerminalPanel: NSViewRepresentable {
     var onFocus: (() -> Void)? = nil
     @Environment(GhosttyAppManager.self) var appManager
     @Environment(RightDockStore.self) var rightDockStore
+    @Environment(TerminalWorkspaceStore.self) var workspace
 
     func makeNSView(context: Context) -> TerminalScrollView {
         // Reuse an existing TerminalScrollView if SwiftUI dismantled a previous
@@ -17,6 +18,7 @@ struct TerminalPanel: NSViewRepresentable {
         // (viewDidMoveToWindow nil→window thrash) on every SwiftUI re-evaluation.
         if let existing = appManager.scrollView(for: paneID) {
             existing.terminalView.onFocus = onFocus
+            existing.workspace = workspace
             existing.setTerminalVisibility(isVisible)
             return existing
         }
@@ -33,7 +35,8 @@ struct TerminalPanel: NSViewRepresentable {
             terminalView.initialWorkingDirectory = workingDirectory
         }
 
-        let scrollView = TerminalScrollView(terminalView: terminalView)
+        let scrollView = TerminalScrollView(terminalView: terminalView, paneID: paneID)
+        scrollView.workspace = workspace
         scrollView.setTerminalVisibility(isVisible)
         appManager.registerScrollView(scrollView, for: paneID)
         return scrollView
@@ -41,6 +44,7 @@ struct TerminalPanel: NSViewRepresentable {
 
     func updateNSView(_ nsView: TerminalScrollView, context: Context) {
         nsView.terminalView.onFocus = onFocus
+        nsView.workspace = workspace
         nsView.freezeTerminalWidth = rightDockStore.shouldFreezeTerminalResize && !rightDockStore.isFullscreen
         nsView.setTerminalVisibility(isVisible)
     }

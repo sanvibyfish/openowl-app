@@ -133,6 +133,22 @@ struct SwitchProjectDragTests {
         #expect(store.dragOverPaneID == nil)
     }
 
+    @Test func switchProject_sameProject_keepsActiveDrag() {
+        let store = TerminalWorkspaceStore()
+        store.switchProject("project-abc")
+        let source = UUID()
+        let target = UUID()
+        store.draggingPaneID = source
+        store.dragOverPaneID = target
+        store.dropZone = .right
+
+        store.switchProject("project-abc")
+
+        #expect(store.draggingPaneID == source)
+        #expect(store.dragOverPaneID == target)
+        #expect(store.dropZone == .right)
+    }
+
     @Test func switchProject_alsoResetMaximize() {
         let store = TerminalWorkspaceStore()
         store.maximizedPaneID = UUID()
@@ -177,6 +193,17 @@ struct PaneDragCancelTests {
         #expect(store.dropZone == nil)
     }
 
+    @Test func cancelDragIfActive_clearsOrphanedDropTargetState() {
+        let store = TerminalWorkspaceStore()
+        store.dragOverPaneID = UUID()
+        store.dropZone = .left
+
+        store.cancelDragIfActive()
+
+        #expect(store.dragOverPaneID == nil)
+        #expect(store.dropZone == nil)
+    }
+
     @Test func cancelDragIfActive_idempotent() {
         let store = TerminalWorkspaceStore()
         store.draggingPaneID = UUID()
@@ -188,8 +215,8 @@ struct PaneDragCancelTests {
     }
 
     @Test func cancelDragIfActive_doesNotClearWhenAlreadyClearedByPerformDrop() {
-        // Simulate: performDrop called cleanup() first, setting draggingPaneID = nil.
-        // cancelDragIfActive fires next (from leftMouseUp handler).
+        // Simulate: TerminalScrollView completed the drop and cleared draggingPaneID.
+        // cancelDragIfActive fires next from the NSDraggingSource end callback.
         // dragOverPaneID should also be nil — not touched by a spurious cancel.
         let store = TerminalWorkspaceStore()
         let pane = UUID()

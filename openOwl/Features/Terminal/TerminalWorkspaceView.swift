@@ -1,12 +1,8 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
-/// Private UTType for in-app pane rearrangement drag.
-/// Using a dedicated type prevents TerminalScrollView (which accepts .string)
-/// from intercepting pane drags, and allows the drop overlay to be
-/// always-present without interfering with Finder file drops (.fileURL).
-private let paneDragTypeID = "com.openowl.terminal.pane-drag"
+/// Private pasteboard type for in-app pane rearrangement.
+let paneDragPasteboardType = NSPasteboard.PasteboardType("com.openowl.terminal.pane-drag")
 
 struct TerminalWorkspaceView: View {
     let ghosttyApp: ghostty_app_t
@@ -151,7 +147,11 @@ private struct TerminalTabContentView: View {
                         // one on screen, so it drops the drag and keeps the
                         // double-click.
                         if isMultiPane {
-                            PaneDragHandle(paneID: paneID, isMaximized: isMaximized)
+                            PaneDragHandle(
+                                paneID: paneID,
+                                isMaximized: isMaximized,
+                                isVisible: isPaneVisible
+                            )
                         }
 
                         TerminalPanel(
@@ -184,32 +184,8 @@ private struct TerminalTabContentView: View {
                                 .allowsHitTesting(false)
                         }
                     }
-                    .overlay {
-                        // Only register drop target when a pane drag is actually in progress
-                        // and this pane is not the drag source.
-                        // Previously used `draggingPaneID != paneID` which is true even
-                        // when draggingPaneID is nil — causing the contentShape overlay to
-                        // block all mouse events at all times.
-                        //
-                        // Safe to use paneDragTypeID (private UTType) — TerminalScrollView
-                        // only registers for .fileURL, so Finder drops reach AppKit unimpeded.
-                        if !isMaximized,
-                           let draggingID = workspace.draggingPaneID,
-                           draggingID != paneID {
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .onDrop(
-                                    of: [UTType(exportedAs: paneDragTypeID)],
-                                    delegate: PaneDropDelegate(
-                                        targetPaneID: paneID,
-                                        workspace: workspace,
-                                        viewSize: frame.size
-                                    )
-                                )
-                        }
-                    }
                     // Search overlay is the outermost overlay so it renders above
-                    // the pane drop delegate (Color.clear.contentShape) and receives clicks.
+                    // terminal content and receives clicks.
                     .overlay(alignment: .topTrailing) {
                         let isFocused = workspace.isFocusedPane(paneID, in: tab.id)
                         TerminalSearchOverlay(paneID: paneID, isFocused: isFocused)
@@ -427,6 +403,7 @@ struct DragZoneHighlightHostView: NSViewRepresentable {
 private struct PaneDragHandle: View {
     let paneID: UUID
     let isMaximized: Bool
+    let isVisible: Bool
 
     @State private var isHovered = false
     @Environment(TerminalWorkspaceStore.self) private var workspace
@@ -437,6 +414,7 @@ private struct PaneDragHandle: View {
                 PaneHandleInteractionView(
                     paneID: paneID,
                     isMaximized: isMaximized,
+                    isVisible: isVisible,
                     isHovered: $isHovered
                 )
 
@@ -472,6 +450,7 @@ private struct PaneDragHandle: View {
 private struct PaneHandleInteractionView: NSViewRepresentable {
     let paneID: UUID
     let isMaximized: Bool
+    let isVisible: Bool
     @Binding var isHovered: Bool
 
     @Environment(TerminalWorkspaceStore.self) private var workspace
@@ -490,6 +469,7 @@ private struct PaneHandleInteractionView: NSViewRepresentable {
         view.paneID = paneID
         view.isMaximized = isMaximized
         view.workspace = workspace
+        view.setPaneDropEnabled(isVisible && !isMaximized)
         view.onHoverChanged = { hovering in
             isHovered = hovering
         }
@@ -507,10 +487,21 @@ private final class PaneHandleNSView: NSView, NSDraggingSource {
     var onHoverChanged: ((Bool) -> Void)?
 
     private var dragSessionActive = false
+    private var paneDropEnabled = false
     private var mouseDownEvent: NSEvent?
     private var mouseDownLocation: NSPoint = .zero
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    func setPaneDropEnabled(_ enabled: Bool) {
+        guard paneDropEnabled != enabled else { return }
+        paneDropEnabled = enabled
+        if enabled {
+            registerForDraggedTypes([paneDragPasteboardType])
+        } else {
+            unregisterDraggedTypes()
+        }
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -554,7 +545,7 @@ private final class PaneHandleNSView: NSView, NSDraggingSource {
         AppLogger.log("pane-drag", "drag started pane=%@", paneID.uuidString)
 
         let pbItem = NSPasteboardItem()
-        pbItem.setString(paneID.uuidString, forType: NSPasteboard.PasteboardType(paneDragTypeID))
+        pbItem.setString(paneID.uuidString, forType: paneDragPasteboardType)
         let item = NSDraggingItem(pasteboardWriter: pbItem)
         item.setDraggingFrame(bounds, contents: nil)
 
@@ -583,94 +574,56 @@ private final class PaneHandleNSView: NSView, NSDraggingSource {
         operation: NSDragOperation
     ) {
         dragSessionActive = false
-        // Success path: PaneDropDelegate.cleanup already cleared state.
+        // Success path: TerminalScrollView already cleared state.
         // Cancel / outside / back-on-source: clear here so drop overlays unmount.
         workspace?.cancelDragIfActive()
+    }
+
+    // MARK: NSDraggingDestination
+
+    private func canAcceptPaneDrop(_ sender: NSDraggingInfo) -> Bool {
+        guard paneDropEnabled,
+              sender.draggingPasteboard.types?.contains(paneDragPasteboardType) == true,
+              let sourceID = workspace?.draggingPaneID else { return false }
+        return sourceID != paneID
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard canAcceptPaneDrop(sender), let workspace else { return [] }
+        workspace.dragOverPaneID = paneID
+        workspace.dropZone = .center
+        workspace.showDropHighlight(targetPaneID: paneID, zone: .center)
+        return .move
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        canAcceptPaneDrop(sender) ? .move : []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        guard let workspace, workspace.dragOverPaneID == paneID else { return }
+        workspace.dragOverPaneID = nil
+        workspace.dropZone = nil
+        workspace.hideDropHighlight()
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        canAcceptPaneDrop(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard canAcceptPaneDrop(sender), let workspace,
+              let sourceID = workspace.draggingPaneID else { return false }
+        AppLogger.log("pane-drag", "performDrop source=%@ target=%@ zone=center",
+                      sourceID.uuidString, paneID.uuidString)
+        workspace.movePaneToTarget(sourceID: sourceID, targetID: paneID, zone: .center)
+        workspace.draggingPaneID = nil
+        workspace.dragOverPaneID = nil
+        workspace.dropZone = nil
+        workspace.hideDropHighlight()
+        return true
     }
 }
 
 // Old recursive TerminalSplitNodeView and SplitContainerView removed.
 // Replaced by flat layout in TerminalTabContentView above.
-
-// MARK: - Pane Drop Delegate
-
-private struct PaneDropDelegate: DropDelegate {
-    let targetPaneID: UUID
-    let workspace: TerminalWorkspaceStore
-    let viewSize: CGSize
-
-    func dropEntered(info: DropInfo) {
-        AppLogger.log("pane-drag", "dropEntered target=\(targetPaneID.uuidString) dragging=\(workspace.draggingPaneID?.uuidString ?? "nil")")
-        workspace.dragOverPaneID = targetPaneID
-        workspace.showDropHighlight(targetPaneID: targetPaneID, zone: detectZone(at: info.location))
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        guard workspace.draggingPaneID != nil,
-              workspace.draggingPaneID != targetPaneID else {
-            // No active pane drag or drag is over its own source — reject silently.
-            // (overlay is always-present; this fires when cursor passes over non-drag drags)
-            return DropProposal(operation: .cancel)
-        }
-
-        workspace.dragOverPaneID = targetPaneID
-        let newZone = detectZone(at: info.location)
-        if newZone != workspace.dropZone {
-            AppLogger.log("pane-drag", "zone changed target=\(targetPaneID.uuidString) zone=\(newZone)")
-            workspace.dropZone = newZone
-            workspace.showDropHighlight(targetPaneID: targetPaneID, zone: newZone)
-        }
-        return DropProposal(operation: .move)
-    }
-
-    func dropExited(info: DropInfo) {
-        if workspace.dragOverPaneID == targetPaneID {
-            AppLogger.log("pane-drag", "dropExited target=\(targetPaneID.uuidString)")
-            workspace.dragOverPaneID = nil
-            workspace.dropZone = nil
-            workspace.hideDropHighlight()
-        }
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        guard let sourceID = workspace.draggingPaneID,
-              sourceID != targetPaneID else {
-            AppLogger.log("pane-drag", "performDrop SKIPPED target=\(targetPaneID.uuidString) dragging=\(workspace.draggingPaneID?.uuidString ?? "nil")")
-            cleanup()
-            return false
-        }
-
-        let zone = workspace.dropZone ?? .center
-        AppLogger.log("pane-drag", "performDrop source=\(sourceID.uuidString) target=\(targetPaneID.uuidString) zone=\(zone)")
-        workspace.movePaneToTarget(sourceID: sourceID, targetID: targetPaneID, zone: zone)
-        cleanup()
-        return true
-    }
-
-    /// Detect drop zone based on cursor position within the target pane.
-    /// Edges (30% inset) → directional split. Center → swap.
-    private func detectZone(at point: CGPoint) -> PaneDropZone {
-        let w = viewSize.width
-        let h = viewSize.height
-        guard w > 0, h > 0 else { return .center }
-
-        let relX = point.x / w  // 0..1
-        let relY = point.y / h  // 0..1
-        let edgeThreshold: CGFloat = 0.3
-
-        // Check edges first
-        if relX < edgeThreshold { return .left }
-        if relX > 1 - edgeThreshold { return .right }
-        if relY < edgeThreshold { return .top }
-        if relY > 1 - edgeThreshold { return .bottom }
-
-        return .center
-    }
-
-    private func cleanup() {
-        workspace.draggingPaneID = nil
-        workspace.dragOverPaneID = nil
-        workspace.dropZone = nil
-        workspace.hideDropHighlight()
-    }
-}
