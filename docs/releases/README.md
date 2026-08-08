@@ -8,7 +8,7 @@
 
 | 版本 | 状态 | 发布日期 | 文档 |
 |------|------|----------|------|
-| v1.1.4-2 | 🟢 Ready | 2026-08-09 | [Release Notes](v1.1.4-2.md) |
+| v1.1.4-2 | ✅ Done | 2026-08-09 | [Release Notes](v1.1.4-2.md) |
 | v1.1.4 | ✅ Done | 2026-08-05 | [Release Notes](v1.1.4.md)（含 v1.1.4-1 patch tag，2026-08-08） |
 | v1.1.3 | 🟢 Ready | 2026-08-03 | [Release Notes](v1.1.3.md) |
 | v1.1.2 | ✅ Done | 2026-08-01 | [Release Notes](v1.1.2.md) |
@@ -37,7 +37,7 @@
 
 | 日期 | 说明 |
 |------|------|
-| 2026-08-09 | 新增 v1.1.4-2 发布说明：pane 与 Finder 拖放统一迁到 AppKit，修复嵌套分屏命中、终端输入阻塞和隐藏 pane 抢拖放事件 |
+| 2026-08-09 | 发布 v1.1.4-2：pane 与 Finder 拖放统一迁到 AppKit，修复嵌套分屏命中、终端输入阻塞和隐藏 pane 抢拖放事件 |
 | 2026-08-08 | v1.1.4 发布说明定稿并补登索引；新增 v1.1.4-1 patch tag（AppKit `PaneHandleNSView` + `[terminal-drop]` 日志） |
 | 2026-08-01 | v1.1.2 统一选中态、unified diff、终端 tab 记忆、bell 移除、Debug bundle ID 分离 |
 | 2026-07-31 | v1.1.1 补充稳定性修复、365 tests / 33 suites 验证结果及当前 GUI 未验证范围 |
