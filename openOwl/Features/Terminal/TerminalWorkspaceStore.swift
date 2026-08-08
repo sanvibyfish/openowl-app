@@ -778,14 +778,25 @@ final class TerminalWorkspaceStore {
     /// blow up — the drag handle that was double-clicked, which is not
     /// necessarily the focused one. Nil targets the focused pane (⌘⇧Return, menu).
     func toggleMaximizeCurrentPane(paneID: UUID? = nil) {
-        guard let index = activeTabIndex else { return }
+        guard let index = activeTabIndex else {
+            AppLogger.log("pane-drag", "toggle maximize ABORT: no active tab (paneID=%@)",
+                          paneID?.uuidString ?? "nil")
+            return
+        }
         let tab = tabs[index]
-        guard tab.splitTree.leafCount > 1 else { return }
+        guard tab.splitTree.leafCount > 1 else {
+            AppLogger.log("pane-drag", "toggle maximize ABORT: single pane tab=%@ (paneID=%@)",
+                          tab.id.uuidString, paneID?.uuidString ?? "nil")
+            return
+        }
 
         if let current = maximizedPaneID, tab.splitTree.containsPane(current) {
             maximizedPaneID = nil
+            AppLogger.log("pane-drag", "toggle maximize RESTORE pane=%@", current.uuidString)
         } else if let target = paneID ?? tab.focusedPaneID ?? tab.splitTree.firstPaneID {
             maximizedPaneID = target
+            AppLogger.log("pane-drag", "toggle maximize SET pane=%@ focused=%@",
+                          target.uuidString, tab.focusedPaneID?.uuidString ?? "nil")
         }
     }
 
@@ -848,9 +859,9 @@ final class TerminalWorkspaceStore {
         for host in dropHighlightHosts.values { host.hide() }
     }
 
-    /// Called when a pane drag ends without a valid drop target (drag cancelled).
-    /// In the success path, `PaneDropDelegate.cleanup()` clears state first and
-    /// this becomes a no-op.
+    /// Clears drag state if still active. Called from the handle's
+    /// `NSDraggingSource` end callback; success path already cleared via
+    /// `PaneDropDelegate.cleanup()`, so this is then a no-op.
     func cancelDragIfActive() {
         guard draggingPaneID != nil else { return }
         AppLogger.log("pane-drag", "drag cancelled (no performDrop) — clearing state")

@@ -185,14 +185,27 @@ class TerminalScrollView: NSView {
     }
 
     private func canAcceptDrag(_ sender: NSDraggingInfo) -> Bool {
-        guard isEffectivelyVisible,
-              let types = sender.draggingPasteboard.types,
-              !Set(types).isDisjoint(with: Self.acceptedDropTypes) else { return false }
+        guard isEffectivelyVisible else {
+            AppLogger.log("terminal-drop", "reject: not effectively visible scroll=%@",
+                          ObjectIdentifier(self).debugDescription)
+            return false
+        }
+        guard let types = sender.draggingPasteboard.types,
+              !Set(types).isDisjoint(with: Self.acceptedDropTypes) else {
+            AppLogger.log("terminal-drop", "reject: no accepted type scroll=%@ types=%@",
+                          ObjectIdentifier(self).debugDescription,
+                          sender.draggingPasteboard.types?.map(\.rawValue).joined(separator: ",") ?? "nil")
+            return false
+        }
         return true
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        canAcceptDrag(sender) ? .copy : []
+        let op: NSDragOperation = canAcceptDrag(sender) ? .copy : []
+        AppLogger.log("terminal-drop", "entered scroll=%@ op=%@ types=%@",
+                      ObjectIdentifier(self).debugDescription, "\(op.rawValue)",
+                      sender.draggingPasteboard.types?.map(\.rawValue).joined(separator: ",") ?? "nil")
+        return op
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -204,8 +217,14 @@ class TerminalScrollView: NSView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard isEffectivelyVisible else { return false }
-        return terminalView.performDragOperation(sender)
+        guard isEffectivelyVisible else {
+            AppLogger.log("terminal-drop", "perform reject: not visible scroll=%@",
+                          ObjectIdentifier(self).debugDescription)
+            return false
+        }
+        let ok = terminalView.performDragOperation(sender)
+        AppLogger.log("terminal-drop", "perform scroll=%@ ok=%d", ObjectIdentifier(self).debugDescription, ok ? 1 : 0)
+        return ok
     }
 }
 

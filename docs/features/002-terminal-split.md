@@ -79,7 +79,8 @@ indirect enum TerminalSplitNode: Equatable {
 
 | 日期 | 说明 |
 |------|------|
-| 2026-08-04 | 修复取消拖拽后终端失去响应：`draggingPaneID` 只在 `performDrop` 成功时清除，Esc 取消 / 拖到窗口外松手 / 拖回源窗格都会让它卡住，非源窗格的 `contentShape` drop overlay 随即永久吃掉点击与文本选择。原兜底挂在 `NSEvent` 的 `.leftMouseUp` 上，但 AppKit 拖拽会话自带事件循环、mouseUp 不经过 `NSApp.sendEvent`，监听器从未触发——改为 `watchForPaneDragEnd` 轮询 `NSEvent.pressedMouseButtons`，那是 SwiftUI `.onDrag` 缺少结束回调时唯一可用的信号 |
+| 2026-08-07 | 三点手柄改为 AppKit `PaneHandleNSView`：`mouseDown` 双击放大/还原，`mouseDragged` 自启 `NSDraggingSession`，结束走 `NSDraggingSource` 回调清状态。SwiftUI `.onTapGesture(count: 2)` + `.onDrag` 互相拆台（延迟 mouseDown 导致 drop 失败；空 NSView overlay 收不到点击），双击放大因此失效 |
+| 2026-08-04 | 修复取消拖拽后终端失去响应：`draggingPaneID` 只在 `performDrop` 成功时清除，Esc 取消 / 拖到窗口外松手 / 拖回源窗格都会让它卡住，非源窗格的 `contentShape` drop overlay 随即永久吃掉点击与文本选择。现由手柄 `NSDraggingSource.draggingSession(_:endedAt:)` 统一清状态 |
 | 2026-08-03 | 项目最后一个 terminal 改为「context 审批成功 → 销毁 surface」；审批失败不再先关 terminal 再留下空 namespace。最大化隐藏 pane 显式移出 accessibility 树 |
 | 2026-08-03 | 三点手柄支持双击放大/还原——放大能力本就存在（`maximizedPaneID` + ⇧⌘↩），缺的只是鼠标入口。手柄改为在放大态也渲染（否则鼠标回不去）并在该态去掉 `.onDrag`；`toggleMaximizeCurrentPane` 加可选 `paneID`，因为手柄是 per-pane 的，点谁放大谁，而不是放大当前焦点 pane |
 | 2026-08-01 | `closeCurrent()` 关掉项目最后一个 tab 时不再补新 tab，改为清空 `activeTabID` 并返回新的 `.projectEmptied`，由宿主把选中态切到 free terminal。上一条的「就地新建 tab」让 `hasTabs` 恒为 true，项目再也无法变成非激活。free terminal 的最后一个 tab 仍返回 `.closeWindow` |

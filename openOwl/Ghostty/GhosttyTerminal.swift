@@ -627,7 +627,9 @@ class TerminalNSView: NSView {
     private static let acceptedDropTypes: Set<NSPasteboard.PasteboardType> = [.fileURL, .URL, .string]
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        NSLog("openOwl: [TerminalNSView] draggingEntered types=%@", sender.draggingPasteboard.types?.map(\.rawValue) ?? [])
+        AppLogger.log("terminal-drop", "terminalview entered view=%@ types=%@",
+                      ObjectIdentifier(self).debugDescription,
+                      sender.draggingPasteboard.types?.map(\.rawValue).joined(separator: ",") ?? "nil")
         guard let types = sender.draggingPasteboard.types,
               !Set(types).isDisjoint(with: Self.acceptedDropTypes) else { return [] }
         return .copy
@@ -647,7 +649,8 @@ class TerminalNSView: NSView {
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         let pb = sender.draggingPasteboard
         guard let surface else {
-            NSLog("openOwl: [Terminal] performDragOperation rejected — no surface (pane not yet initialized)")
+            AppLogger.log("terminal-drop", "perform rejected: no surface view=%@",
+                          ObjectIdentifier(self).debugDescription)
             return false
         }
 
@@ -674,10 +677,8 @@ class TerminalNSView: NSView {
         }
 
         guard let content, !content.isEmpty else {
-            NSLog(
-                "openOwl: [Terminal] performDragOperation rejected — no usable pasteboard content (types=%@)",
-                pb.types?.map(\.rawValue) ?? []
-            )
+            AppLogger.log("terminal-drop", "perform rejected: no usable content types=%@",
+                          pb.types?.map(\.rawValue).joined(separator: ",") ?? "nil")
             return false
         }
         window?.makeFirstResponder(self)
