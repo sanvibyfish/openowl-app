@@ -13,6 +13,8 @@ struct TerminalScrollbarState {
 /// A standalone ScrollIndicatorView shows scroll position from ghostty's SCROLLBAR action.
 class TerminalScrollView: NSView {
     let terminalView: TerminalNSView
+    let paneID: UUID
+    weak var workspace: TerminalWorkspaceStore?
     private let scroller: ScrollIndicatorView
     private var terminalShouldBeVisible = true
 
@@ -33,8 +35,9 @@ class TerminalScrollView: NSView {
     /// Current scrollbar state from ghostty core
     var scrollbarState: TerminalScrollbarState?
 
-    init(terminalView: TerminalNSView) {
+    init(terminalView: TerminalNSView, paneID: UUID) {
         self.terminalView = terminalView
+        self.paneID = paneID
 
         // Custom scroll indicator — a simple rounded bar drawn manually.
         // NSScroller (both overlay and legacy) doesn't render the knob
@@ -54,8 +57,6 @@ class TerminalScrollView: NSView {
             self?.setScrollerInteractionActive(active)
         }
 
-        // Accept file/URL/text drops on this top-level view (SwiftUI hosts this directly)
-        registerForDraggedTypes([.fileURL, .URL, .string])
     }
 
     @available(*, unavailable)
@@ -160,6 +161,15 @@ class TerminalScrollView: NSView {
     func setTerminalVisibility(_ isVisible: Bool) {
         let changed = terminalShouldBeVisible != isVisible
         terminalShouldBeVisible = isVisible
+        if isVisible {
+            // Keep both file drops and pane rearrangement in AppKit. A SwiftUI
+            // drop target above TerminalNSView intercepts normal terminal input.
+            registerForDraggedTypes([.fileURL, .URL, .string, paneDragPasteboardType])
+        } else {
+            // Inactive tabs remain mounted in the ZStack. Leaving them registered
+            // makes AppKit route drags to an invisible pane instead of the visible one.
+            unregisterDraggedTypes()
+        }
         terminalView.setSurfaceVisibility(isVisible)
         guard isVisible, changed else { return }
 
@@ -171,6 +181,51 @@ class TerminalScrollView: NSView {
     // MARK: - Drag & Drop (forwarded to terminalView)
 
     private static let acceptedDropTypes: Set<NSPasteboard.PasteboardType> = [.fileURL, .URL, .string]
+
+    private func isPaneDrag(_ sender: NSDraggingInfo) -> Bool {
+        sender.draggingPasteboard.types?.contains(paneDragPasteboardType) == true
+    }
+
+    private func canAcceptPaneDrag() -> Bool {
+        guard isEffectivelyVisible,
+              let sourceID = workspace?.draggingPaneID else { return false }
+        return sourceID != paneID
+    }
+
+    private func paneDropZone(at windowPoint: NSPoint) -> PaneDropZone {
+        let point = convert(windowPoint, from: nil)
+        guard bounds.width > 0, bounds.height > 0 else { return .center }
+
+        let relX = point.x / bounds.width
+        let relY = point.y / bounds.height
+        let edgeThreshold: CGFloat = 0.3
+
+        if relX < edgeThreshold { return .left }
+        if relX > 1 - edgeThreshold { return .right }
+        // AppKit view coordinates grow upward.
+        if relY > 1 - edgeThreshold { return .top }
+        if relY < edgeThreshold { return .bottom }
+        return .center
+    }
+
+    private func updatePaneDrag(_ sender: NSDraggingInfo) {
+        guard let workspace else { return }
+        let zone = paneDropZone(at: sender.draggingLocation)
+        workspace.dragOverPaneID = paneID
+        if workspace.dropZone != zone {
+            AppLogger.log("pane-drag", "zone changed target=%@ zone=%@",
+                          paneID.uuidString, "\(zone)")
+            workspace.dropZone = zone
+        }
+        workspace.showDropHighlight(targetPaneID: paneID, zone: zone)
+    }
+
+    private func clearPaneDropTarget() {
+        guard let workspace, workspace.dragOverPaneID == paneID else { return }
+        workspace.dragOverPaneID = nil
+        workspace.dropZone = nil
+        workspace.hideDropHighlight()
+    }
 
     /// Reject drags on hidden terminals (opacity=0 via SwiftUI project tab switching).
     /// Without this, AppKit routes drags to invisible views in the ZStack, causing
@@ -201,6 +256,14 @@ class TerminalScrollView: NSView {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if isPaneDrag(sender) {
+            guard canAcceptPaneDrag() else { return [] }
+            AppLogger.log("pane-drag", "dropEntered target=%@ dragging=%@",
+                          paneID.uuidString, workspace?.draggingPaneID?.uuidString ?? "nil")
+            updatePaneDrag(sender)
+            return .move
+        }
+
         let op: NSDragOperation = canAcceptDrag(sender) ? .copy : []
         AppLogger.log("terminal-drop", "entered scroll=%@ op=%@ types=%@",
                       ObjectIdentifier(self).debugDescription, "\(op.rawValue)",
@@ -209,14 +272,40 @@ class TerminalScrollView: NSView {
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        canAcceptDrag(sender) ? .copy : []
+        if isPaneDrag(sender) {
+            guard canAcceptPaneDrag() else { return [] }
+            updatePaneDrag(sender)
+            return .move
+        }
+        return canAcceptDrag(sender) ? .copy : []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        guard sender.map(isPaneDrag) == true else { return }
+        AppLogger.log("pane-drag", "dropExited target=%@", paneID.uuidString)
+        clearPaneDropTarget()
     }
 
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        canAcceptDrag(sender)
+        if isPaneDrag(sender) { return canAcceptPaneDrag() }
+        return canAcceptDrag(sender)
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if isPaneDrag(sender) {
+            guard canAcceptPaneDrag(), let workspace,
+                  let sourceID = workspace.draggingPaneID else { return false }
+            let zone = paneDropZone(at: sender.draggingLocation)
+            AppLogger.log("pane-drag", "performDrop source=%@ target=%@ zone=%@",
+                          sourceID.uuidString, paneID.uuidString, "\(zone)")
+            workspace.movePaneToTarget(sourceID: sourceID, targetID: paneID, zone: zone)
+            workspace.draggingPaneID = nil
+            workspace.dragOverPaneID = nil
+            workspace.dropZone = nil
+            workspace.hideDropHighlight()
+            return true
+        }
+
         guard isEffectivelyVisible else {
             AppLogger.log("terminal-drop", "perform reject: not visible scroll=%@",
                           ObjectIdentifier(self).debugDescription)

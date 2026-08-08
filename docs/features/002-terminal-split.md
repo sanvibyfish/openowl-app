@@ -79,6 +79,7 @@ indirect enum TerminalSplitNode: Equatable {
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-09 | 修复嵌套分屏的 pane 拖拽只能命中部分窗格：pane 主体重排改由每个 `TerminalScrollView` 在 AppKit 层处理，与文件拖入共用原生拖放入口；`PaneHandleNSView` 同样在 AppKit 层接收手柄到手柄的中心交换。不在 `TerminalNSView` 上方挂 SwiftUI drop target。隐藏 tab/pane 同步注销拖放类型，避免不可见终端抢走文件或 pane 拖拽 |
 | 2026-08-07 | 三点手柄改为 AppKit `PaneHandleNSView`：`mouseDown` 双击放大/还原，`mouseDragged` 自启 `NSDraggingSession`，结束走 `NSDraggingSource` 回调清状态。SwiftUI `.onTapGesture(count: 2)` + `.onDrag` 互相拆台（延迟 mouseDown 导致 drop 失败；空 NSView overlay 收不到点击），双击放大因此失效 |
 | 2026-08-04 | 修复取消拖拽后终端失去响应：`draggingPaneID` 只在 `performDrop` 成功时清除，Esc 取消 / 拖到窗口外松手 / 拖回源窗格都会让它卡住，非源窗格的 `contentShape` drop overlay 随即永久吃掉点击与文本选择。现由手柄 `NSDraggingSource.draggingSession(_:endedAt:)` 统一清状态 |
 | 2026-08-03 | 项目最后一个 terminal 改为「context 审批成功 → 销毁 surface」；审批失败不再先关 terminal 再留下空 namespace。最大化隐藏 pane 显式移出 accessibility 树 |
