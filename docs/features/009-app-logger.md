@@ -63,6 +63,7 @@ AppLogger.log("resize-diag", "frame=%.1fx%.1f", width, height)
 - `syncSurfaceSize skipped ... hostVisible=false/tiny ...` 表示 pane 当前隐藏或尺寸未稳定，openOwl 会保留上一次可用 PTY 尺寸，恢复显示后再同步
 - `[file-editor-state] restore-skip ...` 表示 editor tab session 恢复时跳过不存在文件、目录或超过图片解码上限的图片
 - `[pane-drag]` 记录窗格拖拽重排全链路：`drag started` → `dropEntered` / `zone changed` / `dropExited` → `performDrop` 或 `drag cancelled`。非 opt-in（拖拽是低频操作），落盘后可脱离 Xcode 排查拖拽状态残留
+- `[terminal-drop]` 记录 Finder/文件拖进终端链路的每次判定：`entered`（含 pasteboard types 与返回的 op）、`reject: not effectively visible`、`reject: no accepted type`、`perform`（含 ok 结果）。此前 `TerminalScrollView` 拖放方法完全无日志、`TerminalNSView` 走裸 `NSLog`（Release 不持久化），拖图片失败查无痕迹
 
 ## 5. 相关需求
 
@@ -72,6 +73,8 @@ AppLogger.log("resize-diag", "frame=%.1fx%.1f", width, height)
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-08 | 新增 `[terminal-drop]` 拖放链路日志：`TerminalScrollView` 与 `TerminalNSView` 的 `draggingEntered` / `draggingUpdated` / `prepareForDragOperation` / `performDragOperation` 从裸 `NSLog` 或无日志迁移到 `AppLogger`，Release 也落盘。排查拖图片"放不进来"时第一次有据可查 |
+| 2026-08-06 | `emit()` 的 `dateFormatter.string(from:)` 从调用者线程移入 serial queue：`DateFormatter` 非线程安全，并发调用会产生非法 UTF-8，`data(using: .utf8)` 返回 nil 导致整行日志被静默吞掉；还会丢失 `\n`，后续行直接拼在前一行末尾 |
 | 2026-08-04 | 窗格拖拽埋点从裸 `NSLog` 迁到 `AppLogger`（tag `pane-drag`）。之前拖拽日志只进系统日志不落盘，导致排查拖拽 bug 时日志文件里查无此事 |
 | 2026-06-25 | `resize-diag` layout 日志降噪，只记录尺寸变化，避免终端输出热路径重复写日志 |
 | 2026-06-05 | 新增 file-editor-state 示例与恢复跳过语义 |

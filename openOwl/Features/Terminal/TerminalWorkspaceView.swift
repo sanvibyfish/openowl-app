@@ -415,27 +415,15 @@ struct DragZoneHighlightHostView: NSViewRepresentable {
     }
 }
 
-/// Polls the mouse button until the pane drag ends.
+/// Three-dot split handle: double-click maximizes/restores, drag rearranges.
 ///
-/// SwiftUI's `.onDrag` has no drag-ended callback, and an NSEvent monitor is no
-/// help either: once AppKit opens an `NSDraggingSession` it runs its own event
-/// loop and consumes the mouseUp without ever going through `NSApp.sendEvent`.
-/// The button state is the only signal left. Without it a cancelled drag (Esc,
-/// released outside a target, dropped back on the source) leaves
-/// `draggingPaneID` set, and every other pane keeps its `contentShape` drop
-/// overlay — swallowing clicks and text selection until the app restarts.
-private func watchForPaneDragEnd(_ workspace: TerminalWorkspaceStore) {
-    guard NSEvent.pressedMouseButtons == 0 else {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            watchForPaneDragEnd(workspace)
-        }
-        return
-    }
-    // One more hop so a successful drop — AppKit calls performDrop as the
-    // session ends — clears the state first, leaving this a no-op.
-    DispatchQueue.main.async { workspace.cancelDragIfActive() }
-}
-
+/// Interaction lives in AppKit (`PaneHandleNSView`). SwiftUI's
+/// `.onTapGesture(count: 2)` + `.onDrag` cannot coexist — the tap gesture
+/// delays mouseDown and breaks the drag session. A plain NSView overlay with
+/// `NSClickGestureRecognizer` also fails to receive clicks under SwiftUI's
+/// hosting hit-testing. Owning mouseDown/mouseDragged ourselves (same pattern
+/// as ghostty's SurfaceDragSource) gives reliable double-click and a proper
+/// `NSDraggingSession` end callback so cancelled drags clear state.
 private struct PaneDragHandle: View {
     let paneID: UUID
     let isMaximized: Bool
@@ -445,57 +433,159 @@ private struct PaneDragHandle: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // The drag modifier is applied on the branch rather than
-            // conditionally inside one: `.onDrag` has no "disabled" form, and an
-            // empty NSItemProvider would still start a drag with a blank image.
-            if isMaximized {
-                handleBar
-            } else {
-                handleBar.onDrag {
-                    workspace.draggingPaneID = paneID
-                    watchForPaneDragEnd(workspace)
-                    AppLogger.log("pane-drag", "drag started pane=\(paneID.uuidString)")
-                    // Use private UTType — prevents TerminalScrollView (.string acceptor)
-                    // from intercepting this drag through the AppKit layer.
-                    let provider = NSItemProvider()
-                    let data = paneID.uuidString.data(using: .utf8)!
-                    provider.registerDataRepresentation(
-                        forTypeIdentifier: paneDragTypeID,
-                        visibility: .all
-                    ) { completion in completion(data, nil); return nil }
-                    return provider
+            ZStack {
+                PaneHandleInteractionView(
+                    paneID: paneID,
+                    isMaximized: isMaximized,
+                    isHovered: $isHovered
+                )
+
+                HStack(spacing: 3) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        Circle()
+                            .fill(Color.secondary.opacity(isHovered ? 1 : 0.6))
+                            .frame(width: 3, height: 3)
+                    }
                 }
+                .allowsHitTesting(false)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 12)
+            .background(AppPalette.elevated)
+            .help(isMaximized
+                  ? "Double-click to restore split (⇧⌘↩)"
+                  : "Double-click to maximize (⇧⌘↩) · drag to move pane")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(isMaximized ? "Restore split" : "Maximize pane")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction {
+                workspace.toggleMaximizeCurrentPane(paneID: paneID)
             }
 
-            // Bottom separator
             Rectangle()
                 .fill(AppPalette.border)
                 .frame(height: 1)
         }
     }
+}
 
-    private var handleBar: some View {
-        HStack(spacing: 3) {
-            ForEach(0..<3, id: \.self) { _ in
-                Circle()
-                    .fill(Color.secondary.opacity(isHovered ? 1 : 0.6))
-                    .frame(width: 3, height: 3)
-            }
+private struct PaneHandleInteractionView: NSViewRepresentable {
+    let paneID: UUID
+    let isMaximized: Bool
+    @Binding var isHovered: Bool
+
+    @Environment(TerminalWorkspaceStore.self) private var workspace
+
+    func makeNSView(context: Context) -> PaneHandleNSView {
+        let view = PaneHandleNSView()
+        apply(to: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: PaneHandleNSView, context: Context) {
+        apply(to: nsView)
+    }
+
+    private func apply(to view: PaneHandleNSView) {
+        view.paneID = paneID
+        view.isMaximized = isMaximized
+        view.workspace = workspace
+        view.onHoverChanged = { hovering in
+            isHovered = hovering
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 12)
-        .background(AppPalette.elevated)
-        .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
-        // Declared inside the shared bar so it sits below `.onDrag` in the
-        // modifier chain and gets first crack at the click.
-        .onTapGesture(count: 2) {
-            workspace.toggleMaximizeCurrentPane(paneID: paneID)
+    }
+}
+
+/// AppKit hit target for the split handle.
+private final class PaneHandleNSView: NSView, NSDraggingSource {
+    /// Ignore sub-threshold jitter so a double-click still registers.
+    private static let dragThreshold: CGFloat = 4
+
+    var paneID: UUID = UUID()
+    var isMaximized: Bool = false
+    weak var workspace: TerminalWorkspaceStore?
+    var onHoverChanged: ((Bool) -> Void)?
+
+    private var dragSessionActive = false
+    private var mouseDownEvent: NSEvent?
+    private var mouseDownLocation: NSPoint = .zero
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        ))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHoverChanged?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHoverChanged?(false)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount >= 2 {
+            mouseDownEvent = nil
+            AppLogger.log("pane-drag", "handle double-click pane=%@", paneID.uuidString)
+            workspace?.toggleMaximizeCurrentPane(paneID: paneID)
+            return
         }
-        .help(isMaximized
-              ? "Double-click to restore split (⇧⌘↩)"
-              : "Double-click to maximize (⇧⌘↩) · drag to move pane")
-        .accessibilityLabel(isMaximized ? "Restore split" : "Maximize pane")
+        mouseDownEvent = event
+        mouseDownLocation = event.locationInWindow
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard !isMaximized, !dragSessionActive,
+              let mouseDownEvent, let workspace else { return }
+
+        let loc = event.locationInWindow
+        let distance = hypot(loc.x - mouseDownLocation.x, loc.y - mouseDownLocation.y)
+        guard distance >= Self.dragThreshold else { return }
+
+        workspace.draggingPaneID = paneID
+        AppLogger.log("pane-drag", "drag started pane=%@", paneID.uuidString)
+
+        let pbItem = NSPasteboardItem()
+        pbItem.setString(paneID.uuidString, forType: NSPasteboard.PasteboardType(paneDragTypeID))
+        let item = NSDraggingItem(pasteboardWriter: pbItem)
+        item.setDraggingFrame(bounds, contents: nil)
+
+        self.mouseDownEvent = nil
+        dragSessionActive = true
+        let session = beginDraggingSession(with: [item], event: mouseDownEvent, source: self)
+        session.animatesToStartingPositionsOnCancelOrFail = false
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        mouseDownEvent = nil
+    }
+
+    // MARK: NSDraggingSource
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        sourceOperationMaskFor context: NSDraggingContext
+    ) -> NSDragOperation {
+        context == .withinApplication ? .move : []
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        dragSessionActive = false
+        // Success path: PaneDropDelegate.cleanup already cleared state.
+        // Cancel / outside / back-on-source: clear here so drop overlays unmount.
+        workspace?.cancelDragIfActive()
     }
 }
 

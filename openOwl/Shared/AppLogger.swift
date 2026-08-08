@@ -58,10 +58,11 @@ enum AppLogger {
     }
 
     private static func emit(_ tag: String, _ message: String) {
-        let timestamp = dateFormatter.string(from: Date())
-        let line = "\(timestamp) [\(tag)] \(message)\n"
+        let now = Date()
         NSLog("openOwl: [%@] %@", tag, message)
         queue.async {
+            let timestamp = dateFormatter.string(from: now)
+            let line = "\(timestamp) [\(tag)] \(message)\n"
             writeToFile(line)
         }
     }
