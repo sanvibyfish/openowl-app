@@ -24,6 +24,7 @@
 | 008 | Right Dock + 独立 Terminals | ✅ Done | [008-right-dock.md](008-right-dock.md) |
 | 009 | 文件日志系统 (AppLogger) | ✅ Done | [009-app-logger.md](009-app-logger.md) |
 | 010 | 进程资源异常监控 | 🟡 In Progress | [010-resource-monitor.md](010-resource-monitor.md) |
+| 011 | Ghostty 风格终端 AppleScript 控制 | ✅ Done | [011-terminal-applescript.md](011-terminal-applescript.md) |
 
 ## 分类
 
@@ -31,6 +32,7 @@
 
 - [001-libghostty-integration.md](001-libghostty-integration.md) — libghostty 集成方式、C API 桥接、Metal 渲染
 - [002-terminal-split.md](002-terminal-split.md) — 多标签 + 二叉树分屏、焦点导航、窗格拖拽
+- [011-terminal-applescript.md](011-terminal-applescript.md) — Ghostty 风格对象模型、稳定 ID、surface configuration 与原生 Pane 自动化
 
 ### Git
 
@@ -59,6 +61,9 @@
                     ──→ 004-file-explorer
 
 002-terminal-split ──→ 001-libghostty-integration
+011-terminal-applescript ──→ 001-libghostty-integration
+                         ──→ 002-terminal-split
+                         ──→ 008-right-dock
 010-resource-monitor ──→ 009-app-logger
 ```
 
@@ -75,3 +80,4 @@
 | 2026-07-28 | 006/008：左侧改为 Muxy 风格 Project Rail，移除宽 NavigationSplitView 侧栏 |
 | 2026-07-30 | 004/006：强化编辑器异步读取提交门禁与交互状态保持，并统一 worktree 归档并发 guard |
 | 2026-07-31 | 004/006/008：同步 editor context preflight、持久化保护、Right Dock 常驻与 resize 中断语义 |
+| 2026-08-09 | 加入 011 Ghostty 风格终端 AppleScript 控制（实现与验收完成） |

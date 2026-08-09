@@ -12,8 +12,10 @@
 		03E4037BB16E1CAFAD0AAB1A /* GhosttyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9FDFE104B8726AFD0EF477D /* GhosttyConfig.swift */; };
 		05AC7232364220B07F6B1EB0 /* GhosttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73CF89807648285D325F0F65 /* GhosttyApp.swift */; };
 		06EF6FC70AE06D5D9FB2EE60 /* TerminalSurfaceRetentionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21DD4CFA52278B0DEC5F0003 /* TerminalSurfaceRetentionTests.swift */; };
+		0C4C5FD6D4339741C90633BE /* OpenOwlScriptSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B4BF96596776B42B728A4BA /* OpenOwlScriptSupport.swift */; };
 		1B8510A1B037F58C77A70E55 /* TerminalNamespaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D9C4F6213AD81E8DDF041EE /* TerminalNamespaceTests.swift */; };
 		1BD4F2C33F69F3A58B4049E9 /* TerminalSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C041C1F34801BF486A888B46 /* TerminalSearchTests.swift */; };
+		1EA69FEFECCF88BD38CD674B /* OpenOwlScriptTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9595BA823992D72334FE8E14 /* OpenOwlScriptTab.swift */; };
 		23E85236BE44285F65D1E92F /* FileIconsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F84090706181BCE2FB1AF47 /* FileIconsTests.swift */; };
 		253B536A97052112FD46B3FF /* GitChangesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C7B0DBA130E23B413EA3A8 /* GitChangesView.swift */; };
 		25638B8C67FB225663CCE5A1 /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6892EC597E859C6C89747657 /* BookmarkStore.swift */; };
@@ -41,20 +43,26 @@
 		5E3BD234948BA7E23B411AFC /* openOwlApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CB54138411E7B198A089C5F /* openOwlApp.swift */; };
 		60B99CB7A678B3FF5849F23B /* TerminalSearchOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB671E763D87E90D400A8ED9 /* TerminalSearchOverlay.swift */; };
 		62C2E9297DE3DE2DA8FE87D3 /* FileExplorerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12AC90A655D11BC8410328FD /* FileExplorerStore.swift */; };
+		64824CF44F9B3337E2B9C310 /* GhosttyAppleScriptNotice.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8FAE6BF5140BF5128C60847 /* GhosttyAppleScriptNotice.swift */; };
+		68788EBB23DEB13BEE399A1A /* OpenOwlScriptWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3AE9C141F2A562E6ED6297B /* OpenOwlScriptWindow.swift */; };
 		68E8E1B4A11A9861636A80B3 /* BranchNameGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C32FF68B777207179BFEFB0 /* BranchNameGenerator.swift */; };
 		6BB859A04E634B0BEF110C32 /* ProjectSessionList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 154F9C01C1F87B15DA5F1AC3 /* ProjectSessionList.swift */; };
 		6BBD6B72F4001B15A9D35F94 /* SpinningIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61BBAD397E75BD6423E0EB63 /* SpinningIcon.swift */; };
 		6BD87F1582F09A111CA1DAEE /* GitServiceParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00AF40C4BACE1CDD1ECD6157 /* GitServiceParsingTests.swift */; };
 		72D67EA4C8D4364F538AC3BA /* FreeTerminalTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5533A6D4B3B1811FF42BB1D1 /* FreeTerminalTabBar.swift */; };
+		76614BF00160F7D55908ADBD /* AppleScriptTerminalControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 419DD400A66E6A28C6F5DDAA /* AppleScriptTerminalControlTests.swift */; };
 		78E88DA5D9EE3022602988FB /* TerminalSplitNodeExtraTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46C97B681433B80851C4C8B2 /* TerminalSplitNodeExtraTests.swift */; };
+		81891F00FAE35519BF05DC49 /* OpenOwlScriptInputTextCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9BBA0458FAE44C6C23D13F3 /* OpenOwlScriptInputTextCommand.swift */; };
 		84210C57D43532E520A69243 /* TerminalKeyboardRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56EC8F9FC165C061D79F5952 /* TerminalKeyboardRoutingTests.swift */; };
 		8542D038455206037150C4FE /* RightDockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D143F488B97B650DE80654CB /* RightDockView.swift */; };
 		882EAAE1592A1A4FCB1A169A /* ScrollIndicatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE6FF0B33095CC35D7533713 /* ScrollIndicatorTests.swift */; };
 		8A11FA4EFF26B2E2418120DE /* FileExplorerErrorHandlingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A99EEE47269D739DF84C40 /* FileExplorerErrorHandlingTests.swift */; };
 		8F5B22333611B8EB7B1D3000 /* ProjectRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20D59796FBA02BB2C2D2CB5 /* ProjectRail.swift */; };
 		9121D7764A3A9AB908307340 /* ghostty-resources in Resources */ = {isa = PBXBuildFile; fileRef = 35BDC16C9BB8A7EF4C33FEE8 /* ghostty-resources */; };
+		A0EBFC9CAF76CC9E533CB961 /* openOwl.sdef in Resources */ = {isa = PBXBuildFile; fileRef = CE0A597E1EC1F43E6575658B /* openOwl.sdef */; };
 		A1A33C96E8CE7B33C8C44339 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 56D3EFADA4D64C3ABBF4887E /* Assets.xcassets */; };
 		A2747B4F72892C3434D61AFD /* ProjectStorePersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F55B1F7B1BFEBE824E839A54 /* ProjectStorePersistenceTests.swift */; };
+		A4FB5C4173C676E4791465AB /* OpenOwlScriptTerminal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27014DFFC5FB2EA0E96C6B5B /* OpenOwlScriptTerminal.swift */; };
 		A831242FE45B5FDEC78DD834 /* GhosttyTerminal.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3210995F6EB34D444A49815 /* GhosttyTerminal.swift */; };
 		B688B8E2534656369B51C04E /* OutlineTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E712E0676CA92A36194A3A3E /* OutlineTreeView.swift */; };
 		B6BB3580C221F10DBB012FCA /* TerminalSplitNodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1ACD5DC9423F0D31646990E /* TerminalSplitNodeTests.swift */; };
@@ -63,14 +71,17 @@
 		BF6B6B2E42E2713F6F298006 /* QuickOpenSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98E3B22B024A5CF89AEF09F0 /* QuickOpenSheet.swift */; };
 		C519F9EA87A6C9634B6330C5 /* ResourceMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00DAEBF29B433B2E5D08B1FB /* ResourceMonitorTests.swift */; };
 		C8103406C7769B2B19CF90A5 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38E541F2A395A5EB308D9C38 /* Constants.swift */; };
+		CA4AFC34CA8758696F61EC58 /* NSApplication+AppleScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC2A87338545E6774A2E78BC /* NSApplication+AppleScript.swift */; };
 		CB4F833D9F18065300936BAB /* GitServiceWorktreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A67F7E3F270286352D95F0 /* GitServiceWorktreeTests.swift */; };
 		CCF135004AC2388F113EE300 /* FileIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7453D913EA60163D2B5E6D2 /* FileIcons.swift */; };
 		CD05B57A6A79E3908340A545 /* TerminalSearchState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD76FBFB96CF78FA6A6B167C /* TerminalSearchState.swift */; };
 		D22473C2BCB4E577E5447A08 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 490E3122E814DA28B0734EF6 /* ContentView.swift */; };
 		D3A330C500889DCBF61B4CA0 /* CodeEditSourceEditor in Frameworks */ = {isa = PBXBuildFile; productRef = AE1D15AD458D2BC516FC7BCE /* CodeEditSourceEditor */; };
+		D4E0202304DEB18FD601BAC5 /* AppDelegate+AppleScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43761720F62A8ECE8D6EA9C3 /* AppDelegate+AppleScript.swift */; };
 		D79A8C2EED7A6227E6DFF3AD /* RightDockStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 482BCD458AD47827F0591A74 /* RightDockStore.swift */; };
 		D8FC95FBDD4287532684B9F3 /* GitChangesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C602586627CCE3EB2977A5E /* GitChangesStore.swift */; };
 		DB321C5D9D0B1ED20AF1B5C3 /* ProjectStoreFreeTerminalsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D8EB9056F0398E50CA36087 /* ProjectStoreFreeTerminalsTests.swift */; };
+		DF1F537D95D60F5982775E65 /* Ghostty-AppleScript-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 37C4BD3EC95537DBA5896D07 /* Ghostty-AppleScript-LICENSE.txt */; };
 		E26D6EB03ADF4440FEECCD35 /* TerminalPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C4F7D15DDB411EB83184BAD /* TerminalPanel.swift */; };
 		E2858524718C2F8850AE2DE9 /* BranchNameGeneratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5BCF2DFA7863BDF0B13FA97 /* BranchNameGeneratorTests.swift */; };
 		E3A2575D11E17CF509A2CA38 /* FileExplorerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C85221AB69D1FBEA8FB4B809 /* FileExplorerView.swift */; };
@@ -108,16 +119,21 @@
 		10A99EEE47269D739DF84C40 /* FileExplorerErrorHandlingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileExplorerErrorHandlingTests.swift; sourceTree = "<group>"; };
 		12AC90A655D11BC8410328FD /* FileExplorerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileExplorerStore.swift; sourceTree = "<group>"; };
 		154F9C01C1F87B15DA5F1AC3 /* ProjectSessionList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSessionList.swift; sourceTree = "<group>"; };
+		1B4BF96596776B42B728A4BA /* OpenOwlScriptSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenOwlScriptSupport.swift; sourceTree = "<group>"; };
 		217AE27F0A3DE1C89E12F04E /* OutlineTreeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutlineTreeViewController.swift; sourceTree = "<group>"; };
 		21D628067CD85F2271ABAA1F /* openOwl.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = openOwl.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		21DD4CFA52278B0DEC5F0003 /* TerminalSurfaceRetentionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurfaceRetentionTests.swift; sourceTree = "<group>"; };
 		25682E8CB84A6D92095A3762 /* openOwl-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "openOwl-Bridging-Header.h"; sourceTree = "<group>"; };
+		27014DFFC5FB2EA0E96C6B5B /* OpenOwlScriptTerminal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenOwlScriptTerminal.swift; sourceTree = "<group>"; };
 		2CB54138411E7B198A089C5F /* openOwlApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = openOwlApp.swift; sourceTree = "<group>"; };
 		2ECB0AF2C7F4EFE398EA47EA /* GlassCompat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassCompat.swift; sourceTree = "<group>"; };
 		35BDC16C9BB8A7EF4C33FEE8 /* ghostty-resources */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "ghostty-resources"; sourceTree = SOURCE_ROOT; };
+		37C4BD3EC95537DBA5896D07 /* Ghostty-AppleScript-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Ghostty-AppleScript-LICENSE.txt"; sourceTree = "<group>"; };
 		38E541F2A395A5EB308D9C38 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		3C32FF68B777207179BFEFB0 /* BranchNameGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BranchNameGenerator.swift; sourceTree = "<group>"; };
 		3EA6C0B7C4F7B3B1E84C0C91 /* BookmarkStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkStoreTests.swift; sourceTree = "<group>"; };
+		419DD400A66E6A28C6F5DDAA /* AppleScriptTerminalControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleScriptTerminalControlTests.swift; sourceTree = "<group>"; };
+		43761720F62A8ECE8D6EA9C3 /* AppDelegate+AppleScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+AppleScript.swift"; sourceTree = "<group>"; };
 		46C97B681433B80851C4C8B2 /* TerminalSplitNodeExtraTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSplitNodeExtraTests.swift; sourceTree = "<group>"; };
 		47FBEED930CEBFE305680520 /* SelectableRowChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectableRowChrome.swift; sourceTree = "<group>"; };
 		482BCD458AD47827F0591A74 /* RightDockStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RightDockStore.swift; sourceTree = "<group>"; };
@@ -146,6 +162,7 @@
 		8DE94F3F69D57F740DD9C966 /* GhosttyInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyInput.swift; sourceTree = "<group>"; };
 		8EB4866085EB54B9C129F121 /* RightDockStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RightDockStoreTests.swift; sourceTree = "<group>"; };
 		938F89967F54EF40EA4AE7FE /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
+		9595BA823992D72334FE8E14 /* OpenOwlScriptTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenOwlScriptTab.swift; sourceTree = "<group>"; };
 		98E3B22B024A5CF89AEF09F0 /* QuickOpenSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickOpenSheet.swift; sourceTree = "<group>"; };
 		9F84090706181BCE2FB1AF47 /* FileIconsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileIconsTests.swift; sourceTree = "<group>"; };
 		A7453D913EA60163D2B5E6D2 /* FileIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileIcons.swift; sourceTree = "<group>"; };
@@ -165,10 +182,15 @@
 		C39D7120D769F3D4DF10E3C6 /* SplitDiffByFileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitDiffByFileTests.swift; sourceTree = "<group>"; };
 		C4E0BCEA1E40509CACA5F04D /* TerminalWorkspaceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceStore.swift; sourceTree = "<group>"; };
 		C85221AB69D1FBEA8FB4B809 /* FileExplorerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileExplorerView.swift; sourceTree = "<group>"; };
+		C8FAE6BF5140BF5128C60847 /* GhosttyAppleScriptNotice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyAppleScriptNotice.swift; sourceTree = "<group>"; };
+		CC2A87338545E6774A2E78BC /* NSApplication+AppleScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSApplication+AppleScript.swift"; sourceTree = "<group>"; };
+		CE0A597E1EC1F43E6575658B /* openOwl.sdef */ = {isa = PBXFileReference; path = openOwl.sdef; sourceTree = "<group>"; };
 		D143F488B97B650DE80654CB /* RightDockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RightDockView.swift; sourceTree = "<group>"; };
 		D3F88A4C649AE808F422E1D1 /* SectionTitle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionTitle.swift; sourceTree = "<group>"; };
+		D9BBA0458FAE44C6C23D13F3 /* OpenOwlScriptInputTextCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenOwlScriptInputTextCommand.swift; sourceTree = "<group>"; };
 		DB671E763D87E90D400A8ED9 /* TerminalSearchOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSearchOverlay.swift; sourceTree = "<group>"; };
 		E20D59796FBA02BB2C2D2CB5 /* ProjectRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectRail.swift; sourceTree = "<group>"; };
+		E3AE9C141F2A562E6ED6297B /* OpenOwlScriptWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenOwlScriptWindow.swift; sourceTree = "<group>"; };
 		E6BFB8B2686ECAE673F0ACA6 /* UpdateAlertView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateAlertView.swift; sourceTree = "<group>"; };
 		E712E0676CA92A36194A3A3E /* OutlineTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutlineTreeView.swift; sourceTree = "<group>"; };
 		EA86C7ADE1E696F8BF004DAD /* NotificationNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationNames.swift; sourceTree = "<group>"; };
@@ -198,6 +220,7 @@
 		04C93BCA620B1CDC8170910E /* openOwlTests */ = {
 			isa = PBXGroup;
 			children = (
+				419DD400A66E6A28C6F5DDAA /* AppleScriptTerminalControlTests.swift */,
 				3EA6C0B7C4F7B3B1E84C0C91 /* BookmarkStoreTests.swift */,
 				F5BCF2DFA7863BDF0B13FA97 /* BranchNameGeneratorTests.swift */,
 				10A99EEE47269D739DF84C40 /* FileExplorerErrorHandlingTests.swift */,
@@ -250,6 +273,7 @@
 		31FEC93EF6867CC4561BCB6B /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				3D4A58E98DD146B6FF542CBA /* AppleScript */,
 				EBC783796EA12BFD733DB048 /* FileExplorer */,
 				FCB43E15D5030AD0BAE059B7 /* Git */,
 				A42DBE2934B7553AB080C73B /* RightDock */,
@@ -258,6 +282,21 @@
 				A305209820E9D4A628147E13 /* Terminal */,
 			);
 			path = Features;
+			sourceTree = "<group>";
+		};
+		3D4A58E98DD146B6FF542CBA /* AppleScript */ = {
+			isa = PBXGroup;
+			children = (
+				43761720F62A8ECE8D6EA9C3 /* AppDelegate+AppleScript.swift */,
+				C8FAE6BF5140BF5128C60847 /* GhosttyAppleScriptNotice.swift */,
+				CC2A87338545E6774A2E78BC /* NSApplication+AppleScript.swift */,
+				D9BBA0458FAE44C6C23D13F3 /* OpenOwlScriptInputTextCommand.swift */,
+				1B4BF96596776B42B728A4BA /* OpenOwlScriptSupport.swift */,
+				9595BA823992D72334FE8E14 /* OpenOwlScriptTab.swift */,
+				27014DFFC5FB2EA0E96C6B5B /* OpenOwlScriptTerminal.swift */,
+				E3AE9C141F2A562E6ED6297B /* OpenOwlScriptWindow.swift */,
+			);
+			path = AppleScript;
 			sourceTree = "<group>";
 		};
 		3E575D63BC811B7F7E1158B3 /* Services */ = {
@@ -287,7 +326,9 @@
 		5A041046B6292B56FDBC5B40 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				37C4BD3EC95537DBA5896D07 /* Ghostty-AppleScript-LICENSE.txt */,
 				B0AADF796FB02C8E6D5B25A2 /* Info.plist */,
+				CE0A597E1EC1F43E6575658B /* openOwl.sdef */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -493,7 +534,9 @@
 			files = (
 				5729326DB2DB723A977828AB /* AppIcon.icns in Resources */,
 				A1A33C96E8CE7B33C8C44339 /* Assets.xcassets in Resources */,
+				DF1F537D95D60F5982775E65 /* Ghostty-AppleScript-LICENSE.txt in Resources */,
 				9121D7764A3A9AB908307340 /* ghostty-resources in Resources */,
+				A0EBFC9CAF76CC9E533CB961 /* openOwl.sdef in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -504,6 +547,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				76614BF00160F7D55908ADBD /* AppleScriptTerminalControlTests.swift in Sources */,
 				F7A0E506981153607E812058 /* BookmarkStoreTests.swift in Sources */,
 				E2858524718C2F8850AE2DE9 /* BranchNameGeneratorTests.swift in Sources */,
 				8A11FA4EFF26B2E2418120DE /* FileExplorerErrorHandlingTests.swift in Sources */,
@@ -536,6 +580,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D4E0202304DEB18FD601BAC5 /* AppDelegate+AppleScript.swift in Sources */,
 				BBD5731ED2E2CA722DF77BA0 /* AppDelegate.swift in Sources */,
 				4D9AE12397A51C88BD1D3B4F /* AppLogger.swift in Sources */,
 				25638B8C67FB225663CCE5A1 /* BookmarkStore.swift in Sources */,
@@ -550,6 +595,7 @@
 				EC8DF83DFD73AE2330E7E2E5 /* FileWatcher.swift in Sources */,
 				72D67EA4C8D4364F538AC3BA /* FreeTerminalTabBar.swift in Sources */,
 				05AC7232364220B07F6B1EB0 /* GhosttyApp.swift in Sources */,
+				64824CF44F9B3337E2B9C310 /* GhosttyAppleScriptNotice.swift in Sources */,
 				03E4037BB16E1CAFAD0AAB1A /* GhosttyConfig.swift in Sources */,
 				353D99F512065C7E8FD7EDFB /* GhosttyInput.swift in Sources */,
 				A831242FE45B5FDEC78DD834 /* GhosttyTerminal.swift in Sources */,
@@ -558,7 +604,13 @@
 				5CB8CC71803498A3BE67CF5A /* GitService.swift in Sources */,
 				5639D1BC18ACAAA2A02228CA /* GlassCompat.swift in Sources */,
 				3D99003D3AD31CD33007EFFC /* IconButtonStyle.swift in Sources */,
+				CA4AFC34CA8758696F61EC58 /* NSApplication+AppleScript.swift in Sources */,
 				4EB8B6468815663DFB8126CA /* NotificationNames.swift in Sources */,
+				81891F00FAE35519BF05DC49 /* OpenOwlScriptInputTextCommand.swift in Sources */,
+				0C4C5FD6D4339741C90633BE /* OpenOwlScriptSupport.swift in Sources */,
+				1EA69FEFECCF88BD38CD674B /* OpenOwlScriptTab.swift in Sources */,
+				A4FB5C4173C676E4791465AB /* OpenOwlScriptTerminal.swift in Sources */,
+				68788EBB23DEB13BEE399A1A /* OpenOwlScriptWindow.swift in Sources */,
 				01839507C6B1B5EB49B8DEFD /* OutlineTreeCellView.swift in Sources */,
 				B688B8E2534656369B51C04E /* OutlineTreeView.swift in Sources */,
 				F79004DAFFCFE7A81C3C8061 /* OutlineTreeViewController.swift in Sources */,

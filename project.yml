@@ -31,6 +31,12 @@ targets:
       - path: openOwl
         excludes:
           - "**/*.entitlements"
+          - Resources/Ghostty-AppleScript-LICENSE.txt
+          - Resources/openOwl.sdef
+      - path: openOwl/Resources/openOwl.sdef
+        buildPhase: resources
+      - path: openOwl/Resources/Ghostty-AppleScript-LICENSE.txt
+        buildPhase: resources
       - path: ghostty-resources
         type: folder
         buildPhase: resources
