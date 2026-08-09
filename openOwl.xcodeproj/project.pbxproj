@@ -22,7 +22,6 @@
 		2F7B5276A453883804B6D37C /* GitCommitParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0940CC16A5382882D30EBAFD /* GitCommitParsingTests.swift */; };
 		300A0C58F3CD4221DD347BEA /* RightDockStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EB4866085EB54B9C129F121 /* RightDockStoreTests.swift */; };
 		3140A88752300CC5AE03A433 /* FileExplorerGitPropagationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC7E472A3BF6DAE6E5623511 /* FileExplorerGitPropagationTests.swift */; };
-		31D8FE742A5D4C7DA94327BA /* CommitMessageGeneratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31D8FE732A5D4C7DA94327BA /* CommitMessageGeneratorTests.swift */; };
 		353D99F512065C7E8FD7EDFB /* GhosttyInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DE94F3F69D57F740DD9C966 /* GhosttyInput.swift */; };
 		3D99003D3AD31CD33007EFFC /* IconButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 552C03468C64C29EEA14DE99 /* IconButtonStyle.swift */; };
 		4637838D393C5D4F441A50E0 /* FileExplorerParsingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC6E1BF43BA95A17177F2788 /* FileExplorerParsingTests.swift */; };
@@ -79,6 +78,7 @@
 		D22473C2BCB4E577E5447A08 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 490E3122E814DA28B0734EF6 /* ContentView.swift */; };
 		D3A330C500889DCBF61B4CA0 /* CodeEditSourceEditor in Frameworks */ = {isa = PBXBuildFile; productRef = AE1D15AD458D2BC516FC7BCE /* CodeEditSourceEditor */; };
 		D4E0202304DEB18FD601BAC5 /* AppDelegate+AppleScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43761720F62A8ECE8D6EA9C3 /* AppDelegate+AppleScript.swift */; };
+		D777EC70FD82962AE8CEE4A1 /* CommitMessageGeneratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A052747B8741B9905D324367 /* CommitMessageGeneratorTests.swift */; };
 		D79A8C2EED7A6227E6DFF3AD /* RightDockStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 482BCD458AD47827F0591A74 /* RightDockStore.swift */; };
 		D8FC95FBDD4287532684B9F3 /* GitChangesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C602586627CCE3EB2977A5E /* GitChangesStore.swift */; };
 		DB321C5D9D0B1ED20AF1B5C3 /* ProjectStoreFreeTerminalsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D8EB9056F0398E50CA36087 /* ProjectStoreFreeTerminalsTests.swift */; };
@@ -129,7 +129,6 @@
 		27014DFFC5FB2EA0E96C6B5B /* OpenOwlScriptTerminal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenOwlScriptTerminal.swift; sourceTree = "<group>"; };
 		2CB54138411E7B198A089C5F /* openOwlApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = openOwlApp.swift; sourceTree = "<group>"; };
 		2ECB0AF2C7F4EFE398EA47EA /* GlassCompat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassCompat.swift; sourceTree = "<group>"; };
-		31D8FE732A5D4C7DA94327BA /* CommitMessageGeneratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitMessageGeneratorTests.swift; sourceTree = "<group>"; };
 		35BDC16C9BB8A7EF4C33FEE8 /* ghostty-resources */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "ghostty-resources"; sourceTree = SOURCE_ROOT; };
 		37C4BD3EC95537DBA5896D07 /* Ghostty-AppleScript-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Ghostty-AppleScript-LICENSE.txt"; sourceTree = "<group>"; };
 		38E541F2A395A5EB308D9C38 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
@@ -169,6 +168,7 @@
 		9839FF7051C06D934EAAA61F /* GitChangesStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitChangesStoreTests.swift; sourceTree = "<group>"; };
 		98E3B22B024A5CF89AEF09F0 /* QuickOpenSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickOpenSheet.swift; sourceTree = "<group>"; };
 		9F84090706181BCE2FB1AF47 /* FileIconsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileIconsTests.swift; sourceTree = "<group>"; };
+		A052747B8741B9905D324367 /* CommitMessageGeneratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitMessageGeneratorTests.swift; sourceTree = "<group>"; };
 		A7453D913EA60163D2B5E6D2 /* FileIcons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileIcons.swift; sourceTree = "<group>"; };
 		AAF45F9E4541BB9F66DC113E /* PanelDivider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelDivider.swift; sourceTree = "<group>"; };
 		AB19182518A4ECF2CB2EFE7D /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
@@ -227,7 +227,7 @@
 				419DD400A66E6A28C6F5DDAA /* AppleScriptTerminalControlTests.swift */,
 				3EA6C0B7C4F7B3B1E84C0C91 /* BookmarkStoreTests.swift */,
 				F5BCF2DFA7863BDF0B13FA97 /* BranchNameGeneratorTests.swift */,
-				31D8FE732A5D4C7DA94327BA /* CommitMessageGeneratorTests.swift */,
+				A052747B8741B9905D324367 /* CommitMessageGeneratorTests.swift */,
 				10A99EEE47269D739DF84C40 /* FileExplorerErrorHandlingTests.swift */,
 				AC7E472A3BF6DAE6E5623511 /* FileExplorerGitPropagationTests.swift */,
 				AC6E1BF43BA95A17177F2788 /* FileExplorerParsingTests.swift */,
@@ -556,7 +556,7 @@
 				76614BF00160F7D55908ADBD /* AppleScriptTerminalControlTests.swift in Sources */,
 				F7A0E506981153607E812058 /* BookmarkStoreTests.swift in Sources */,
 				E2858524718C2F8850AE2DE9 /* BranchNameGeneratorTests.swift in Sources */,
-				31D8FE742A5D4C7DA94327BA /* CommitMessageGeneratorTests.swift in Sources */,
+				D777EC70FD82962AE8CEE4A1 /* CommitMessageGeneratorTests.swift in Sources */,
 				8A11FA4EFF26B2E2418120DE /* FileExplorerErrorHandlingTests.swift in Sources */,
 				3140A88752300CC5AE03A433 /* FileExplorerGitPropagationTests.swift in Sources */,
 				4637838D393C5D4F441A50E0 /* FileExplorerParsingTests.swift in Sources */,
@@ -757,7 +757,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = openOwl/Resources/openOwl.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(PROJECT_DIR)",
 				);
@@ -775,7 +775,7 @@
 				LIBRARY_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
-				MARKETING_VERSION = 1.1.4;
+				MARKETING_VERSION = 1.1.5;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-framework Metal",
@@ -804,7 +804,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconDev;
 				CODE_SIGN_ENTITLEMENTS = openOwl/Resources/openOwl.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(PROJECT_DIR)",
 				);
@@ -822,7 +822,7 @@
 				LIBRARY_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
-				MARKETING_VERSION = 1.1.4;
+				MARKETING_VERSION = 1.1.5;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-framework Metal",
