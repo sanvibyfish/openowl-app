@@ -114,9 +114,11 @@ final class OutlineTreeCellView: NSTableCellView {
         // Name
         if isRenaming {
             nameField.isEditable = true
-            nameField.isBezeled = false
+            nameField.isBezeled = true
+            nameField.bezelStyle = .roundedBezel
             nameField.drawsBackground = true
-            nameField.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.15)
+            nameField.backgroundColor = .textBackgroundColor
+            nameField.textColor = .controlTextColor
             nameField.focusRingType = .exterior
             nameField.stringValue = node.name
             nameField.delegate = self
@@ -128,9 +130,12 @@ final class OutlineTreeCellView: NSTableCellView {
             nameField.isEditable = false
             nameField.isBezeled = false
             nameField.drawsBackground = false
+            nameField.focusRingType = .default
             nameField.stringValue = node.name
             nameField.textColor = Self.gitColor(for: node.gitState) ?? .labelColor
             nameField.delegate = nil
+            nameField.target = nil
+            nameField.action = nil
         }
 
         // Git badge (files show letter code, directories show dot indicator)
@@ -179,7 +184,14 @@ final class OutlineTreeCellView: NSTableCellView {
 
     @objc private func stageClicked() { onStage?() }
     @objc private func discardClicked() { onDiscard?() }
-    @objc private func renameCommitted() { onCommitRename?(nameField.stringValue) }
+    @objc private func renameCommitted() {
+        let newName = nameField.stringValue
+        if let node = currentNode {
+            configure(node: node, isRenaming: false)
+        }
+        window?.makeFirstResponder(superview)
+        onCommitRename?(newName)
+    }
 
     // MARK: - Helpers
 
@@ -205,14 +217,8 @@ final class OutlineTreeCellView: NSTableCellView {
 extension OutlineTreeCellView: NSTextFieldDelegate {
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
-            // Escape — cancel rename, reset all visual state
-            nameField.isEditable = false
-            nameField.isBezeled = false
-            nameField.drawsBackground = false
-            nameField.focusRingType = .default
             if let node = currentNode {
-                nameField.stringValue = node.name
-                nameField.textColor = Self.gitColor(for: node.gitState) ?? .labelColor
+                configure(node: node, isRenaming: false)
             }
             onCancelRename?()
             window?.makeFirstResponder(superview) // return focus to outline view
