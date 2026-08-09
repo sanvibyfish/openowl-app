@@ -74,6 +74,8 @@ final class FileExplorerStore {
     private(set) var projectURL: URL?
     private(set) var rootNodes: [FileExplorerNode] = []
     private(set) var isRefreshing = false
+    private var refreshRequestedWhileRefreshing = false
+    private(set) var fileSystemRevision = 0
     var selectedNodeID: String?
     private(set) var previewState: FilePreviewState = .none
     var errorMessage: String?
@@ -506,7 +508,10 @@ final class FileExplorerStore {
     }
 
     private func refresh() async {
-        guard !isRefreshing else { return }
+        guard !isRefreshing else {
+            refreshRequestedWhileRefreshing = true
+            return
+        }
         guard let projectURL else {
             rootNodes = []
             nodeIndex = [:]
@@ -515,7 +520,13 @@ final class FileExplorerStore {
         }
 
         isRefreshing = true
-        defer { isRefreshing = false }
+        defer {
+            isRefreshing = false
+            if refreshRequestedWhileRefreshing {
+                refreshRequestedWhileRefreshing = false
+                refreshNow()
+            }
+        }
 
         let capturedURL = projectURL
         let t0 = CFAbsoluteTimeGetCurrent()
@@ -572,11 +583,20 @@ final class FileExplorerStore {
     /// Background-only refresh: skip shallow scan, only update git status.
     /// Used when cache already provides the tree — avoids flashing the UI.
     private func refreshFullOnly() async {
-        guard !isRefreshing else { return }
+        guard !isRefreshing else {
+            refreshRequestedWhileRefreshing = true
+            return
+        }
         guard let projectURL else { return }
 
         isRefreshing = true
-        defer { isRefreshing = false }
+        defer {
+            isRefreshing = false
+            if refreshRequestedWhileRefreshing {
+                refreshRequestedWhileRefreshing = false
+                refreshNow()
+            }
+        }
 
         let capturedURL = projectURL
         let t1 = CFAbsoluteTimeGetCurrent()
@@ -621,7 +641,9 @@ final class FileExplorerStore {
         guard let projectURL else { return }
 
         watcher = FileWatcher(directoryURL: projectURL) { [weak self] in
-            self?.refreshNow()
+            guard let self else { return }
+            fileSystemRevision &+= 1
+            refreshNow()
         }
         if watcher == nil {
             NSLog("openOwl: [FileExplorer] FileWatcher init failed for %@ — auto-refresh unavailable",

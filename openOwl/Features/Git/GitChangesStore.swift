@@ -12,6 +12,7 @@ final class GitChangesStore {
     var commitMessage: String = ""
 
     private(set) var isRefreshing = false
+    private var refreshRequestedWhileRefreshing = false
     private(set) var isRunningCommand = false
     var errorMessage: String?
     var infoMessage: String?
@@ -22,6 +23,8 @@ final class GitChangesStore {
     private(set) var hasMoreLog = true
     private(set) var commitFiles: [GitFileChange] = []
     private(set) var commitDiffText: String = ""
+    private(set) var isLoadingCommitDetail = false
+    private(set) var commitDetailErrorMessage: String?
     private let logPageSize = 50
 
     private(set) var isGeneratingMessage = false
@@ -31,9 +34,13 @@ final class GitChangesStore {
     private let commitMessageGenerator = CommitMessageGenerator()
     private var generateTask: Task<Void, Never>?
     private var commitDetailTask: Task<Void, Never>?
+    private var openDiffTask: Task<Void, Never>?
+    private var loadingMoreLogService: GitService?
+    private var logGeneration = 0
 
     private var preferredDirectory: URL
     private var openingDirectory: URL?
+    private var repositoryOpenRequestID: UUID?
 
     init(initialDirectory: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)) {
         self.preferredDirectory = initialDirectory.standardizedFileURL
@@ -42,6 +49,11 @@ final class GitChangesStore {
     func setPreferredDirectory(_ directoryURL: URL) {
         let standardized = directoryURL.standardizedFileURL
         preferredDirectory = standardized
+        if isFileInsideCurrentRepository(standardized) { return }
+        if openingDirectory != standardized {
+            openDiffTask?.cancel()
+            openDiffTask = nil
+        }
         openPreferredDirectory(standardized)
     }
 
@@ -58,34 +70,56 @@ final class GitChangesStore {
     }
 
     func openRepository(at candidateURL: URL) async {
+        guard !Task.isCancelled else { return }
+        let requestID = UUID()
+        repositoryOpenRequestID = requestID
         let directoryURL = candidateURL.hasDirectoryPath ? candidateURL : candidateURL.deletingLastPathComponent()
         let probeService = GitService(workingDirectory: directoryURL)
 
         do {
             let resolvedRoot = try await probeService.repositoryRoot()
+            guard !Task.isCancelled, repositoryOpenRequestID == requestID else { return }
             let root = resolvedRoot.standardizedFileURL
             preferredDirectory = root
             gitService = GitService(workingDirectory: root)
+            loadingMoreLogService = nil
+            logGeneration &+= 1
             repositoryURL = root
+            statusSnapshot = nil
+            logEntries = []
+            hasMoreLog = true
             selectedChange = nil
             selectedDiffText = ""
             selectedCommitHash = nil
             commitFiles = []
             commitDiffText = ""
+            isLoadingCommitDetail = false
+            commitDetailErrorMessage = nil
             commitDetailTask?.cancel()
+            commitDetailTask = nil
             errorMessage = nil
             infoMessage = nil
 
             configureWatcher(for: root)
             await refresh()
         } catch {
+            guard !Task.isCancelled, repositoryOpenRequestID == requestID else { return }
+            gitService = nil
+            loadingMoreLogService = nil
+            logGeneration &+= 1
             repositoryURL = nil
             statusSnapshot = nil
+            logEntries = []
+            hasMoreLog = false
             selectedChange = nil
             selectedDiffText = ""
             selectedCommitHash = nil
             commitFiles = []
             commitDiffText = ""
+            isLoadingCommitDetail = false
+            commitDetailErrorMessage = nil
+            commitDetailTask?.cancel()
+            commitDetailTask = nil
             watcher?.stop()
             watcher = nil
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -93,20 +127,31 @@ final class GitChangesStore {
     }
 
     func refresh() async {
-        guard !isRefreshing else { return }
+        guard !isRefreshing else {
+            refreshRequestedWhileRefreshing = true
+            return
+        }
         guard let gitService else { return }
 
         isRefreshing = true
-        defer { isRefreshing = false }
+        defer {
+            isRefreshing = false
+            if refreshRequestedWhileRefreshing {
+                refreshRequestedWhileRefreshing = false
+                refreshNow()
+            }
+        }
 
         do {
             let snapshot = try await gitService.status()
+            guard self.gitService === gitService else { return }
             statusSnapshot = snapshot
             errorMessage = nil
 
             await ensureSelectedDiffIsFresh(using: gitService)
             await loadLog(using: gitService, reset: true)
         } catch {
+            guard self.gitService === gitService else { return }
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
@@ -120,8 +165,14 @@ final class GitChangesStore {
     // MARK: - Git Graph
 
     func loadMoreLog() {
-        guard let gitService, hasMoreLog else { return }
+        guard let gitService, hasMoreLog, !isRefreshing, loadingMoreLogService == nil else { return }
+        loadingMoreLogService = gitService
         Task {
+            defer {
+                if loadingMoreLogService === gitService {
+                    loadingMoreLogService = nil
+                }
+            }
             await loadLog(using: gitService, reset: false)
         }
     }
@@ -129,6 +180,10 @@ final class GitChangesStore {
     func selectCommit(_ hash: String) {
         commitDetailTask?.cancel()
         commitDetailTask = nil
+        isLoadingCommitDetail = false
+        commitDetailErrorMessage = nil
+        selectedChange = nil
+        selectedDiffText = ""
 
         if selectedCommitHash == hash {
             selectedCommitHash = nil
@@ -142,7 +197,13 @@ final class GitChangesStore {
 
         guard let gitService else { return }
         let capturedHash = hash
+        isLoadingCommitDetail = true
         commitDetailTask = Task {
+            defer {
+                if selectedCommitHash == capturedHash {
+                    isLoadingCommitDetail = false
+                }
+            }
             do {
                 async let files = gitService.commitFiles(hash: capturedHash)
                 async let diff = gitService.showCommit(hash: capturedHash)
@@ -152,18 +213,25 @@ final class GitChangesStore {
                 commitFiles = f
                 commitDiffText = d
             } catch {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, selectedCommitHash == capturedHash else { return }
                 commitFiles = []
                 commitDiffText = ""
-                errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                commitDetailErrorMessage = message
+                errorMessage = message
             }
         }
     }
 
     private func loadLog(using gitService: GitService, reset: Bool) async {
+        if reset {
+            logGeneration &+= 1
+        }
+        let capturedGeneration = logGeneration
         let skip = reset ? 0 : logEntries.count
         do {
             let entries = try await gitService.log(limit: logPageSize, skip: skip)
+            guard self.gitService === gitService, logGeneration == capturedGeneration else { return }
             if reset {
                 logEntries = entries
             } else {
@@ -171,6 +239,7 @@ final class GitChangesStore {
             }
             hasMoreLog = entries.count >= logPageSize
         } catch {
+            guard self.gitService === gitService, logGeneration == capturedGeneration else { return }
             if reset { logEntries = [] }
             hasMoreLog = false
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -181,6 +250,8 @@ final class GitChangesStore {
         // Cancel any in-flight commit detail loading
         commitDetailTask?.cancel()
         commitDetailTask = nil
+        isLoadingCommitDetail = false
+        commitDetailErrorMessage = nil
 
         // Clear commit selection so diff panel shows working tree diff
         selectedCommitHash = nil
@@ -188,6 +259,7 @@ final class GitChangesStore {
         commitDiffText = ""
 
         selectedChange = change
+        selectedDiffText = ""
 
         Task {
             await loadDiff(for: change)
@@ -317,12 +389,24 @@ final class GitChangesStore {
         }
     }
 
-    func openDiff(forFileURL fileURL: URL) {
-        Task {
-            let standardized = fileURL.standardizedFileURL
+    func openDiff(forFileURL fileURL: URL, repositoryCandidateURL: URL) {
+        let standardized = fileURL.standardizedFileURL
+        let candidate = repositoryCandidateURL.standardizedFileURL
+        openDiffTask?.cancel()
 
+        if !isFileInsideCurrentRepository(standardized) {
+            openingDirectory = candidate
+        }
+
+        openDiffTask = Task {
+            defer {
+                if openingDirectory == candidate {
+                    openingDirectory = nil
+                }
+            }
             if !isFileInsideCurrentRepository(standardized) {
-                await openRepository(at: standardized.deletingLastPathComponent())
+                await openRepository(at: candidate)
+                guard !Task.isCancelled else { return }
             }
 
             guard statusSnapshot != nil else { return }
@@ -437,11 +521,11 @@ final class GitChangesStore {
 
         do {
             let diff = try await gitService.diff(for: change)
-            if selectedChange?.id == change.id {
+            if self.gitService === gitService, selectedChange?.id == change.id {
                 selectedDiffText = diff
             }
         } catch {
-            if selectedChange?.id == change.id {
+            if self.gitService === gitService, selectedChange?.id == change.id {
                 selectedDiffText = ""
                 errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
@@ -468,8 +552,11 @@ final class GitChangesStore {
         }
 
         do {
-            selectedDiffText = try await gitService.diff(for: stillExisting)
+            let diff = try await gitService.diff(for: stillExisting)
+            guard self.gitService === gitService else { return }
+            selectedDiffText = diff
         } catch {
+            guard self.gitService === gitService else { return }
             selectedDiffText = ""
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }

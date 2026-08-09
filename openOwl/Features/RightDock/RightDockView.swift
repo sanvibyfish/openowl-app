@@ -161,12 +161,14 @@ struct RightDockView: View {
             // controlled by opacity + allowsHitTesting.
             NavigationStack {
                 FileExplorerView()
+                    .accessibilityHidden(dock.activeTab != .files)
             }
             .opacity(dock.activeTab == .files ? 1 : 0)
             .allowsHitTesting(dock.activeTab == .files)
 
             NavigationStack {
                 GitChangesView()
+                    .accessibilityHidden(dock.activeTab != .git)
             }
             .opacity(dock.activeTab == .git ? 1 : 0)
             .allowsHitTesting(dock.activeTab == .git)

@@ -179,6 +179,7 @@ GeometryReader { geo in
 
 | 日期 | 变更 | 作者 |
 |------|------|------|
+| 2026-08-09 | Files / Git 继续以 opacity 常驻保留状态，但非当前 tab 同步从 accessibility tree 隐藏，VoiceOver 不再访问不可见控件 | Codex |
 | 2026-07-31 | `ContentView` 以 width 0 + opacity/disabled/hit-testing/accessibility hidden 保持 `RightDockView` 常驻；折叠或进入 fullscreen 时结束 interactive resize freeze | Codex |
 | 2026-07-28 | 左侧宽 Sidebar 换为 `ProjectRail`；ContentView 去掉 NavigationSplitView，三栏变为 左 rail + Terminal + 右 dock | Lead |
 | 2026-07-25 | 项目上下文条并入 tab header（路径降为 tooltip）、删除 EXPLORER/CHANGES 重复标题、`headerHeight` 32→28 对齐编辑器 tab 栏、文件树背景从 `.regularMaterial` 改回语义色；dock 外壳 104pt→57pt | Lead |

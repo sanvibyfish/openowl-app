@@ -431,6 +431,9 @@ struct FileExplorerView: View {
         .onChange(of: store.selectedNodeID) { _, newID in
             handleSelectedNodeChange(newID)
         }
+        .onChange(of: store.fileSystemRevision) { _, _ in
+            reloadOpenTabsAfterFileSystemChange()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openFileFromTerminal)) { notification in
             handleOpenFileNotification(notification)
         }
@@ -506,6 +509,12 @@ struct FileExplorerView: View {
         // explorer root).
         if store.nodeIndex[url.path] != nil {
             store.selectNode(url.path)
+        }
+    }
+
+    private func reloadOpenTabsAfterFileSystemChange() {
+        for tab in openTabs where !dirtyTabs.contains(tab.url) {
+            reloadOpenTabFromDiskIfNeeded(tab.url, reason: "file-watcher")
         }
     }
 
@@ -1965,8 +1974,11 @@ struct FileExplorerView: View {
 
     private func openDiff(_ node: FileExplorerNode) {
         guard !node.isDirectory else { return }
+        gitStore.openDiff(
+            forFileURL: node.url,
+            repositoryCandidateURL: store.projectURL ?? node.url.deletingLastPathComponent()
+        )
         rightDockStore.expand(tab: .git)
-        gitStore.openDiff(forFileURL: node.url)
     }
 
     // MARK: - Helpers

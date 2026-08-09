@@ -226,7 +226,7 @@ final class GitService {
 
     /// Files changed in a specific commit.
     func commitFiles(hash: String) async throws -> [GitFileChange] {
-        let output = try await runGit(["diff-tree", "--no-commit-id", "-r", "--name-status", hash])
+        let output = try await runGit(["diff-tree", "--root", "--no-commit-id", "-r", "--name-status", hash])
         return parseCommitFiles(output)
     }
 
@@ -264,16 +264,10 @@ final class GitService {
         let records = output.components(separatedBy: separator).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
         for record in records {
-            let lines = record.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-            guard lines.count >= 7 else { continue }
-
-            // Find the 7 meaningful lines (skip leading empty lines from separator)
-            let meaningful = lines.filter { !$0.isEmpty }
-            guard meaningful.count >= 5 else { continue }
-
-            // Re-parse: the record has exactly 7 lines between separators
-            let trimmed = record.trimmingCharacters(in: .whitespacesAndNewlines)
-            let parts = trimmed.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            var parts = record.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            while parts.first?.isEmpty == true {
+                parts.removeFirst()
+            }
             guard parts.count >= 7 else { continue }
 
             let parents = parts[6].isEmpty ? [] : parts[6].split(separator: " ").map(String.init)
@@ -603,6 +597,10 @@ extension GitService {
     }
 
     func decodePath(_ rawPath: String) -> String {
+        Self.decodeGitPath(rawPath)
+    }
+
+    static func decodeGitPath(_ rawPath: String) -> String {
         guard rawPath.count >= 2, rawPath.first == "\"", rawPath.last == "\"" else {
             return rawPath
         }

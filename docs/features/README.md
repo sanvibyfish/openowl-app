@@ -80,4 +80,8 @@
 | 2026-07-28 | 006/008：左侧改为 Muxy 风格 Project Rail，移除宽 NavigationSplitView 侧栏 |
 | 2026-07-30 | 004/006：强化编辑器异步读取提交门禁与交互状态保持，并统一 worktree 归档并发 guard |
 | 2026-07-31 | 004/006/008：同步 editor context preflight、持久化保护、Right Dock 常驻与 resize 中断语义 |
+| 2026-08-09 | 003：补充 Git Graph 分页串行化、刷新 generation 隔离、末行可点击空间、root commit 日志与文件详情，以及 commit diff 加载/空 patch/失败状态契约 |
+| 2026-08-09 | 003：补充 commit 切换时折叠/文件选择/滚动状态隔离，以及 quoted UTF-8 路径的统一解码与回归验收 |
+| 2026-08-09 | 003：Git Graph 支持展开 commit 修改文件、点击文件定位 diff、展开区域泳道对齐，以及右键复制完整 Commit ID |
+| 2026-08-09 | 003：仓库切换原子清理旧 Git 状态，非 Git 目录失败后 refresh 不再恢复旧数据；Git Log 展开文件作为唯一入口，右侧 commit diff 移除重复文件侧栏并使用全宽布局 |
 | 2026-08-09 | 加入 011 Ghostty 风格终端 AppleScript 控制（实现与验收完成） |
