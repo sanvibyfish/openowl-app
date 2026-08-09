@@ -49,7 +49,6 @@ final class GitChangesStore {
     func setPreferredDirectory(_ directoryURL: URL) {
         let standardized = directoryURL.standardizedFileURL
         preferredDirectory = standardized
-        if isFileInsideCurrentRepository(standardized) { return }
         if openingDirectory != standardized {
             openDiffTask?.cancel()
             openDiffTask = nil
@@ -81,6 +80,7 @@ final class GitChangesStore {
             guard !Task.isCancelled, repositoryOpenRequestID == requestID else { return }
             let root = resolvedRoot.standardizedFileURL
             preferredDirectory = root
+            if repositoryURL == root, gitService != nil { return }
             gitService = GitService(workingDirectory: root)
             loadingMoreLogService = nil
             logGeneration &+= 1
@@ -393,10 +393,7 @@ final class GitChangesStore {
         let standardized = fileURL.standardizedFileURL
         let candidate = repositoryCandidateURL.standardizedFileURL
         openDiffTask?.cancel()
-
-        if !isFileInsideCurrentRepository(standardized) {
-            openingDirectory = candidate
-        }
+        openingDirectory = candidate
 
         openDiffTask = Task {
             defer {
@@ -404,10 +401,8 @@ final class GitChangesStore {
                     openingDirectory = nil
                 }
             }
-            if !isFileInsideCurrentRepository(standardized) {
-                await openRepository(at: candidate)
-                guard !Task.isCancelled else { return }
-            }
+            await openRepository(at: candidate)
+            guard !Task.isCancelled else { return }
 
             guard statusSnapshot != nil else { return }
             if let change = changeForFileURL(standardized) {
@@ -560,14 +555,6 @@ final class GitChangesStore {
             selectedDiffText = ""
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
-    }
-
-    private func isFileInsideCurrentRepository(_ fileURL: URL) -> Bool {
-        guard let repositoryURL else { return false }
-        let rootPath = repositoryURL.standardizedFileURL.path
-        let filePath = fileURL.path
-        if filePath == rootPath { return true }
-        return filePath.hasPrefix(rootPath + "/")
     }
 
     private func changeForFileURL(_ fileURL: URL) -> GitFileChange? {

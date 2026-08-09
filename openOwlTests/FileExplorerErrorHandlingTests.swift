@@ -437,6 +437,35 @@ struct FileExplorerErrorHandlingTests {
         #expect(store.unsavedTabNames.isEmpty)
     }
 
+    @Test @MainActor func switchingToUncachedProjectClearsPreviousQuickOpenFiles() async throws {
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-file-switch-\(UUID().uuidString)", isDirectory: true)
+        let firstProjectURL = baseURL.appendingPathComponent("first", isDirectory: true)
+        let secondProjectURL = baseURL.appendingPathComponent("second", isDirectory: true)
+        try FileManager.default.createDirectory(at: firstProjectURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondProjectURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseURL) }
+
+        try "old project\n".write(
+            to: firstProjectURL.appendingPathComponent("old-project.swift"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let store = FileExplorerStore()
+        store.setProject(firstProjectURL)
+        for _ in 0..<100 where store.quickOpenMatches.isEmpty {
+            store.updateQuickOpenResults()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.quickOpenMatches.map(\.node.name) == ["old-project.swift"])
+
+        store.setProject(secondProjectURL)
+        store.updateQuickOpenResults()
+
+        #expect(store.quickOpenMatches.isEmpty)
+    }
+
     private var defaultsSuiteName: String {
         "openowl.file-editor-session.tests"
     }

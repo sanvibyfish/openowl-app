@@ -41,6 +41,8 @@
   - ignored 路径过滤（git ignored 列表 + 目录前缀压缩优化）
   - 文件预览（文本/二进制判定 + 截断）
   - 刷新进行中收到的新 watcher/手动请求时，当前轮完成后立即执行一次尾随刷新，避免文件变化事件丢失
+  - 切换项目时立即清空旧 `currentGitContext`；目标项目没有扫描缓存时同时清空 `searchableFileNodes`，保证 Quick Open 不泄漏旧项目文件
+  - 浅层扫描写入 `rootNodes` / `nodeIndex` 前核对 captured `projectURL`，丢弃项目切换后才返回的旧扫描结果
 - `FileExplorerView`：
   - `OutlineGroup` 树视图 + 文件图标 + 状态标记
   - `Cmd+P` 快速查找弹层（关键字检索 + 回车打开）
@@ -48,3 +50,10 @@
   - 右键菜单（Reveal / Open in Terminal / Copy Path）
   - 变更文件点击后切换到 Git 面板并打开 diff
   - 普通文件预览语法高亮（轻量关键词/注释/字符串）
+
+## 回归验收
+
+- `switchingToUncachedProjectClearsPreviousQuickOpenFiles`：从已有 Quick Open 索引的项目切换到无缓存项目时，旧文件列表必须立即清空
+- `FileExplorerErrorHandlingTests`：29 tests / 1 suite 通过
+- 完整 XCTest：394 tests / 34 suites 通过
+- `git diff --check` 通过；SPM patch 已应用

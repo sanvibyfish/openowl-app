@@ -86,6 +86,66 @@ struct GitChangesStoreTests {
     }
 
     @Test @MainActor
+    func emptyRepositoryReportsUnbornBranchName() async throws {
+        let repositoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-git-empty-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL) }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git", "init", "--quiet", "--initial-branch=trunk"]
+        process.currentDirectoryURL = repositoryURL
+        try process.run()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0)
+
+        let store = GitChangesStore(initialDirectory: repositoryURL)
+        await store.openRepository(at: repositoryURL)
+
+        #expect(store.statusSnapshot?.branch == "trunk")
+        #expect(store.logEntries.isEmpty)
+        #expect(store.errorMessage == nil)
+    }
+
+    @Test @MainActor
+    func preferredDirectorySwitchesFromOuterToNestedRepository() async throws {
+        let outerRepositoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-git-nested-\(UUID().uuidString)", isDirectory: true)
+        let nestedRepositoryURL = outerRepositoryURL.appendingPathComponent("nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: nestedRepositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outerRepositoryURL) }
+
+        for repositoryURL in [outerRepositoryURL, nestedRepositoryURL] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["git", "init", "--quiet"]
+            process.currentDirectoryURL = repositoryURL
+            try process.run()
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 0)
+        }
+
+        try "nested change\n".write(
+            to: nestedRepositoryURL.appendingPathComponent("nested.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let store = GitChangesStore(initialDirectory: outerRepositoryURL)
+        await store.openRepository(at: outerRepositoryURL)
+        #expect(store.repositoryURL == outerRepositoryURL.standardizedFileURL)
+
+        store.setPreferredDirectory(nestedRepositoryURL)
+        for _ in 0..<100 where store.statusSnapshot?.repositoryRoot.standardizedFileURL != nestedRepositoryURL.standardizedFileURL {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(store.repositoryURL == nestedRepositoryURL.standardizedFileURL)
+        #expect(store.statusSnapshot?.untracked.map(\.path) == ["nested.txt"])
+    }
+
+    @Test @MainActor
     func failedRepositoryOpenClearsPreviousRepositoryState() async throws {
         let baseURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("openowl-git-failed-switch-\(UUID().uuidString)", isDirectory: true)

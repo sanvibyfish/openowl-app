@@ -51,6 +51,7 @@ GitChangesStore (@MainActor)
 `GitService` 通过 `Process` 调用 `/usr/bin/env git`，关键细节：
 - **管道读取顺序**: 先读 stdout/stderr 再 `waitUntilExit()`，避免 64KB 管道缓冲区满导致死锁
 - **状态解析**: `git status --porcelain=v1 --branch` → `parseStatus()` 解析分支、upstream、ahead/behind、文件变更
+- **未诞生分支**: porcelain v1 的 `## No commits yet on <branch>` 与旧版 Git 的 `## Initial commit on <branch>` 都解析为真实 `<branch>`；Right Dock 与状态栏只显示分支名，不显示整句 header。detached HEAD 继续沿用原有解析与显示行为
 - **路径解码**: `GitService.decodeGitPath()` 统一处理 Git C 风格 quoted path（引号、反斜杠与 UTF-8 八进制转义）；status 与 commit diff 文件拆分复用同一逻辑，中文/非 ASCII 路径不会退化为 `unknown`
 
 ### 3.3 实时刷新
@@ -65,12 +66,22 @@ GitChangesStore (@MainActor)
 - status 列表更新后，工作区多选集合会裁剪到仍存在的 change ID；range selection 的锚点失效时同步清空
 - 从工作区 diff 切换到 commit 时清空工作区多选与 range selection 锚点，避免隐藏选择在返回工作区后继续影响批量操作
 
+仓库身份与 preferred directory 切换统一以 `GitService.repositoryRoot()`（`git rev-parse --show-toplevel`）返回的真实仓库根目录为准，不再通过“目标路径位于当前仓库目录内”推断两者属于同一仓库：
+
+- terminal cwd 或 Files 的 “Open Changes” 进入 submodule / 嵌套 Git repository 时，即使目标路径仍位于外层仓库目录下，也必须切换到内层仓库
+- preferred directory 只是同一仓库内的普通子目录、解析结果仍为当前 root 时快速返回，保留现有工作区文件选择与 diff
+- `openDiff` 总是先将 `repositoryCandidateURL` 解析为真实 repository root，再在该仓库中选择目标文件，避免先按路径包含关系错误复用外层仓库
+
+回归覆盖：`GitChangesStoreTests.preferredDirectorySwitchesFromOuterToNestedRepository` 从外层仓库切换到其目录中的嵌套仓库，验证当前仓库身份更新为内层 root；本批定向 `GitChangesStoreTests` 为 5 tests / 1 suite，完整 XCTest 为 395 tests / 34 suites。SPM patch 已应用，`git diff --check` 通过。
+
 ### 3.4 Git Graph 分页一致性
 
 - 同一 `GitService` 同时只允许一个加载更多任务；`LazyVStack` 底部 sentinel 连续触发 `onAppear` 时，后续相同 `skip` 请求直接忽略，避免重复追加同一批 commit
 - 仓库切换会重置分页任务的服务身份；旧任务结束时只清理自己的身份，不得解除新仓库的分页互斥
 - 刷新/reset 会递增 log generation，旧 generation 的分页成功或失败结果均不得写回；刷新期间不启动加载更多，避免 reset 与分页交错造成错页或缺页
-- `GitService.log()` 只移除 record 前导空行，不裁剪尾部字段；root commit 的空 `%P`（parents）仍保留为第七字段并解析为 `[]`
+- `GitService.log()` 使用 `git log -z` 与 `%x00` 输出 NUL 分隔协议，每条提交固定解析 hash、abbrev、subject、author、date、refs、parents 7 个字段；不再依赖可与提交标题碰撞的可见文本 `---OPENOWL-RECORD---` 切分 record
+- subject 即使完整等于旧 record marker `---OPENOWL-RECORD---` 也必须原样显示；空 refs 与 root commit 的空 parents 字段必须保留，parents 解析为 `[]`，且分页边界不能改变字段归属或遗漏提交
+- 仓库尚无提交时，Git Graph 保持 `No commits yet` 空态，不因 `git log` 无记录产生 error banner；未诞生分支的真实名称仍由 status 提供给 Right Dock 与状态栏
 - `GitGraphContentView` 在列表末尾增加一个 `graphRowHeight` 的底部 padding，避免最早一条提交被面板底边裁掉或无法点击
 - 选中的 commit 行下使用 `commitFiles` 展开 M/A/D/R 状态与 `lastPathComponent` 文件名；详情加载期间仅显示一行 `Loading changed files…`，`CommitRow` 的 chevron 表示展开状态
 - 展开区域的高度同时计入 Canvas 总高度及后续 commit 节点的纵坐标偏移，泳道跨过文件行后仍与下一节点对齐
@@ -79,6 +90,8 @@ GitChangesStore (@MainActor)
 - `CommitRow` 的右键菜单将完整 `entry.hash` 写入系统剪贴板
 
 回归覆盖：`GitChangesStoreTests.repeatedLoadMoreRequestsDoNotDuplicateCommits` 在含 55 个 commit 的临时仓库中连续触发 3 次加载更多，最终必须得到恰好 55 个唯一 hash，并同时覆盖 root commit 未被日志解析遗漏；测试仓库的 root commit 新增 `root.txt`，选择该提交后还会验证文件列表为 `root.txt` 且 patch 包含 `+root content`。
+
+日志协议回归覆盖：`GitCommitParsingTests.log_preservesSubjectMatchingPreviousRecordSeparator` 创建标题完整等于旧 marker 的合法提交，验证 subject 原样保留，同时覆盖空 refs、root commit 空 parents 与分页解析。定向 `GitCommitParsingTests` + `GitChangesStoreTests` 共 18 tests / 2 suites、完整 XCTest 396 tests / 34 suites 通过；SPM patch 已应用，`git diff --check` 通过。
 
 交互验收：定向 `GraphLayoutTests` 与 `GitChangesStoreTests` 共 11 tests / 2 suites 通过；Debug UI 确认首个 commit 展开 4 个文件、点击 `project.yml` 后右侧定位到该文件、再次点击 commit 收起、右键执行 `Copy Commit ID`，且右侧不再出现 `Toggle file list`、diff 使用全部可用宽度，展开区域内泳道与后续节点保持对齐。完整回归为 388 tests / 34 suites。
 
@@ -120,6 +133,9 @@ Commit diff 使用独立的详情状态，不以空字符串同时表示“尚�
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-09 | Git porcelain v1 的 unborn branch header 同时支持 `No commits yet on <branch>` 与旧 `Initial commit on <branch>`，仅向 Right Dock/状态栏暴露真实分支名；空仓库 Git Graph 保持 `No commits yet` 空态且不显示 error banner，detached HEAD 行为不变。新增 `GitServiceParsingTests.parseBranch_unbornBranch`、`GitChangesStoreTests.emptyRepositoryReportsUnbornBranchName`；定向 26 tests / 2 suites、完整 398 tests / 34 suites 通过，SPM patch 已应用且 `git diff --check` 通过 |
+| 2026-08-09 | Git Graph 日志由可碰撞的 `---OPENOWL-RECORD---` 可见文本分隔改为 `git log -z` + `%x00` 的 NUL 字段协议，固定解析 7 个字段并保留空 refs/root parents；合法提交标题等于旧 marker 时仍完整显示。新增 `log_preservesSubjectMatchingPreviousRecordSeparator`；定向 18 tests / 2 suites、完整 396 tests / 34 suites 通过，SPM patch 已应用且 `git diff --check` 通过 |
+| 2026-08-09 | Right Dock Git 仓库身份改以 `repositoryRoot()` / `git rev-parse` 的实际 root 判定；terminal cwd 与 Files Open Changes 可从外层仓库切换到 submodule/嵌套仓库，同仓库普通子目录则保留当前选择与 diff；`openDiff` 先解析候选路径的真实 root。新增 `preferredDirectorySwitchesFromOuterToNestedRepository`；定向 5 tests / 1 suite、完整 395 tests / 34 suites 通过，SPM patch 已应用且 `git diff --check` 通过 |
 | 2026-08-09 | 切换新仓库时原子清除旧 status/log/选择/详情，打开非 Git 目录失败时移除旧 `GitService`，防止后续 refresh 恢复旧数据；Git Log 展开文件名作为唯一文件入口，右侧移除重复文件侧栏与 Toggle 控件并改为全宽 diff。新增失败仓库切换回归；定向 11 tests / 2 suites、完整 388 tests / 34 suites 与 Debug UI 验收通过 |
 | 2026-08-09 | Git Graph 支持点击 commit 展开 M/A/D/R 文件名、再次点击收起，点击文件定位右侧 commit diff，并可从右键菜单复制完整 Commit ID；Canvas 高度与后续节点坐标同步避让展开区域。定向 10 tests / 2 suites、完整 387 tests / 34 suites 与 Debug UI 交互验收通过 |
 | 2026-08-09 | commit 切换会重置文件折叠、侧栏选择和滚动目标，并以 commit hash 重建 diff 容器，避免沿用上一提交的视图状态；commit diff 文件拆分复用 `GitService.decodeGitPath()`，正确解析 quoted UTF-8 八进制路径。新增 `quotedNonASCIIPath_parsedCorrectly`；定向 31 tests / 2 suites、完整 385 tests / 34 suites 与 Debug UI 滚动归顶验收通过 |

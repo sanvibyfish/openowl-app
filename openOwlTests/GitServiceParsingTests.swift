@@ -36,6 +36,13 @@ struct GitServiceParsingTests {
         #expect(result.upstreamBranch == nil)
     }
 
+    @Test func parseBranch_unbornBranch() {
+        let result = service.parseBranch(from: "## No commits yet on trunk")
+        #expect(result.branch == "trunk")
+        #expect(result.upstreamBranch == nil)
+        #expect(result.trackingSummary == nil)
+    }
+
     // MARK: - parseAheadBehind
 
     @Test func parseAheadBehind_aheadOnly() {

@@ -249,37 +249,38 @@ final class GitService {
     // MARK: - Log
 
     func log(limit: Int = 50, skip: Int = 0) async throws -> [GitLogEntry] {
-        // Each entry is 7 lines separated by a record separator
-        let separator = "---OPENOWL-RECORD---"
-        let format = ["%H", "%h", "%s", "%aN", "%aI", "%D", "%P"].joined(separator: "%n")
+        let format = ["%H", "%h", "%s", "%aN", "%aI", "%D", "%P"].joined(separator: "%x00") + "%x00"
         let output = try await runGit([
             "log",
-            "--format=\(format)\(separator)",
+            "-z",
+            "--format=\(format)",
             "-n", "\(limit)",
             "--skip=\(skip)",
             "--all"
         ])
 
+        let fields = output.components(separatedBy: "\0")
         var entries: [GitLogEntry] = []
-        let records = output.components(separatedBy: separator).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-
-        for record in records {
-            var parts = record.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-            while parts.first?.isEmpty == true {
-                parts.removeFirst()
+        var index = 0
+        while index < fields.count {
+            while index < fields.count, fields[index].isEmpty {
+                index += 1
             }
-            guard parts.count >= 7 else { continue }
+            guard index + 6 < fields.count else { break }
 
-            let parents = parts[6].isEmpty ? [] : parts[6].split(separator: " ").map(String.init)
+            let parents = fields[index + 6].isEmpty
+                ? []
+                : fields[index + 6].split(separator: " ").map(String.init)
             entries.append(GitLogEntry(
-                hash: parts[0],
-                abbreviatedHash: parts[1],
-                message: parts[2],
-                author: parts[3],
-                date: parts[4],
-                refs: parts[5],
+                hash: fields[index],
+                abbreviatedHash: fields[index + 1],
+                message: fields[index + 2],
+                author: fields[index + 3],
+                date: fields[index + 4],
+                refs: fields[index + 5],
                 parents: parents
             ))
+            index += 7
         }
 
         return entries
@@ -540,6 +541,10 @@ extension GitService {
 
     func parseBranch(from line: String) -> (branch: String, upstreamBranch: String?, trackingSummary: String?) {
         let payload = line.replacingOccurrences(of: "## ", with: "")
+        for prefix in ["No commits yet on ", "Initial commit on "] where payload.hasPrefix(prefix) {
+            let branch = String(payload.dropFirst(prefix.count))
+            return (branch: branch.isEmpty ? "HEAD" : branch, upstreamBranch: nil, trackingSummary: nil)
+        }
         if let dotsRange = payload.range(of: "...") {
             let name = String(payload[..<dotsRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
             let trackingPayload = String(payload[dotsRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)

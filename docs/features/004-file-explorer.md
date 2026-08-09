@@ -54,6 +54,8 @@ struct FileExplorerNode: Identifiable, Hashable {
 4. **按需展开**: `expandDirectory()` 用户展开目录时单独扫描该目录
 5. **缓存**: `projectScanCache` 按项目路径缓存，切换项目时即时恢复
 6. **尾随刷新**: 扫描进行中再次收到 watcher 或手动刷新请求时记录一次待刷新；当前扫描结束后立即补跑，避免互斥窗口内的文件变化被丢弃
+7. **项目切换隔离**: 切换项目时立即清空旧 `currentGitContext`；目标项目无缓存时同步清空 `searchableFileNodes`，Quick Open 在新项目扫描完成前不会展示或打开旧项目文件
+8. **浅扫描提交门禁**: 浅层扫描结束、写入 `rootNodes` / `nodeIndex` 前核对启动扫描时捕获的 `projectURL`；切换项目后才结束的旧扫描不得覆盖新项目 UI
 
 ### 3.3 Git 状态映射
 
@@ -123,6 +125,7 @@ classifyGitState: GitFileChange → FileGitState
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-09 | 项目切换立即清理旧 Git context 与无缓存目标的 Quick Open 数据；浅扫描提交结果前核对 captured project URL，阻止旧项目扫描覆盖新项目 UI，并新增跨项目 Quick Open 回归测试 |
 | 2026-08-09 | 文件树刷新采用尾随刷新语义：扫描进行中收到的新请求不会直接丢弃，而是在当前轮完成后立即补跑一次 |
 | 2026-08-09 | FileWatcher 事件新增 editor revision 通知；所有已打开且未编辑的 tab 会按磁盘签名立即 reload，不再等切换 tab 才更新 |
 | 2026-08-04 | 文件树/编辑器分隔条的 `DragGesture` 补上 `coordinateSpace: .global`。分隔条夹在两个面板之间，拖宽文件树会带着分隔条一起右移，`.local` 的坐标原点跟着走、每帧把 translation 抵消掉，拖动因此原地振荡。RightDock 的宽度手柄早修过同款问题并留了注释，这处漏改 |

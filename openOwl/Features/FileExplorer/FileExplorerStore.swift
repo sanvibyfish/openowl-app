@@ -197,6 +197,7 @@ final class FileExplorerStore {
         previewState = .none
         errorMessage = nil
         dismissQuickOpen()
+        currentGitContext = .empty
 
         // Restore from cache if available (instant)
         let restoredFromCache: Bool
@@ -210,6 +211,7 @@ final class FileExplorerStore {
         } else {
             rootNodes = []
             nodeIndex = [:]
+            searchableFileNodes = []
             restoredFromCache = false
         }
 
@@ -535,6 +537,7 @@ final class FileExplorerStore {
         let shallowResult = await Task.detached(priority: .userInitiated) {
             Self.scanProject(projectURL: capturedURL, gitContext: .empty, maxDepth: 1)
         }.value
+        guard projectURL == capturedURL else { return }
         NSLog("FileExplorer: shallow scan %.0fms (%d nodes)", (CFAbsoluteTimeGetCurrent() - t0) * 1000, shallowResult.index.count)
 
         rootNodes = shallowResult.nodes

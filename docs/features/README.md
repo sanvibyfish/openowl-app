@@ -71,6 +71,10 @@
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-09 | 003：正确解析 Git porcelain v1 新旧 unborn branch header，仅显示真实分支名；空仓库 Git Graph 保持 `No commits yet` 空态且不产生 error banner，detached HEAD 行为不变 |
+| 2026-08-09 | 003：Git Graph 改用 `git log -z` + `%x00` 的 7 字段 NUL 协议，避免合法提交标题与旧可见 record marker 碰撞，并保持空 refs、root parents 与分页解析正确 |
+| 2026-08-09 | 003：Right Dock Git 以 `git rev-parse` 的真实 root 识别仓库，支持 terminal cwd / Files Open Changes 从外层仓库切换到 submodule 或嵌套仓库，同仓库普通子目录保持当前选择与 diff |
+| 2026-08-09 | 004：项目切换同步清理旧 Git/Quick Open 数据，并以 captured project URL 门禁浅扫描提交，防止旧项目结果覆盖新项目 UI |
 | 2026-03-16 | 创建索引，补全 001–006 功能文档 |
 | 2026-05-07 | 加入 008 Right Dock + 独立 Terminals（实现完成） |
 | 2026-05-10 | v1.0.8 下架本地部署，005 文档归档至 docs/archive/ |
