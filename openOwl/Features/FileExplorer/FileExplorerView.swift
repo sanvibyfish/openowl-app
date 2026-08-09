@@ -145,6 +145,54 @@ enum FileEditorAutomaticReadPolicy {
     }
 }
 
+enum FileEditorURLMutationPolicy {
+    static func remappedURL(_ url: URL, moving source: URL, to destination: URL) -> URL? {
+        let path = url.standardizedFileURL.path
+        let sourcePath = source.standardizedFileURL.path
+        let destinationURL = destination.standardizedFileURL
+        if path == sourcePath { return destinationURL }
+        guard path.hasPrefix(sourcePath + "/") else { return nil }
+        let relativePath = String(path.dropFirst(sourcePath.count + 1))
+        return destinationURL.appendingPathComponent(relativePath).standardizedFileURL
+    }
+
+    static func isAffected(_ url: URL, by roots: [URL]) -> Bool {
+        FileExplorerStore.isURL(url, coveredByAny: roots)
+    }
+
+    static func collisionURL(
+        openURLs: [URL],
+        applying moves: [FileExplorerURLMove]
+    ) -> URL? {
+        var seen = Set<URL>()
+        for openURL in openURLs {
+            let mappedURL = moves.reduce(openURL.standardizedFileURL) { url, move in
+                remappedURL(url, moving: move.source, to: move.destination) ?? url
+            }
+            guard seen.insert(mappedURL).inserted else { return mappedURL }
+        }
+        return nil
+    }
+
+    static func remappingValues<Value>(
+        _ values: [URL: Value],
+        moving source: URL,
+        to destination: URL
+    ) -> [URL: Value] {
+        Dictionary(uniqueKeysWithValues: values.map { url, value in
+            (remappedURL(url, moving: source, to: destination) ?? url, value)
+        })
+    }
+
+    static func remappingSet(
+        _ values: Set<URL>,
+        moving source: URL,
+        to destination: URL
+    ) -> Set<URL> {
+        Set(values.map { remappedURL($0, moving: source, to: destination) ?? $0 })
+    }
+}
+
 enum FileEditorSessionPersistence {
     private static let defaultsKey = "openowl.fileExplorer.editorSessions.v1"
     private static var cache: [String: FileEditorSession]?
@@ -513,9 +561,119 @@ struct FileExplorerView: View {
     }
 
     private func reloadOpenTabsAfterFileSystemChange() {
-        for tab in openTabs where !dirtyTabs.contains(tab.url) {
-            reloadOpenTabFromDiskIfNeeded(tab.url, reason: "file-watcher")
+        for tab in openTabs {
+            guard FileEditorDiskSignatureProvider.signature(for: tab.url) != nil else {
+                if !FileManager.default.fileExists(atPath: tab.url.path) {
+                    handleMissingBackingFile(tab.url)
+                }
+                continue
+            }
+            if !dirtyTabs.contains(tab.url) {
+                reloadOpenTabFromDiskIfNeeded(tab.url, reason: "file-watcher")
+            }
         }
+    }
+
+    private func deleteNodesFromEditor(_ urls: [URL]) {
+        let dirtyAffectedURLs = dirtyTabs.filter {
+            FileEditorURLMutationPolicy.isAffected($0, by: urls)
+        }
+        guard dirtyAffectedURLs.isEmpty else {
+            let names = dirtyAffectedURLs.map(\.lastPathComponent).sorted().joined(separator: ", ")
+            store.errorMessage = "Cannot delete files with unsaved changes: \(names)"
+            return
+        }
+
+        store.deleteNodes(urls) { deletedURLs in
+            for tabURL in openTabs.map(\.url) where
+                FileEditorURLMutationPolicy.isAffected(tabURL, by: deletedURLs) {
+                handleMissingBackingFile(tabURL)
+            }
+        }
+    }
+
+    private func handleMissingBackingFile(_ url: URL) {
+        guard openTabs.contains(where: { $0.url == url }) else { return }
+        if !dirtyTabs.contains(url) {
+            removeTab(url, reason: "backing-file-deleted")
+            return
+        }
+
+        fileReadRequestIDs.removeValue(forKey: url)
+        clearHeavyProgress(for: url)
+        if pendingActivationURL == url { pendingActivationURL = nil }
+        if activeTabURL == url { isEditorLoading = false }
+        store.errorMessage = "\(url.lastPathComponent) was deleted on disk. Its unsaved buffer is still open."
+    }
+
+    private func migrateEditorState(for move: FileExplorerURLMove) {
+        let source = move.source.standardizedFileURL
+        let destination = move.destination.standardizedFileURL
+        let interruptedReads = fileReadRequestIDs.keys.compactMap {
+            FileEditorURLMutationPolicy.remappedURL($0, moving: source, to: destination)
+        }
+
+        openTabs = openTabs.map { tab in
+            EditorTab(url: FileEditorURLMutationPolicy.remappedURL(
+                tab.url,
+                moving: source,
+                to: destination
+            ) ?? tab.url)
+        }
+        activeTabURL = activeTabURL.map {
+            FileEditorURLMutationPolicy.remappedURL($0, moving: source, to: destination) ?? $0
+        }
+        pendingActivationURL = pendingActivationURL.map {
+            FileEditorURLMutationPolicy.remappedURL($0, moving: source, to: destination) ?? $0
+        }
+        heavyProgressURL = heavyProgressURL.map {
+            FileEditorURLMutationPolicy.remappedURL($0, moving: source, to: destination) ?? $0
+        }
+        tabStorages = FileEditorURLMutationPolicy.remappingValues(
+            tabStorages, moving: source, to: destination
+        )
+        tabImageCache = FileEditorURLMutationPolicy.remappingValues(
+            tabImageCache, moving: source, to: destination
+        )
+        tabDiskSignatures = FileEditorURLMutationPolicy.remappingValues(
+            tabDiskSignatures, moving: source, to: destination
+        )
+        fileReadRequestIDs = FileEditorURLMutationPolicy.remappingValues(
+            fileReadRequestIDs, moving: source, to: destination
+        )
+        dirtyTabs = FileEditorURLMutationPolicy.remappingSet(
+            dirtyTabs, moving: source, to: destination
+        )
+        largeModeTabs = FileEditorURLMutationPolicy.remappingSet(
+            largeModeTabs, moving: source, to: destination
+        )
+        hugeFilePending = FileEditorURLMutationPolicy.remappingSet(
+            hugeFilePending, moving: source, to: destination
+        )
+
+        // Reads already running captured the old URL. Replace their IDs and
+        // restart only tabs that do not yet have a usable buffer, so an old
+        // completion cannot strand a renamed tab in its loading state.
+        for url in interruptedReads {
+            fileReadRequestIDs.removeValue(forKey: url)
+            guard !dirtyTabs.contains(url),
+                  tabStorages[url] == nil,
+                  tabImageCache[url] == nil,
+                  let signature = FileEditorDiskSignatureProvider.signature(for: url) else { continue }
+            reloadOpenTabFromDisk(url, signature: signature, reason: "file-moved-during-read")
+        }
+
+        publishUnsavedTabNames()
+        persistEditorSession(reason: "file-moved")
+    }
+
+    private func approveEditorMoves(_ moves: [FileExplorerURLMove]) -> Bool {
+        guard let collisionURL = FileEditorURLMutationPolicy.collisionURL(
+            openURLs: openTabs.map(\.url),
+            applying: moves
+        ) else { return true }
+        store.errorMessage = "Cannot move files because \(collisionURL.lastPathComponent) is already open."
+        return false
     }
 
     private func handleDisappear() {
@@ -628,11 +786,26 @@ struct FileExplorerView: View {
                         }
                         openDiff(node)
                     },
-                    onDelete: { urls in store.deleteNodes(urls) },
-                    onRename: { node, newName in store.renameNode(node, to: newName) },
+                    onDelete: { urls in deleteNodesFromEditor(urls) },
+                    onRename: { node, newName in
+                        if let move = store.renameNode(
+                            node,
+                            to: newName,
+                            approveMove: { approveEditorMoves([$0]) }
+                        ) {
+                            migrateEditorState(for: move)
+                        }
+                    },
                     onCopy: { urls in store.copyFiles(urls) },
                     onCut: { urls in store.cutFiles(urls) },
-                    onPaste: { targetDir in store.pasteFiles(into: targetDir) },
+                    onPaste: { targetDir in
+                        for move in store.pasteFiles(
+                            into: targetDir,
+                            approveMoves: approveEditorMoves
+                        ) {
+                            migrateEditorState(for: move)
+                        }
+                    },
                     onCopyPath: { url in store.copyPath(url) },
                     onDropFiles: { targetDir, sourceURLs in
                         let fm = FileManager.default

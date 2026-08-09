@@ -1,8 +1,35 @@
 import Foundation
 
 final class CommitMessageGenerator {
+    final class ProcessState {
+        private let lock = NSLock()
+        private var process: Process?
+
+        func install(_ process: Process) {
+            lock.lock()
+            self.process = process
+            lock.unlock()
+        }
+
+        func clear(ifCurrent process: Process) {
+            lock.lock()
+            if self.process === process {
+                self.process = nil
+            }
+            lock.unlock()
+        }
+
+        func take() -> Process? {
+            lock.lock()
+            let process = process
+            self.process = nil
+            lock.unlock()
+            return process
+        }
+    }
+
     private let maxDiffChars = 20_000
-    private var runningProcess: Process?
+    private let processState = ProcessState()
 
     func generate(diff: String) async throws -> String {
         let truncatedDiff: String
@@ -33,11 +60,11 @@ final class CommitMessageGenerator {
         proc.standardOutput = stdoutPipe
         proc.standardError = stderrPipe
 
-        runningProcess = proc
+        processState.install(proc)
 
         return try await withCheckedThrowingContinuation { continuation in
             proc.terminationHandler = { [weak self] process in
-                self?.runningProcess = nil
+                self?.processState.clear(ifCurrent: process)
 
                 let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
                 let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
@@ -62,15 +89,14 @@ final class CommitMessageGenerator {
                 try proc.run()
                 NSLog("CommitMessageGenerator: process started, pid=%d", proc.processIdentifier)
             } catch {
-                runningProcess = nil
+                processState.clear(ifCurrent: proc)
                 continuation.resume(throwing: GeneratorError.cliError(error.localizedDescription))
             }
         }
     }
 
     func cancel() {
-        runningProcess?.terminate()
-        runningProcess = nil
+        processState.take()?.terminate()
     }
 
     enum GeneratorError: LocalizedError {

@@ -68,6 +68,11 @@ struct FileQuickOpenMatch: Identifiable, Hashable {
     var id: String { node.id }
 }
 
+struct FileExplorerURLMove: Equatable {
+    let source: URL
+    let destination: URL
+}
+
 @MainActor
 @Observable
 final class FileExplorerStore {
@@ -423,20 +428,33 @@ final class FileExplorerStore {
     }
 
     /// Paste files from pasteboard into target directory
-    func pasteFiles(into targetDirectory: URL) {
+    @discardableResult
+    func pasteFiles(
+        into targetDirectory: URL,
+        approveMoves: ([FileExplorerURLMove]) -> Bool = { _ in true }
+    ) -> [FileExplorerURLMove] {
         let pasteboard = NSPasteboard.general
         guard let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
-              !urls.isEmpty else { return }
+              !urls.isEmpty else { return [] }
 
         let isCut = UserDefaults.standard.bool(forKey: "openowl.fileCutPending")
+        let plannedMoves = isCut ? urls.map {
+            FileExplorerURLMove(
+                source: $0,
+                destination: targetDirectory.appendingPathComponent($0.lastPathComponent)
+            )
+        } : []
+        guard approveMoves(plannedMoves) else { return [] }
         UserDefaults.standard.removeObject(forKey: "openowl.fileCutPending")
 
         let fm = FileManager.default
+        var moves: [FileExplorerURLMove] = []
         for url in urls {
             let destURL = targetDirectory.appendingPathComponent(url.lastPathComponent)
             do {
                 if isCut {
                     try fm.moveItem(at: url, to: destURL)
+                    moves.append(FileExplorerURLMove(source: url, destination: destURL))
                 } else {
                     try fm.copyItem(at: url, to: destURL)
                 }
@@ -445,67 +463,98 @@ final class FileExplorerStore {
             }
         }
         refreshNow()
+        return moves
     }
 
     /// Rename file/folder
-    func renameNode(_ node: FileExplorerNode, to newName: String) {
+    @discardableResult
+    func renameNode(
+        _ node: FileExplorerNode,
+        to newName: String,
+        approveMove: (FileExplorerURLMove) -> Bool = { _ in true }
+    ) -> FileExplorerURLMove? {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != node.name else { return }
+        guard !trimmed.isEmpty, trimmed != node.name else { return nil }
 
         let newURL = node.url.deletingLastPathComponent().appendingPathComponent(trimmed)
+        let move = FileExplorerURLMove(source: node.url, destination: newURL)
+        guard approveMove(move) else { return nil }
         do {
             try FileManager.default.moveItem(at: node.url, to: newURL)
             refreshNow()
+            return move
         } catch {
             errorMessage = error.localizedDescription
+            return nil
         }
     }
 
     /// Delete files (move to Trash)
-    func deleteNodes(_ urls: [URL]) {
-        let pathsToRemove = Set(urls.map { $0.standardizedFileURL.path })
+    func deleteNodes(_ urls: [URL], completion: @escaping @MainActor ([URL]) -> Void = { _ in }) {
+        let standardizedURLs = urls.map(\.standardizedFileURL)
 
         // Immediately remove from UI
-        func filterNodes(_ nodes: [FileExplorerNode]) -> [FileExplorerNode] {
-            nodes.compactMap { node in
-                if pathsToRemove.contains(node.url.standardizedFileURL.path) { return nil }
-                if let children = node.children {
-                    let filtered = filterNodes(children)
-                    return FileExplorerNode(id: node.id, url: node.url, name: node.name,
-                                            isDirectory: node.isDirectory, gitState: node.gitState,
-                                            children: filtered)
-                }
-                return node
-            }
+        rootNodes = Self.pruningNodes(rootNodes, deleting: standardizedURLs)
+        nodeIndex = nodeIndex.filter { _, node in
+            !Self.isURL(node.url, coveredByAny: standardizedURLs)
         }
-        rootNodes = filterNodes(rootNodes)
-
-        for id in pathsToRemove {
-            nodeIndex.removeValue(forKey: id)
-            if selectedNodeID == id { selectedNodeID = nil; previewState = .none }
+        searchableFileNodes.removeAll { node in
+            Self.isURL(node.url, coveredByAny: standardizedURLs)
         }
+        if let selectedNodeID,
+           Self.isURL(URL(fileURLWithPath: selectedNodeID), coveredByAny: standardizedURLs) {
+            self.selectedNodeID = nil
+            previewState = .none
+        }
+        updateQuickOpenResults()
 
         // Trash off the main actor (FileExplorerStore is @MainActor; a plain Task
         // would inherit it and block the UI). Task.detached runs on the cooperative
         // pool; we await its result back on the main actor to update state.
         Task {
-            let failedNames: [String] = await Task.detached(priority: .userInitiated) {
+            let result: (successful: [URL], failedNames: [String]) = await Task.detached(priority: .userInitiated) {
+                var successful: [URL] = []
                 var failed: [String] = []
                 for url in urls {
                     do {
                         try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+                        successful.append(url)
                     } catch {
                         NSLog("openOwl: [FileExplorer] trashItem failed for %@: %@",
                               url.path, error.localizedDescription)
                         failed.append(url.lastPathComponent)
                     }
                 }
-                return failed
+                return (successful, failed)
             }.value
-            if !failedNames.isEmpty {
-                errorMessage = "无法删除：\(failedNames.joined(separator: "、"))"
+            completion(result.successful)
+            if !result.failedNames.isEmpty {
+                errorMessage = "无法删除：\(result.failedNames.joined(separator: "、"))"
                 refreshNow()  // re-scan to restore failed items in the tree
             }
+        }
+    }
+
+    nonisolated static func isURL(_ candidate: URL, coveredByAny roots: [URL]) -> Bool {
+        let path = candidate.standardizedFileURL.path
+        return roots.contains { root in
+            let rootPath = root.standardizedFileURL.path
+            return path == rootPath || path.hasPrefix(rootPath + "/")
+        }
+    }
+
+    nonisolated static func pruningNodes(_ nodes: [FileExplorerNode], deleting urls: [URL]) -> [FileExplorerNode] {
+        nodes.compactMap { node in
+            if isURL(node.url, coveredByAny: urls) { return nil }
+            guard let children = node.children else { return node }
+            return FileExplorerNode(
+                id: node.id,
+                url: node.url,
+                name: node.name,
+                isDirectory: node.isDirectory,
+                gitState: node.gitState,
+                children: pruningNodes(children, deleting: urls)
+            )
         }
     }
 

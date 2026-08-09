@@ -104,11 +104,19 @@ final class GitService {
 
     func unstage(files: [String]) async throws {
         guard !files.isEmpty else { return }
-        _ = try await runGit(["restore", "--staged", "--"] + files)
+        if try await hasHead() {
+            _ = try await runGit(["restore", "--staged", "--"] + files)
+        } else {
+            _ = try await runGit(["rm", "--cached", "-r", "-f", "--"] + files)
+        }
     }
 
     func unstageAll() async throws {
-        _ = try await runGit(["restore", "--staged", ":/"])
+        if try await hasHead() {
+            _ = try await runGit(["restore", "--staged", ":/"])
+        } else {
+            _ = try await runGit(["rm", "--cached", "-r", "-f", "--", ":/"])
+        }
     }
 
     func discardModified(files: [String]) async throws {
@@ -119,6 +127,11 @@ final class GitService {
     func discardUntracked(paths: [String]) async throws {
         guard !paths.isEmpty else { return }
         _ = try await runGit(["clean", "-f", "-d", "--"] + paths)
+    }
+
+    func discardAll() async throws {
+        _ = try await runGit(["checkout-index", "--all", "--force"])
+        _ = try await runGit(["clean", "-f", "-d"])
     }
 
     func commit(message: String, autoStageWhenNeeded: Bool) async throws {
@@ -159,7 +172,10 @@ final class GitService {
             return try await runGit(["diff", "--", change.path])
 
         case .untracked:
-            return try await runGit(["diff", "--no-index", "--", "/dev/null", change.path], allowFailure: true)
+            return try await runGit(
+                ["diff", "--no-index", "--", "/dev/null", change.path],
+                allowedExitCodes: [0, 1]
+            )
         }
     }
 
@@ -466,6 +482,14 @@ final class GitService {
 }
 
 extension GitService {
+    private func hasHead() async throws -> Bool {
+        let output = try await runGit(
+            ["rev-parse", "--verify", "--quiet", "HEAD"],
+            allowedExitCodes: [0, 1]
+        )
+        return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     func parseStatus(_ output: String) throws -> GitStatusSnapshot {
         let lines = output.split(whereSeparator: \.isNewline).map(String.init)
         var branch = "HEAD"
@@ -510,14 +534,15 @@ extension GitService {
             let y = line[line.index(after: line.startIndex)]
             let rawPath = String(line.dropFirst(3))
             let path = decodePath(parsePath(rawPath))
+            let isConflict = ["UU", "AA", "DD", "AU", "UA", "DU", "UD"].contains("\(x)\(y)")
 
-            if x != " " {
+            if x != " ", !isConflict {
                 staged.append(
                     GitFileChange(path: path, indexStatus: x, workTreeStatus: y, section: .staged)
                 )
             }
 
-            if y != " " {
+            if y != " " || isConflict {
                 modified.append(
                     GitFileChange(path: path, indexStatus: x, workTreeStatus: y, section: .modified)
                 )
@@ -595,8 +620,23 @@ extension GitService {
     }
 
     func parsePath(_ rawPath: String) -> String {
-        if let arrowRange = rawPath.range(of: " -> ") {
-            return String(rawPath[arrowRange.upperBound...])
+        var isQuoted = false
+        var isEscaped = false
+        var index = rawPath.startIndex
+
+        while index < rawPath.endIndex {
+            let character = rawPath[index]
+            if isEscaped {
+                isEscaped = false
+            } else if character == "\\", isQuoted {
+                isEscaped = true
+            } else if character == "\"" {
+                isQuoted.toggle()
+            } else if !isQuoted, rawPath[index...].hasPrefix(" -> ") {
+                let destinationStart = rawPath.index(index, offsetBy: 4)
+                return String(rawPath[destinationStart...])
+            }
+            index = rawPath.index(after: index)
         }
         return rawPath
     }
@@ -679,7 +719,7 @@ extension GitService {
         return output
     }
 
-    func runGit(_ arguments: [String], allowFailure: Bool = false) async throws -> String {
+    func runGit(_ arguments: [String], allowedExitCodes: Set<Int32> = [0]) async throws -> String {
         let workingDirectory = self.workingDirectory
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -706,7 +746,7 @@ extension GitService {
                     let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
                     let stderr = String(data: stderrData, encoding: .utf8) ?? ""
 
-                    if process.terminationStatus == 0 || allowFailure {
+                    if allowedExitCodes.contains(process.terminationStatus) {
                         continuation.resume(returning: stdout)
                         return
                     }

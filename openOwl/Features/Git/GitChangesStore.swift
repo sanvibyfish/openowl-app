@@ -9,12 +9,18 @@ final class GitChangesStore {
     var selectedChange: GitFileChange?
     private(set) var selectedDiffText: String = ""
 
-    var commitMessage: String = ""
+    var commitMessage: String = "" {
+        didSet {
+            if let repositoryURL {
+                commitDrafts[repositoryURL] = commitMessage
+            }
+        }
+    }
 
     private(set) var isRefreshing = false
     private var refreshRequestedWhileRefreshing = false
     private(set) var isRunningCommand = false
-    var errorMessage: String?
+    private(set) var errorMessage: String?
     var infoMessage: String?
 
     // Git Graph
@@ -33,6 +39,9 @@ final class GitChangesStore {
     private var watcher: FileWatcher?
     private let commitMessageGenerator = CommitMessageGenerator()
     private var generateTask: Task<Void, Never>?
+    private var generateRequestID: UUID?
+    private var commandTask: Task<Void, Never>?
+    private var commandRequestID: UUID?
     private var commitDetailTask: Task<Void, Never>?
     private var openDiffTask: Task<Void, Never>?
     private var loadingMoreLogService: GitService?
@@ -41,6 +50,11 @@ final class GitChangesStore {
     private var preferredDirectory: URL
     private var openingDirectory: URL?
     private var repositoryOpenRequestID: UUID?
+    private var repositoryContextGeneration = 0
+    private var diffRequestRevision = 0
+    private var commitDrafts: [URL: String] = [:]
+    private var errorRevision = 0
+    private var commitDetailErrorRevision: Int?
 
     init(initialDirectory: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)) {
         self.preferredDirectory = initialDirectory.standardizedFileURL
@@ -70,9 +84,17 @@ final class GitChangesStore {
 
     func openRepository(at candidateURL: URL) async {
         guard !Task.isCancelled else { return }
+        let directoryURL = candidateURL.hasDirectoryPath ? candidateURL : candidateURL.deletingLastPathComponent()
+        if repositoryURL == directoryURL.standardizedFileURL, gitService != nil {
+            repositoryOpenRequestID = UUID()
+            return
+        }
+
         let requestID = UUID()
         repositoryOpenRequestID = requestID
-        let directoryURL = candidateURL.hasDirectoryPath ? candidateURL : candidateURL.deletingLastPathComponent()
+        repositoryContextGeneration &+= 1
+        invalidateRepositoryTasks()
+        diffRequestRevision &+= 1
         let probeService = GitService(workingDirectory: directoryURL)
 
         do {
@@ -85,6 +107,7 @@ final class GitChangesStore {
             loadingMoreLogService = nil
             logGeneration &+= 1
             repositoryURL = root
+            commitMessage = commitDrafts[root] ?? ""
             statusSnapshot = nil
             logEntries = []
             hasMoreLog = true
@@ -95,9 +118,10 @@ final class GitChangesStore {
             commitDiffText = ""
             isLoadingCommitDetail = false
             commitDetailErrorMessage = nil
+            commitDetailErrorRevision = nil
             commitDetailTask?.cancel()
             commitDetailTask = nil
-            errorMessage = nil
+            clearError()
             infoMessage = nil
 
             configureWatcher(for: root)
@@ -108,6 +132,7 @@ final class GitChangesStore {
             loadingMoreLogService = nil
             logGeneration &+= 1
             repositoryURL = nil
+            commitMessage = ""
             statusSnapshot = nil
             logEntries = []
             hasMoreLog = false
@@ -118,11 +143,12 @@ final class GitChangesStore {
             commitDiffText = ""
             isLoadingCommitDetail = false
             commitDetailErrorMessage = nil
+            commitDetailErrorRevision = nil
             commitDetailTask?.cancel()
             commitDetailTask = nil
             watcher?.stop()
             watcher = nil
-            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            setError(error)
         }
     }
 
@@ -142,17 +168,18 @@ final class GitChangesStore {
             }
         }
 
+        let capturedErrorRevision = errorRevision
         do {
             let snapshot = try await gitService.status()
             guard self.gitService === gitService else { return }
             statusSnapshot = snapshot
-            errorMessage = nil
+            clearError(ifRevision: capturedErrorRevision)
 
             await ensureSelectedDiffIsFresh(using: gitService)
             await loadLog(using: gitService, reset: true)
         } catch {
             guard self.gitService === gitService else { return }
-            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            setError(error)
         }
     }
 
@@ -178,9 +205,15 @@ final class GitChangesStore {
     }
 
     func selectCommit(_ hash: String) {
+        diffRequestRevision &+= 1
         commitDetailTask?.cancel()
         commitDetailTask = nil
         isLoadingCommitDetail = false
+        if let detailErrorRevision = commitDetailErrorRevision,
+           errorRevision == detailErrorRevision {
+            clearError(ifRevision: detailErrorRevision)
+        }
+        commitDetailErrorRevision = nil
         commitDetailErrorMessage = nil
         selectedChange = nil
         selectedDiffText = ""
@@ -197,6 +230,7 @@ final class GitChangesStore {
 
         guard let gitService else { return }
         let capturedHash = hash
+        let capturedErrorRevision = errorRevision
         isLoadingCommitDetail = true
         commitDetailTask = Task {
             defer {
@@ -209,16 +243,19 @@ final class GitChangesStore {
                 async let diff = gitService.showCommit(hash: capturedHash)
                 let f = try await files
                 let d = try await diff
-                guard !Task.isCancelled, selectedCommitHash == capturedHash else { return }
+                guard !Task.isCancelled, self.gitService === gitService,
+                      selectedCommitHash == capturedHash else { return }
                 commitFiles = f
                 commitDiffText = d
+                clearError(ifRevision: capturedErrorRevision)
             } catch {
-                guard !Task.isCancelled, selectedCommitHash == capturedHash else { return }
+                guard !Task.isCancelled, self.gitService === gitService,
+                      selectedCommitHash == capturedHash else { return }
                 commitFiles = []
                 commitDiffText = ""
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 commitDetailErrorMessage = message
-                errorMessage = message
+                commitDetailErrorRevision = setError(message)
             }
         }
     }
@@ -242,11 +279,13 @@ final class GitChangesStore {
             guard self.gitService === gitService, logGeneration == capturedGeneration else { return }
             if reset { logEntries = [] }
             hasMoreLog = false
-            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            setError(error)
         }
     }
 
     func selectChange(_ change: GitFileChange) {
+        diffRequestRevision &+= 1
+        let requestRevision = diffRequestRevision
         // Cancel any in-flight commit detail loading
         commitDetailTask?.cancel()
         commitDetailTask = nil
@@ -262,12 +301,16 @@ final class GitChangesStore {
         selectedDiffText = ""
 
         Task {
-            await loadDiff(for: change)
+            await loadDiff(for: change, requestRevision: requestRevision)
         }
     }
 
     func clearInfoMessage() {
         infoMessage = nil
+    }
+
+    func clearErrorMessage() {
+        clearError()
     }
 
     func stage(_ change: GitFileChange) {
@@ -287,55 +330,75 @@ final class GitChangesStore {
     }
 
     func stageAll() {
-        guard let snapshot = statusSnapshot else { return }
-        let paths = Set(snapshot.modified.map(\.path) + snapshot.untracked.map(\.path))
-        stage(paths: Array(paths).sorted())
+        runCommand(
+            operation: { try await $0.stageAll() },
+            success: { self.infoMessage = "Staged all files." }
+        )
     }
 
     func unstageAll() {
-        guard let gitService else { return }
-
-        runCommand {
-            try await gitService.unstageAll()
-            self.infoMessage = "Unstaged all files."
-        }
+        runCommand(
+            operation: { try await $0.unstageAll() },
+            success: { self.infoMessage = "Unstaged all files." }
+        )
     }
 
     func generateCommitMessage() {
         guard let gitService else { NSLog("generateCommitMessage: no gitService"); return }
         guard !isGeneratingMessage else { NSLog("generateCommitMessage: already generating"); return }
         NSLog("generateCommitMessage: starting")
+        let requestID = UUID()
+        let contextGeneration = repositoryContextGeneration
+        generateRequestID = requestID
         isGeneratingMessage = true
 
         generateTask = Task {
-            defer { isGeneratingMessage = false }
+            defer {
+                if generateRequestID == requestID, repositoryContextGeneration == contextGeneration,
+                   self.gitService === gitService {
+                    generateRequestID = nil
+                    generateTask = nil
+                    isGeneratingMessage = false
+                }
+            }
             do {
                 let diff = try await gitService.diff(staged: true)
                 try Task.checkCancellation()
+                guard generateRequestID == requestID, repositoryContextGeneration == contextGeneration,
+                      self.gitService === gitService else { return }
                 guard !diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     let allDiff = try await gitService.diff(staged: false)
                     try Task.checkCancellation()
+                    guard generateRequestID == requestID, repositoryContextGeneration == contextGeneration,
+                          self.gitService === gitService else { return }
                     guard !allDiff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                        errorMessage = "No changes to generate message for."
+                        setError("No changes to generate message for.")
                         return
                     }
                     let message = try await commitMessageGenerator.generate(diff: allDiff)
                     try Task.checkCancellation()
+                    guard generateRequestID == requestID, repositoryContextGeneration == contextGeneration,
+                          self.gitService === gitService else { return }
                     if !message.isEmpty { commitMessage = message }
                     return
                 }
                 let message = try await commitMessageGenerator.generate(diff: diff)
                 try Task.checkCancellation()
+                guard generateRequestID == requestID, repositoryContextGeneration == contextGeneration,
+                      self.gitService === gitService else { return }
                 if !message.isEmpty { commitMessage = message }
             } catch is CancellationError {
                 // cancelled by user
             } catch {
-                errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                guard generateRequestID == requestID, repositoryContextGeneration == contextGeneration,
+                      self.gitService === gitService else { return }
+                setError(error)
             }
         }
     }
 
     func cancelGenerateCommitMessage() {
+        generateRequestID = nil
         generateTask?.cancel()
         generateTask = nil
         commitMessageGenerator.cancel()
@@ -343,50 +406,38 @@ final class GitChangesStore {
     }
 
     func commit() {
-        guard let gitService else { return }
         let autoStage = !(statusSnapshot?.hasStagedChanges ?? false)
         let message = commitMessage
 
-        runCommand {
-            try await gitService.commit(message: message, autoStageWhenNeeded: autoStage)
-            self.commitMessage = ""
-            self.infoMessage = autoStage ? "Committed (auto-staged all changes)." : "Committed."
-        }
+        runCommand(
+            operation: { try await $0.commit(message: message, autoStageWhenNeeded: autoStage) },
+            success: {
+                self.commitMessage = ""
+                self.infoMessage = autoStage ? "Committed (auto-staged all changes)." : "Committed."
+            }
+        )
     }
 
     func deleteBranch(name: String, force: Bool = false) {
-        guard let gitService else { return }
         let targetBranch = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !targetBranch.isEmpty else { return }
 
-        runCommand {
-            try await gitService.deleteBranch(name: targetBranch, force: force)
-            self.infoMessage = force ? "Force deleted branch: \(targetBranch)" : "Deleted branch: \(targetBranch)"
-        }
+        runCommand(
+            operation: { try await $0.deleteBranch(name: targetBranch, force: force) },
+            success: { self.infoMessage = force ? "Force deleted branch: \(targetBranch)" : "Deleted branch: \(targetBranch)" }
+        )
     }
 
     func fetch() {
-        guard let gitService else { return }
-        runCommand {
-            try await gitService.fetch()
-            self.infoMessage = "Fetch completed."
-        }
+        runCommand(operation: { try await $0.fetch() }, success: { self.infoMessage = "Fetch completed." })
     }
 
     func pull() {
-        guard let gitService else { return }
-        runCommand {
-            try await gitService.pull()
-            self.infoMessage = "Pull completed."
-        }
+        runCommand(operation: { try await $0.pull() }, success: { self.infoMessage = "Pull completed." })
     }
 
     func push() {
-        guard let gitService else { return }
-        runCommand {
-            try await gitService.push()
-            self.infoMessage = "Push completed."
-        }
+        runCommand(operation: { try await $0.push() }, success: { self.infoMessage = "Push completed." })
     }
 
     func openDiff(forFileURL fileURL: URL, repositoryCandidateURL: URL) {
@@ -421,45 +472,41 @@ final class GitChangesStore {
     }
 
     func stage(paths: [String]) {
-        guard let gitService else { return }
         guard !paths.isEmpty else { return }
 
-        runCommand {
-            try await gitService.stage(files: paths)
-            self.infoMessage = "Staged \(paths.count) file(s)."
-        }
+        runCommand(operation: { try await $0.stage(files: paths) }, success: { self.infoMessage = "Staged \(paths.count) file(s)." })
     }
 
     func discardByPath(_ relativePath: String) {
-        guard let gitService else { return }
         guard !relativePath.isEmpty else { return }
 
         // Find the change to determine if it's modified or untracked
         let allChanges = (statusSnapshot?.modified ?? []) + (statusSnapshot?.untracked ?? [])
         guard let change = allChanges.first(where: { $0.path == relativePath }) else { return }
 
-        runCommand {
+        runCommand(operation: { gitService in
             if change.section == .untracked {
                 try await gitService.discardUntracked(paths: [relativePath])
             } else {
                 try await gitService.discardModified(files: [relativePath])
             }
-            self.infoMessage = "Discarded changes for \(relativePath)."
-        }
+        }, success: { self.infoMessage = "Discarded changes for \(relativePath)." })
     }
 
     func unstage(paths: [String]) {
-        guard let gitService else { return }
         guard !paths.isEmpty else { return }
 
-        runCommand {
-            try await gitService.unstage(files: paths)
-            self.infoMessage = "Unstaged \(paths.count) file(s)."
-        }
+        runCommand(operation: { try await $0.unstage(files: paths) }, success: { self.infoMessage = "Unstaged \(paths.count) file(s)." })
+    }
+
+    func discardAll() {
+        runCommand(
+            operation: { try await $0.discardAll() },
+            success: { self.infoMessage = "Discarded all changes." }
+        )
     }
 
     private func discard(changes: [GitFileChange]) {
-        guard let gitService else { return }
         guard !changes.isEmpty else { return }
 
         let modifiedPaths = Array(
@@ -471,7 +518,7 @@ final class GitChangesStore {
 
         guard !modifiedPaths.isEmpty || !untrackedPaths.isEmpty else { return }
 
-        runCommand {
+        runCommand(operation: { gitService in
             if !modifiedPaths.isEmpty {
                 try await gitService.discardModified(files: modifiedPaths)
             }
@@ -479,22 +526,44 @@ final class GitChangesStore {
                 try await gitService.discardUntracked(paths: untrackedPaths)
             }
 
+        }, success: {
             let total = modifiedPaths.count + untrackedPaths.count
             self.infoMessage = "Discarded \(total) change(s)."
-        }
+        })
     }
 
-    private func runCommand(_ operation: @escaping () async throws -> Void) {
+    private func runCommand(
+        operation: @escaping (GitService) async throws -> Void,
+        success: @escaping () -> Void
+    ) {
         guard !isRunningCommand else { return }
+        guard let gitService else { return }
+        let requestID = UUID()
+        let contextGeneration = repositoryContextGeneration
+        commandRequestID = requestID
         isRunningCommand = true
 
-        Task {
-            defer { isRunningCommand = false }
+        commandTask = Task {
+            defer {
+                if commandRequestID == requestID, repositoryContextGeneration == contextGeneration,
+                   self.gitService === gitService {
+                    commandRequestID = nil
+                    commandTask = nil
+                    isRunningCommand = false
+                }
+            }
             do {
-                try await operation()
+                try await operation(gitService)
+                guard !Task.isCancelled, commandRequestID == requestID,
+                      repositoryContextGeneration == contextGeneration,
+                      self.gitService === gitService else { return }
+                success()
                 await refresh()
             } catch {
-                errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                guard !Task.isCancelled, commandRequestID == requestID,
+                      repositoryContextGeneration == contextGeneration,
+                      self.gitService === gitService else { return }
+                setError(error)
             }
         }
     }
@@ -511,18 +580,22 @@ final class GitChangesStore {
         watcher?.start()
     }
 
-    private func loadDiff(for change: GitFileChange) async {
+    private func loadDiff(for change: GitFileChange, requestRevision: Int) async {
         guard let gitService else { return }
+        let capturedErrorRevision = errorRevision
 
         do {
             let diff = try await gitService.diff(for: change)
-            if self.gitService === gitService, selectedChange?.id == change.id {
+            if self.gitService === gitService, diffRequestRevision == requestRevision,
+               selectedChange?.id == change.id {
                 selectedDiffText = diff
+                clearError(ifRevision: capturedErrorRevision)
             }
         } catch {
-            if self.gitService === gitService, selectedChange?.id == change.id {
+            if self.gitService === gitService, diffRequestRevision == requestRevision,
+               selectedChange?.id == change.id {
                 selectedDiffText = ""
-                errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                setError(error)
             }
         }
     }
@@ -539,6 +612,9 @@ final class GitChangesStore {
             return
         }
 
+        diffRequestRevision &+= 1
+        let requestRevision = diffRequestRevision
+        let selectedID = selected.id
         let allChanges = snapshot.staged + snapshot.modified + snapshot.untracked
         guard let stillExisting = allChanges.first(where: { $0.id == selected.id }) else {
             selectedChange = nil
@@ -546,15 +622,50 @@ final class GitChangesStore {
             return
         }
 
+        let capturedErrorRevision = errorRevision
         do {
             let diff = try await gitService.diff(for: stillExisting)
-            guard self.gitService === gitService else { return }
+            guard self.gitService === gitService, diffRequestRevision == requestRevision,
+                  selectedChange?.id == selectedID else { return }
             selectedDiffText = diff
+            clearError(ifRevision: capturedErrorRevision)
         } catch {
-            guard self.gitService === gitService else { return }
+            guard self.gitService === gitService, diffRequestRevision == requestRevision,
+                  selectedChange?.id == selectedID else { return }
             selectedDiffText = ""
-            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            setError(error)
         }
+    }
+
+    private func invalidateRepositoryTasks() {
+        generateRequestID = nil
+        generateTask?.cancel()
+        generateTask = nil
+        commitMessageGenerator.cancel()
+        isGeneratingMessage = false
+
+        commandRequestID = nil
+        commandTask?.cancel()
+        commandTask = nil
+        isRunningCommand = false
+    }
+
+    @discardableResult
+    private func setError(_ error: Error) -> Int {
+        setError((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+    }
+
+    @discardableResult
+    private func setError(_ message: String) -> Int {
+        errorRevision &+= 1
+        errorMessage = message
+        return errorRevision
+    }
+
+    private func clearError(ifRevision revision: Int? = nil) {
+        if let revision, errorRevision != revision { return }
+        errorRevision &+= 1
+        errorMessage = nil
     }
 
     private func changeForFileURL(_ fileURL: URL) -> GitFileChange? {

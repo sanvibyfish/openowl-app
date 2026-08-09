@@ -71,6 +71,7 @@
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-09 | 003/004：Right Dock Git 增加仓库级 draft 与异步 request ownership，修正 Stage/Discard/Unstage、冲突与路径解析边界；文件 rename/move/delete 与 editor URL state 原子同步，并保护 dirty/missing/collision 场景。完整 XCTest 416 tests / 35 suites 通过 |
 | 2026-08-09 | 003：正确解析 Git porcelain v1 新旧 unborn branch header，仅显示真实分支名；空仓库 Git Graph 保持 `No commits yet` 空态且不产生 error banner，detached HEAD 行为不变 |
 | 2026-08-09 | 003：Git Graph 改用 `git log -z` + `%x00` 的 7 字段 NUL 协议，避免合法提交标题与旧可见 record marker 碰撞，并保持空 refs、root parents 与分页解析正确 |
 | 2026-08-09 | 003：Right Dock Git 以 `git rev-parse` 的真实 root 识别仓库，支持 terminal cwd / Files Open Changes 从外层仓库切换到 submodule 或嵌套仓库，同仓库普通子目录保持当前选择与 diff |

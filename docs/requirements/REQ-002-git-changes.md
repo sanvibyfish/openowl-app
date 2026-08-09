@@ -13,6 +13,9 @@
 - [x] Stage/Unstage：单文件和批量操作 (`git add` / `git restore --staged`)
 - [x] 提交：多行 commit message，Cmd+Enter 快捷键
 - [x] Auto-stage：如果没有 staged 文件，提交时自动 stage 所有变更
+- [x] Stage All 必须使用 `git add -A` 覆盖完整仓库，不依赖当前展示或缓存的 status 列表
+- [x] 未诞生分支取消暂存必须清空 index 并保留工作树；已有 HEAD 时恢复 index 到 HEAD
+- [x] `UU/AA/DD/AU/UA/DU/UD` 冲突文件只进入 Changes，`MM` 同时按 index/worktree 两侧进入 Staged 与 Changes
 
 ### P0 — Diff 视图
 
@@ -28,6 +31,9 @@
 - [x] 切换 commit 时必须清空上一提交的文件折叠、侧栏文件选择与滚动位置，新 diff 从顶部开始
 - [x] Commit diff 必须解析 Git C 风格 quoted header，并正确还原 UTF-8 八进制转义的中文/非 ASCII 文件路径
 - [x] Commit 修改文件列表以 Git Log 的展开区域为唯一入口；右侧不得重复显示文件侧栏或 `Toggle file list` 控件，diff 使用全部可用宽度
+- [x] 工作区 diff completion 必须同时校验 request revision、当前文件 selection 与 repository service/context；旧文件的成功或失败结果不得覆盖新选择
+- [x] untracked diff 仅把 `git diff --no-index` 退出码 0/1 视为合法结果，大于 1 必须显示错误
+- [x] quoted rename 路径即使文件名包含 ` -> ` 也必须正确解析 source/destination
 
 Commit diff 验收文案：加载中为 `Loading commit diff`，空 patch 为 `No changes in this commit`，失败为 `Could not load commit diff`；header 分别显示 `Loading commit`、`No changes`、`Diff unavailable`。
 
@@ -71,8 +77,9 @@ Commit diff 验收文案：加载中为 `Loading commit diff`，空 patch 为 `N
 
 ### P2 — 增强
 
-- [ ] AI commit message 生成（调用本地 claude CLI）
+- [x] AI commit message 生成（调用本地 claude CLI）；进程句柄需同步并按实例清理，旧 termination 不得清除新任务句柄
 - [x] Discard changes（with confirmation）
+- [x] Discard All 将 tracked 工作树恢复到当前 index，保留 staged 内容，删除全部非 ignored untracked 文件与目录，并保留 ignored 内容
 
 ## 技术要点
 
@@ -117,6 +124,9 @@ final class GitService {
 - [x] 快速切换完成后，仓库路径、当前分支、changes 列表与 diff 必须来自同一仓库
 - [x] 新仓库服务生效时必须原子清空旧 status、log、选择与 commit 详情状态，不能在异步刷新返回前短暂保留旧仓库内容
 - [x] 打开非 Git 目录失败时必须移除旧 `GitService` 并清空旧状态；此后调用 `refresh()` 不得恢复旧仓库数据
+- [x] 仓库切换意图发生时必须立即使旧 command、AI 与 diff completion 失效，不能等待异步 root 解析完成
+- [x] 不同 repository root 的 commit draft 必须独立保存并在切回时恢复；同一真实 root 的普通子目录同步不得清空当前状态
+- [x] 选择新 commit 时立即清理上一详情请求产生的全局错误，且来源/revision 校验不得清除更新的错误
 
 自动化覆盖：`GitChangesStoreTests.preferredDirectorySwitchesFromOuterToNestedRepository` 验证从外层仓库目录进入嵌套仓库时切换到内层 root；`GitChangesStoreTests.cancelledRepositoryOpenCannotReplaceCurrentRepository` 验证取消的旧仓库打开请求不能替换当前仓库；`GitChangesStoreTests.failedRepositoryOpenClearsPreviousRepositoryState` 验证打开非 Git 目录后仓库 URL、status、log 与分页状态清空，后续 refresh 不会恢复旧数据。运行时验收覆盖 Debug UI 快速切换 worktree 后项目、分支与 changes 一致。本批定向 `GitChangesStoreTests` 为 5 tests / 1 suite，完整 XCTest 为 395 tests / 34 suites；SPM patch 已应用，`git diff --check` 通过。
 
@@ -132,6 +142,7 @@ final class GitService {
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-09 | 增加仓库级 commit draft、切仓意图 generation、diff revision/selection、commit error provenance 与 AI Process identity 验收；补齐 `git add -A` Stage All、保留 staged 的 Discard All、unborn unstage、冲突分组、quoted rename arrow 与 untracked diff exit-code 契约。关联 GitChangesStore 10 tests、GitService 40 tests、CommitMessageGenerator 2 tests；完整 XCTest 416 tests / 35 suites 通过 |
 | 2026-08-09 | 增加 unborn branch 验收：porcelain v1 的新版 `No commits yet on <branch>` 与旧版 `Initial commit on <branch>` 均只解析出真实分支名，空仓库 Git Graph 显示 `No commits yet` 且不产生 error banner，detached HEAD 行为不变。关联 `parseBranch_unbornBranch`、`emptyRepositoryReportsUnbornBranchName`；定向 26 tests / 2 suites、完整 398 tests / 34 suites 通过 |
 | 2026-08-09 | Git Graph 日志验收改为 `git log -z` + `%x00` 的 NUL 协议并固定解析 7 字段；要求保留与旧 marker 同名的合法 subject、空 refs 与 root parents，分页不得造成错位或遗漏。关联 `log_preservesSubjectMatchingPreviousRecordSeparator`；定向 18 tests / 2 suites、完整 396 tests / 34 suites 通过 |
 | 2026-08-09 | 仓库身份改为以 `repositoryRoot()` / `git rev-parse` 的实际 root 判定；增加 terminal cwd / Files Open Changes 进入 submodule 或嵌套仓库、同仓库普通子目录保持选择与 diff，以及 `openDiff` 先解析候选仓库 root 的验收。关联 `preferredDirectorySwitchesFromOuterToNestedRepository`；定向 5 tests / 1 suite、完整 395 tests / 34 suites 通过 |

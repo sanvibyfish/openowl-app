@@ -5,6 +5,219 @@ import Testing
 @Suite("GitChangesStore")
 struct GitChangesStoreTests {
     @Test @MainActor
+    func commitDraftsAreIsolatedByRepository() async throws {
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-git-drafts-\(UUID().uuidString)", isDirectory: true)
+        let firstURL = baseURL.appendingPathComponent("first", isDirectory: true)
+        let secondURL = baseURL.appendingPathComponent("second", isDirectory: true)
+        let plainURL = baseURL.appendingPathComponent("plain", isDirectory: true)
+        for directory in [firstURL, secondURL, plainURL] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        defer { try? FileManager.default.removeItem(at: baseURL) }
+
+        for repositoryURL in [firstURL, secondURL] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["git", "init", "--quiet"]
+            process.currentDirectoryURL = repositoryURL
+            try process.run()
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 0)
+        }
+
+        let store = GitChangesStore(initialDirectory: firstURL)
+        await store.openRepository(at: firstURL)
+        store.commitMessage = "first draft"
+
+        await store.openRepository(at: secondURL)
+        #expect(store.commitMessage.isEmpty)
+        store.commitMessage = "second draft"
+
+        await store.openRepository(at: firstURL)
+        #expect(store.commitMessage == "first draft")
+        await store.openRepository(at: secondURL)
+        #expect(store.commitMessage == "second draft")
+
+        await store.openRepository(at: plainURL)
+        #expect(store.repositoryURL == nil)
+        #expect(store.commitMessage.isEmpty)
+    }
+
+    @Test @MainActor
+    func stageAllIncludesFilesBeyondDisplayedSnapshot() async throws {
+        let repositoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-git-stage-all-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL) }
+
+        let initProcess = Process()
+        initProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        initProcess.arguments = ["git", "init", "--quiet"]
+        initProcess.currentDirectoryURL = repositoryURL
+        try initProcess.run()
+        initProcess.waitUntilExit()
+        #expect(initProcess.terminationStatus == 0)
+
+        for index in 0..<501 {
+            try "\(index)\n".write(
+                to: repositoryURL.appendingPathComponent("file-\(index).txt"),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+
+        let store = GitChangesStore(initialDirectory: repositoryURL)
+        await store.openRepository(at: repositoryURL)
+        #expect(store.statusSnapshot?.untracked.count == 500)
+        #expect(store.statusSnapshot?.untrackedTruncated == true)
+
+        store.stageAll()
+        for _ in 0..<200 where store.isRunningCommand {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!store.isRunningCommand)
+
+        let stagedProcess = Process()
+        let stdout = Pipe()
+        stagedProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        stagedProcess.arguments = ["git", "diff", "--staged", "--name-only"]
+        stagedProcess.currentDirectoryURL = repositoryURL
+        stagedProcess.standardOutput = stdout
+        try stagedProcess.run()
+        let output = stdout.fileHandleForReading.readDataToEndOfFile()
+        stagedProcess.waitUntilExit()
+        #expect(stagedProcess.terminationStatus == 0)
+        let stagedPaths = String(decoding: output, as: UTF8.self)
+            .split(whereSeparator: \.isNewline)
+        #expect(stagedPaths.count == 501)
+    }
+
+    @Test @MainActor
+    func commandCompletionFromPreviousRepositoryDoesNotMutateCurrentUI() async throws {
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-git-stale-command-\(UUID().uuidString)", isDirectory: true)
+        let firstURL = baseURL.appendingPathComponent("first", isDirectory: true)
+        let secondURL = baseURL.appendingPathComponent("second", isDirectory: true)
+        try FileManager.default.createDirectory(at: firstURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseURL) }
+
+        func runGit(_ arguments: [String], at repositoryURL: URL) throws {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["git"] + arguments
+            process.currentDirectoryURL = repositoryURL
+            try process.run()
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 0)
+        }
+
+        for repositoryURL in [firstURL, secondURL] {
+            try runGit(["init", "--quiet"], at: repositoryURL)
+            try runGit(["config", "user.name", "openOwl Tests"], at: repositoryURL)
+            try runGit(["config", "user.email", "tests@openowl.local"], at: repositoryURL)
+        }
+        try "change\n".write(
+            to: firstURL.appendingPathComponent("change.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try runGit(["add", "change.txt"], at: firstURL)
+
+        let hookURL = firstURL.appendingPathComponent(".git/hooks/pre-commit")
+        try "#!/bin/sh\nsleep 0.4\nexit 1\n".write(to: hookURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hookURL.path)
+
+        let store = GitChangesStore(initialDirectory: firstURL)
+        await store.openRepository(at: firstURL)
+        store.commitMessage = "stale commit"
+        store.commit()
+        #expect(store.isRunningCommand)
+
+        let switchTask = Task { @MainActor in
+            await store.openRepository(at: secondURL)
+        }
+        await Task.yield()
+        #expect(!store.isRunningCommand)
+        await switchTask.value
+        store.commitMessage = "current draft"
+        try await Task.sleep(for: .milliseconds(700))
+
+        #expect(store.repositoryURL == secondURL.standardizedFileURL)
+        #expect(store.commitMessage == "current draft")
+        #expect(store.infoMessage == nil)
+        #expect(store.errorMessage == nil)
+        #expect(!store.isRunningCommand)
+    }
+
+    @Test @MainActor
+    func staleWorkingTreeDiffCannotOverwriteCurrentSelection() async throws {
+        let repositoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-git-stale-diff-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL) }
+
+        let initProcess = Process()
+        initProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        initProcess.arguments = ["git", "init", "--quiet"]
+        initProcess.currentDirectoryURL = repositoryURL
+        try initProcess.run()
+        initProcess.waitUntilExit()
+        #expect(initProcess.terminationStatus == 0)
+
+        let pipeURL = repositoryURL.appendingPathComponent("slow.pipe")
+        let fifoProcess = Process()
+        fifoProcess.executableURL = URL(fileURLWithPath: "/usr/bin/mkfifo")
+        fifoProcess.arguments = [pipeURL.path]
+        try fifoProcess.run()
+        fifoProcess.waitUntilExit()
+        #expect(fifoProcess.terminationStatus == 0)
+
+        try "current\n".write(
+            to: repositoryURL.appendingPathComponent("current.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let store = GitChangesStore(initialDirectory: repositoryURL)
+        await store.openRepository(at: repositoryURL)
+        let slowChange = GitFileChange(
+            path: "slow.pipe",
+            indexStatus: "?",
+            workTreeStatus: "?",
+            section: .untracked
+        )
+        let currentChange = GitFileChange(
+            path: "current.txt",
+            indexStatus: "?",
+            workTreeStatus: "?",
+            section: .untracked
+        )
+        store.selectChange(slowChange)
+        try await Task.sleep(for: .milliseconds(100))
+        store.selectChange(currentChange)
+        for _ in 0..<100 where !store.selectedDiffText.contains("+current") {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(store.selectedChange?.id == currentChange.id)
+        #expect(store.selectedDiffText.contains("+current"))
+
+        let writer = Process()
+        writer.executableURL = URL(fileURLWithPath: "/bin/sh")
+        writer.arguments = ["-c", "printf stale > slow.pipe"]
+        writer.currentDirectoryURL = repositoryURL
+        try writer.run()
+        writer.waitUntilExit()
+        #expect(writer.terminationStatus == 0)
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(store.selectedChange?.id == currentChange.id)
+        #expect(store.selectedDiffText.contains("+current"))
+        #expect(!store.selectedDiffText.contains("+stale"))
+    }
+
+    @Test @MainActor
     func openDiffKeepsSelectionWhenDockSyncsSameRepository() async throws {
         let repositoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("openowl-git-store-\(UUID().uuidString)", isDirectory: true)
@@ -262,9 +475,11 @@ struct GitChangesStoreTests {
         }
         #expect(!store.isLoadingCommitDetail)
         #expect(store.commitDetailErrorMessage != nil)
+        #expect(store.errorMessage != nil)
 
         let rootCommit = try #require(store.logEntries.last)
         store.selectCommit(rootCommit.hash)
+        #expect(store.errorMessage == nil)
         for _ in 0..<100 where store.isLoadingCommitDetail {
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -272,5 +487,6 @@ struct GitChangesStoreTests {
         #expect(store.commitFiles.map(\.path) == ["root.txt"])
         #expect(store.commitDiffText.contains("+root content"))
         #expect(store.commitDetailErrorMessage == nil)
+        #expect(store.errorMessage == nil)
     }
 }

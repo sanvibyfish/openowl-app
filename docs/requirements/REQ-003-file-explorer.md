@@ -24,6 +24,11 @@
 - [x] 右键菜单：在终端中打开、在 Finder 中显示、复制路径
 - [x] 点击变更文件 → 打开 Diff 视图
 - [x] 点击普通文件 → 只读预览（含轻量语法高亮）
+- [x] rename/cut-move 成功后原子迁移全部 URL-keyed editor state；目录操作覆盖所有已打开后代，复制与失败操作不迁移
+- [x] rename/move 前检测目标与既有 open tab 的 URL 映射碰撞；碰撞时阻止文件系统操作并显示错误
+- [x] 删除成功后立即从 tree/index/search/selection/preview/Quick Open 裁剪目标及后代，不依赖下一次 watcher refresh
+- [x] App 内删除 dirty tab 或其父目录必须被阻止；删除 clean 文件关闭 tab
+- [x] 外部删除 clean 文件关闭 tab；dirty 文件保留内存 buffer 并显示 backing file missing 错误
 
 ### P2 — 增强
 
@@ -50,10 +55,22 @@
   - 右键菜单（Reveal / Open in Terminal / Copy Path）
   - 变更文件点击后切换到 Git 面板并打开 diff
   - 普通文件预览语法高亮（轻量关键词/注释/字符串）
+  - rename/cut-move 将 open/active/pending/heavy tab、storage、image、signature、read request 与 dirty/large/huge 集合按 URL 映射一次提交
+  - delete completion 只按实际成功 URL 裁剪编辑器状态；dirty/missing 处理遵循上述交互契约
 
 ## 回归验收
 
+- `fileEditorURLMutation_remapsFileAndDirectoryDescendantState`：文件与目录后代的 URL-keyed editor state 必须随 move 映射
+- `fileEditorURLMutation_detectsExactAndDirectoryDescendantCollisions`、`renameNode_rejectedEditorMoveDoesNotTouchDisk`：目标碰撞必须在磁盘操作前被拒绝
+- `fileEditorURLMutation_dirtyDeleteGuardIncludesDirectoryDescendants`：目录删除必须识别后代 dirty tab
+- `pruningNodes_removesDeletedDirectoryDescendants`：删除后 tree/index/search/selection/preview/Quick Open 立即裁剪目标后代
 - `switchingToUncachedProjectClearsPreviousQuickOpenFiles`：从已有 Quick Open 索引的项目切换到无缓存项目时，旧文件列表必须立即清空
-- `FileExplorerErrorHandlingTests`：29 tests / 1 suite 通过
-- 完整 XCTest：394 tests / 34 suites 通过
+- `FileExplorerErrorHandlingTests`：34 tests / 1 suite 通过
+- 完整 XCTest：416 tests / 35 suites 通过
 - `git diff --check` 通过；SPM patch 已应用
+
+## 更新记录
+
+| 日期 | 说明 |
+|------|------|
+| 2026-08-09 | 增加 rename/cut-move 的 editor URL state 原子迁移与目标碰撞前置拒绝；删除立即裁剪文件树和 Quick Open 状态，区分 clean/dirty 与 App 内/外部删除。关联 FileExplorer 34 tests；完整 XCTest 416 tests / 35 suites 通过 |

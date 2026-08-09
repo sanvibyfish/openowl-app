@@ -112,7 +112,7 @@ struct GitChangesView: View {
             // Error/Info banners
             if let errorMessage = store.errorMessage {
                 statusBanner(text: errorMessage, color: .red) {
-                    store.errorMessage = nil
+                    store.clearErrorMessage()
                 }
             } else if let infoMessage = store.infoMessage {
                 statusBanner(text: infoMessage, color: .green) {
@@ -319,7 +319,7 @@ struct GitChangesView: View {
                     AnyView(
                         HStack(spacing: 2) {
                             Button {
-                                requestDiscard(changes: changes)
+                                confirmationAction = .discardAll
                             } label: {
                                 Image(systemName: "arrow.uturn.backward")
                                     .font(AppFonts.badge.weight(.semibold))
@@ -1279,6 +1279,9 @@ struct GitChangesView: View {
         case .discardChanges(let changes):
             Button("Discard", role: .destructive) { store.discard(changes); confirmationAction = nil }
             Button("Cancel", role: .cancel) { confirmationAction = nil }
+        case .discardAll:
+            Button("Discard All", role: .destructive) { store.discardAll(); confirmationAction = nil }
+            Button("Cancel", role: .cancel) { confirmationAction = nil }
         }
     }
 
@@ -1288,6 +1291,8 @@ struct GitChangesView: View {
         case .discardChanges(let changes):
             if changes.count == 1, let c = changes.first { return "Discard changes for `\(c.path)`? This cannot be undone." }
             return "Discard \(changes.count) changes? This cannot be undone."
+        case .discardAll:
+            return "Discard all tracked and untracked changes? This cannot be undone."
         }
     }
 
@@ -2084,4 +2089,5 @@ private struct FileStatusRow: View {
 private enum GitConfirmationAction {
     case deleteBranch(branch: String)
     case discardChanges(changes: [GitFileChange])
+    case discardAll
 }
