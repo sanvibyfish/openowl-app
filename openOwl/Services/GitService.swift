@@ -53,6 +53,7 @@ enum GitServiceError: LocalizedError {
     case notGitRepository
     case commandFailed(command: String, exitCode: Int32, stderr: String)
     case invalidCommitMessage
+    case unresolvedConflicts(operation: String)
 
     var errorDescription: String? {
         switch self {
@@ -63,6 +64,8 @@ enum GitServiceError: LocalizedError {
             return "`\(command)` failed (\(exitCode)): \(details)"
         case .invalidCommitMessage:
             return "Commit message cannot be empty."
+        case .unresolvedConflicts(let operation):
+            return "Resolve all merge conflicts before \(operation)."
         }
     }
 }
@@ -130,14 +133,23 @@ final class GitService {
     }
 
     func discardAll() async throws {
+        let unmergedPaths = try await runGit(["diff", "--name-only", "--diff-filter=U", "-z"])
+        guard unmergedPaths.isEmpty else {
+            throw GitServiceError.unresolvedConflicts(operation: "discarding all changes")
+        }
         _ = try await runGit(["checkout-index", "--all", "--force"])
-        _ = try await runGit(["clean", "-f", "-d"])
+        _ = try await runGit(["clean", "-f", "-f", "-d"])
     }
 
     func commit(message: String, autoStageWhenNeeded: Bool) async throws {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
             throw GitServiceError.invalidCommitMessage
+        }
+
+        let unmergedPaths = try await runGit(["diff", "--name-only", "--diff-filter=U", "-z"])
+        guard unmergedPaths.isEmpty else {
+            throw GitServiceError.unresolvedConflicts(operation: "committing")
         }
 
         if autoStageWhenNeeded {

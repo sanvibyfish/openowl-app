@@ -290,6 +290,11 @@ final class GitChangesStore {
         commitDetailTask?.cancel()
         commitDetailTask = nil
         isLoadingCommitDetail = false
+        if let detailErrorRevision = commitDetailErrorRevision,
+           errorRevision == detailErrorRevision {
+            clearError(ifRevision: detailErrorRevision)
+        }
+        commitDetailErrorRevision = nil
         commitDetailErrorMessage = nil
 
         // Clear commit selection so diff panel shows working tree diff
@@ -545,8 +550,7 @@ final class GitChangesStore {
 
         commandTask = Task {
             defer {
-                if commandRequestID == requestID, repositoryContextGeneration == contextGeneration,
-                   self.gitService === gitService {
+                if commandRequestID == requestID {
                     commandRequestID = nil
                     commandTask = nil
                     isRunningCommand = false
@@ -644,10 +648,6 @@ final class GitChangesStore {
         commitMessageGenerator.cancel()
         isGeneratingMessage = false
 
-        commandRequestID = nil
-        commandTask?.cancel()
-        commandTask = nil
-        isRunningCommand = false
     }
 
     @discardableResult

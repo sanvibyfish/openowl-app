@@ -609,6 +609,9 @@ struct FileExplorerView: View {
     private func migrateEditorState(for move: FileExplorerURLMove) {
         let source = move.source.standardizedFileURL
         let destination = move.destination.standardizedFileURL
+        let pendingReadURL = pendingActivationURL.flatMap {
+            FileEditorURLMutationPolicy.remappedURL($0, moving: source, to: destination)
+        }
         let interruptedReads = fileReadRequestIDs.keys.compactMap {
             FileEditorURLMutationPolicy.remappedURL($0, moving: source, to: destination)
         }
@@ -658,9 +661,13 @@ struct FileExplorerView: View {
             fileReadRequestIDs.removeValue(forKey: url)
             guard !dirtyTabs.contains(url),
                   tabStorages[url] == nil,
-                  tabImageCache[url] == nil,
-                  let signature = FileEditorDiskSignatureProvider.signature(for: url) else { continue }
-            reloadOpenTabFromDisk(url, signature: signature, reason: "file-moved-during-read")
+                  tabImageCache[url] == nil else { continue }
+            if url == pendingReadURL {
+                isEditorLoading = true
+                startOpeningFileContent(url, needsLargeMode: largeModeTabs.contains(url))
+            } else if let signature = FileEditorDiskSignatureProvider.signature(for: url) {
+                reloadOpenTabFromDisk(url, signature: signature, reason: "file-moved-during-read")
+            }
         }
 
         publishUnsavedTabNames()

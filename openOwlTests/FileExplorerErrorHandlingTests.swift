@@ -508,6 +508,53 @@ struct FileExplorerErrorHandlingTests {
         #expect(!FileManager.default.fileExists(atPath: destinationURL.path))
     }
 
+    @Test @MainActor func cutPaste_partialFailureKeepsOnlyFailedURLsPendingForMove() throws {
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-partial-cut-\(UUID().uuidString)", isDirectory: true)
+        let sourceDirectory = baseURL.appendingPathComponent("source", isDirectory: true)
+        let targetDirectory = baseURL.appendingPathComponent("target", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: targetDirectory, withIntermediateDirectories: true)
+        defer {
+            NSPasteboard.general.clearContents()
+            UserDefaults.standard.removeObject(forKey: "openowl.fileCutPending")
+            try? FileManager.default.removeItem(at: baseURL)
+        }
+
+        let successfulSource = sourceDirectory.appendingPathComponent("a.swift")
+        let failedSource = sourceDirectory.appendingPathComponent("b.swift")
+        let blockingDestination = targetDirectory.appendingPathComponent("b.swift")
+        try "a".write(to: successfulSource, atomically: true, encoding: .utf8)
+        try "b".write(to: failedSource, atomically: true, encoding: .utf8)
+        try "existing".write(to: blockingDestination, atomically: true, encoding: .utf8)
+
+        let store = FileExplorerStore()
+        store.cutFiles([successfulSource, failedSource])
+        let firstMoves = store.pasteFiles(into: targetDirectory)
+
+        #expect(firstMoves == [FileExplorerURLMove(
+            source: successfulSource,
+            destination: targetDirectory.appendingPathComponent("a.swift")
+        )])
+        #expect(UserDefaults.standard.bool(forKey: "openowl.fileCutPending"))
+        let remaining = NSPasteboard.general.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL]
+        #expect(remaining == [failedSource])
+
+        try FileManager.default.removeItem(at: blockingDestination)
+        let retryMoves = store.pasteFiles(into: targetDirectory)
+
+        #expect(retryMoves == [FileExplorerURLMove(
+            source: failedSource,
+            destination: blockingDestination
+        )])
+        #expect(!UserDefaults.standard.bool(forKey: "openowl.fileCutPending"))
+        #expect(!FileManager.default.fileExists(atPath: failedSource.path))
+        #expect(FileManager.default.fileExists(atPath: blockingDestination.path))
+    }
+
     @Test func pruningNodes_removesDeletedDirectoryDescendants() throws {
         let rootURL = URL(fileURLWithPath: "/project")
         let sourceURL = rootURL.appendingPathComponent("src")

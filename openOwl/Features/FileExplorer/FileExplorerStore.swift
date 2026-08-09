@@ -445,10 +445,10 @@ final class FileExplorerStore {
             )
         } : []
         guard approveMoves(plannedMoves) else { return [] }
-        UserDefaults.standard.removeObject(forKey: "openowl.fileCutPending")
 
         let fm = FileManager.default
         var moves: [FileExplorerURLMove] = []
+        var failedCutURLs: [URL] = []
         for url in urls {
             let destURL = targetDirectory.appendingPathComponent(url.lastPathComponent)
             do {
@@ -459,7 +459,19 @@ final class FileExplorerStore {
                     try fm.copyItem(at: url, to: destURL)
                 }
             } catch {
+                if isCut {
+                    failedCutURLs.append(url)
+                }
                 errorMessage = error.localizedDescription
+            }
+        }
+        if isCut {
+            pasteboard.clearContents()
+            if failedCutURLs.isEmpty {
+                UserDefaults.standard.removeObject(forKey: "openowl.fileCutPending")
+            } else {
+                pasteboard.writeObjects(failedCutURLs as [NSURL])
+                UserDefaults.standard.set(true, forKey: "openowl.fileCutPending")
             }
         }
         refreshNow()

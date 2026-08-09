@@ -139,16 +139,81 @@ struct GitChangesStoreTests {
             await store.openRepository(at: secondURL)
         }
         await Task.yield()
-        #expect(!store.isRunningCommand)
+        #expect(store.isRunningCommand)
         await switchTask.value
+        #expect(store.isRunningCommand)
         store.commitMessage = "current draft"
-        try await Task.sleep(for: .milliseconds(700))
+        for _ in 0..<100 where store.isRunningCommand {
+            try await Task.sleep(for: .milliseconds(20))
+        }
 
         #expect(store.repositoryURL == secondURL.standardizedFileURL)
         #expect(store.commitMessage == "current draft")
         #expect(store.infoMessage == nil)
         #expect(store.errorMessage == nil)
         #expect(!store.isRunningCommand)
+    }
+
+    @Test @MainActor
+    func sameRepositoryOpenIntentKeepsCommandBusyUntilOperationCompletes() async throws {
+        let repositoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-git-command-lock-\(UUID().uuidString)", isDirectory: true)
+        let subdirectoryURL = repositoryURL.appendingPathComponent("Sources", isDirectory: true)
+        try FileManager.default.createDirectory(at: subdirectoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL) }
+
+        func runGit(_ arguments: [String]) throws {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["git"] + arguments
+            process.currentDirectoryURL = repositoryURL
+            try process.run()
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 0)
+        }
+
+        try runGit(["init", "--quiet"])
+        try runGit(["config", "user.name", "openOwl Tests"])
+        try runGit(["config", "user.email", "tests@openowl.local"])
+        try "change\n".write(
+            to: repositoryURL.appendingPathComponent("change.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try runGit(["add", "change.txt"])
+
+        let hookURL = repositoryURL.appendingPathComponent(".git/hooks/pre-commit")
+        try "#!/bin/sh\nsleep 0.4\nexit 1\n".write(to: hookURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hookURL.path)
+
+        let store = GitChangesStore(initialDirectory: repositoryURL)
+        await store.openRepository(at: repositoryURL)
+        store.commitMessage = "slow commit"
+        store.commit()
+        #expect(store.isRunningCommand)
+
+        await store.openRepository(at: subdirectoryURL)
+        #expect(store.repositoryURL == repositoryURL.standardizedFileURL)
+        #expect(store.isRunningCommand)
+
+        store.unstageAll()
+        for _ in 0..<100 where store.isRunningCommand {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!store.isRunningCommand)
+
+        let stagedProcess = Process()
+        let stdout = Pipe()
+        stagedProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        stagedProcess.arguments = ["git", "diff", "--staged", "--name-only"]
+        stagedProcess.currentDirectoryURL = repositoryURL
+        stagedProcess.standardOutput = stdout
+        try stagedProcess.run()
+        let output = stdout.fileHandleForReading.readDataToEndOfFile()
+        stagedProcess.waitUntilExit()
+        #expect(stagedProcess.terminationStatus == 0)
+        #expect(String(decoding: output, as: UTF8.self).contains("change.txt"))
+        #expect(store.errorMessage == nil)
     }
 
     @Test @MainActor
@@ -476,6 +541,15 @@ struct GitChangesStoreTests {
         #expect(!store.isLoadingCommitDetail)
         #expect(store.commitDetailErrorMessage != nil)
         #expect(store.errorMessage != nil)
+
+        store.selectChange(GitFileChange(
+            path: "root.txt",
+            indexStatus: " ",
+            workTreeStatus: "M",
+            section: .modified
+        ))
+        #expect(store.commitDetailErrorMessage == nil)
+        #expect(store.errorMessage == nil)
 
         let rootCommit = try #require(store.logEntries.last)
         store.selectCommit(rootCommit.hash)

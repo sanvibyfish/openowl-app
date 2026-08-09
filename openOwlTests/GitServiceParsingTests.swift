@@ -255,6 +255,10 @@ struct GitServiceParsingTests {
         try write("unstaged content", to: stagedFile)
         try write("modified content", to: modifiedFile)
         try write("ignored", to: repository.appendingPathComponent("ignored.txt"))
+        let nestedRepository = repository.appendingPathComponent("nested-repository", isDirectory: true)
+        try FileManager.default.createDirectory(at: nestedRepository, withIntermediateDirectories: true)
+        _ = try runGit(["init", "--quiet"], at: nestedRepository)
+        try write("nested", to: nestedRepository.appendingPathComponent("nested.txt"))
         for index in 0..<501 {
             try write("untracked", to: repository.appendingPathComponent("untracked-\(index).txt"))
         }
@@ -265,9 +269,52 @@ struct GitServiceParsingTests {
         #expect(try runGit(["diff", "--cached", "--name-only"], at: repository) == "staged.txt\n")
         #expect(try String(contentsOf: modifiedFile, encoding: .utf8) == "base modified")
         #expect(FileManager.default.fileExists(atPath: repository.appendingPathComponent("ignored.txt").path))
+        #expect(!FileManager.default.fileExists(atPath: nestedRepository.path))
         for index in 0..<501 {
             #expect(!FileManager.default.fileExists(atPath: repository.appendingPathComponent("untracked-\(index).txt").path))
         }
+    }
+
+    @Test func commitAndDiscardAllRejectUnresolvedConflictsWithoutChangingThem() async throws {
+        let repository = try makeRepository()
+        defer { try? FileManager.default.removeItem(at: repository) }
+        let conflictedFile = repository.appendingPathComponent("conflicted.txt")
+        try write("base\n", to: conflictedFile)
+        _ = try runGit(["add", "conflicted.txt"], at: repository)
+        _ = try runGit(["commit", "--quiet", "-m", "base"], at: repository)
+        _ = try runGit(["switch", "--quiet", "-c", "other"], at: repository)
+        try write("other\n", to: conflictedFile)
+        _ = try runGit(["commit", "--quiet", "-am", "other"], at: repository)
+        _ = try runGit(["switch", "--quiet", "trunk"], at: repository)
+        try write("trunk\n", to: conflictedFile)
+        _ = try runGit(["commit", "--quiet", "-am", "trunk"], at: repository)
+
+        do {
+            _ = try runGit(["merge", "other"], at: repository)
+            Issue.record("Expected merge conflict")
+        } catch GitServiceError.commandFailed(_, let exitCode, _) {
+            #expect(exitCode != 0)
+        }
+        let conflictContents = try String(contentsOf: conflictedFile, encoding: .utf8)
+        let service = GitService(workingDirectory: repository)
+
+        do {
+            try await service.commit(message: "must not commit", autoStageWhenNeeded: true)
+            Issue.record("Expected commit to reject unresolved conflicts")
+        } catch let GitServiceError.unresolvedConflicts(operation) {
+            #expect(operation == "committing")
+        }
+        #expect(try runGit(["diff", "--name-only", "--diff-filter=U"], at: repository) == "conflicted.txt\n")
+        #expect(try String(contentsOf: conflictedFile, encoding: .utf8) == conflictContents)
+
+        do {
+            try await service.discardAll()
+            Issue.record("Expected discard all to reject unresolved conflicts")
+        } catch let GitServiceError.unresolvedConflicts(operation) {
+            #expect(operation == "discarding all changes")
+        }
+        #expect(try runGit(["diff", "--name-only", "--diff-filter=U"], at: repository) == "conflicted.txt\n")
+        #expect(try String(contentsOf: conflictedFile, encoding: .utf8) == conflictContents)
     }
 
     private func makeRepository() throws -> URL {

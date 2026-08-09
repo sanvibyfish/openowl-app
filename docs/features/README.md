@@ -71,6 +71,7 @@
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-09 | 003/004：Git 阻止 unresolved conflicts 进入 commit/discard-all，Discard All 覆盖非 ignored 嵌套仓库，并保持仓库切换期间 command mutex 与详情错误 provenance；Files 保留部分 cut 失败项的移动语义，并在 rename/move 后重启 pending initial activation。完整 XCTest 419 tests / 35 suites 通过 |
 | 2026-08-09 | 003/004：Right Dock Git 增加仓库级 draft 与异步 request ownership，修正 Stage/Discard/Unstage、冲突与路径解析边界；文件 rename/move/delete 与 editor URL state 原子同步，并保护 dirty/missing/collision 场景。完整 XCTest 416 tests / 35 suites 通过 |
 | 2026-08-09 | 003：正确解析 Git porcelain v1 新旧 unborn branch header，仅显示真实分支名；空仓库 Git Graph 保持 `No commits yet` 空态且不产生 error banner，detached HEAD 行为不变 |
 | 2026-08-09 | 003：Git Graph 改用 `git log -z` + `%x00` 的 7 字段 NUL 协议，避免合法提交标题与旧可见 record marker 碰撞，并保持空 refs、root parents 与分页解析正确 |

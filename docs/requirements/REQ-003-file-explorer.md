@@ -25,6 +25,8 @@
 - [x] 点击变更文件 → 打开 Diff 视图
 - [x] 点击普通文件 → 只读预览（含轻量语法高亮）
 - [x] rename/cut-move 成功后原子迁移全部 URL-keyed editor state；目录操作覆盖所有已打开后代，复制与失败操作不迁移
+- [x] 多文件 cut/move 部分失败后，pasteboard 只保留失败 URL 且 cut pending 不清除；重试必须继续 move，不能退化为 copy
+- [x] pending initial read 遇 rename/move 时必须将 activation 映射到新 URL，并以新 URL 重启完整首次打开流程，最终结束 pending/loading
 - [x] rename/move 前检测目标与既有 open tab 的 URL 映射碰撞；碰撞时阻止文件系统操作并显示错误
 - [x] 删除成功后立即从 tree/index/search/selection/preview/Quick Open 裁剪目标及后代，不依赖下一次 watcher refresh
 - [x] App 内删除 dirty tab 或其父目录必须被阻止；删除 clean 文件关闭 tab
@@ -61,16 +63,18 @@
 ## 回归验收
 
 - `fileEditorURLMutation_remapsFileAndDirectoryDescendantState`：文件与目录后代的 URL-keyed editor state 必须随 move 映射
+- `cutPaste_partialFailureKeepsOnlyFailedURLsPendingForMove`：部分 move 成功后 pasteboard 只保留失败项，解除目标冲突后的第二次 paste 继续移动该项并清除 cut pending
 - `fileEditorURLMutation_detectsExactAndDirectoryDescendantCollisions`、`renameNode_rejectedEditorMoveDoesNotTouchDisk`：目标碰撞必须在磁盘操作前被拒绝
 - `fileEditorURLMutation_dirtyDeleteGuardIncludesDirectoryDescendants`：目录删除必须识别后代 dirty tab
 - `pruningNodes_removesDeletedDirectoryDescendants`：删除后 tree/index/search/selection/preview/Quick Open 立即裁剪目标后代
 - `switchingToUncachedProjectClearsPreviousQuickOpenFiles`：从已有 Quick Open 索引的项目切换到无缓存项目时，旧文件列表必须立即清空
-- `FileExplorerErrorHandlingTests`：34 tests / 1 suite 通过
-- 完整 XCTest：416 tests / 35 suites 通过
+- `FileExplorerErrorHandlingTests`：35 tests / 1 suite 通过
+- 完整 XCTest：419 tests / 35 suites 通过
 - `git diff --check` 通过；SPM patch 已应用
 
 ## 更新记录
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-09 | 增加 cut/move 部分失败只保留失败 URL 与 cut pending、重试仍执行 move，以及 rename/move 后按新 URL 重启 pending initial activation 并结束 loading 的验收。关联 FileExplorer 35 tests；完整 XCTest 419 tests / 35 suites 通过 |
 | 2026-08-09 | 增加 rename/cut-move 的 editor URL state 原子迁移与目标碰撞前置拒绝；删除立即裁剪文件树和 Quick Open 状态，区分 clean/dirty 与 App 内/外部删除。关联 FileExplorer 34 tests；完整 XCTest 416 tests / 35 suites 通过 |
