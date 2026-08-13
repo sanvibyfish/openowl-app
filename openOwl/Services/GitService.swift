@@ -76,11 +76,81 @@ enum WorktreeRemovalOutcome: Equatable {
     case unregisteredPath
 }
 
+/// Resolves the git binary once instead of relying on `/usr/bin/env git`.
+/// GUI apps launched by launchd inherit a PATH that — on machines where
+/// xcode-select points at Xcode — resolves `git` to Apple's (often old) git.
+/// Pinning makes the binary deterministic and visible in the log.
+///
+/// Observed 2026-08-11: the app ran Apple git 2.50.1 (Xcode's) and a child
+/// `git status` was SIGBUS'd mid-hash by a concurrently truncated file. The
+/// version isn't the culprit (mmap semantics exist in every git), but the
+/// binary choice should not be an accident of the environment.
+enum GitExecutable {
+    static let resolvedPath: String = {
+        let candidates = [
+            "/usr/bin/git",           // Apple git (CLT / active Xcode)
+            "/opt/homebrew/bin/git",  // Apple Silicon homebrew
+            "/usr/local/bin/git",     // Intel homebrew / manual installs
+        ]
+        for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate) {
+            return candidate
+        }
+        return "git" // last resort: PATH lookup
+    }()
+
+    static func logChoice() {
+        AppLogger.log("git", "using git binary: %@", resolvedPath)
+    }
+}
+
+/// Serializes `git status` per working-directory key so two stores (e.g.
+/// FileExplorer's status + the Git panel's refresh) never run `status`
+/// concurrently on the same repo. Concurrent `git status` runs let a
+/// truncating writer (build tools, agents writing .audit-cache, log rotation)
+/// race git's mmap'd file hashing and SIGBUS the child — exactly what
+/// happened 2026-08-11 (kernel: `cluster_pagein past EOF`).
+private final class GitCommandGate: @unchecked Sendable {
+    static let shared = GitCommandGate()
+
+    private let lock = NSLock()
+    private var tails: [String: Task<Void, Never>] = [:]
+
+    func withLock<T: Sendable>(
+        _ key: String,
+        _ body: @Sendable @escaping () async throws -> T
+    ) async throws -> T {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
+            lock.lock()
+            let previous = tails[key]
+            let task = Task {
+                if let previous {
+                    _ = await previous.value
+                }
+                do {
+                    continuation.resume(returning: try await body())
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+            tails[key] = task
+            lock.unlock()
+        }
+    }
+}
+
 final class GitService {
     let workingDirectory: URL
 
     init(workingDirectory: URL) {
         self.workingDirectory = workingDirectory
+    }
+
+    /// Gate key: the standardized working directory. GitChangesStore and
+    /// FileExplorer both pass the repository root, so their statuses
+    /// serialize. Sibling instances using a subdirectory get their own lane
+    /// (rev-parse/branch are cheap and don't hash worktree files).
+    private static func gateKey(for directory: URL) -> String {
+        directory.standardizedFileURL.path
     }
 
     func repositoryRoot() async throws -> URL {
@@ -92,7 +162,20 @@ final class GitService {
     }
 
     func status() async throws -> GitStatusSnapshot {
-        let output = try await runGit(["status", "--porcelain=v1", "--branch", "--untracked-files=all"])
+        // Serialized per-repo: FileExplorer's status and the Git panel's status
+        // both call this on the repository root. Concurrent `git status` runs
+        // let a truncating writer (build tools, agents writing .audit-cache,
+        // log rotation) race git's mmap'd file hashing and SIGBUS the child
+        // (observed 2026-08-11, kernel: `cluster_pagein past EOF`). diff/log
+        // stay concurrent — they don't refresh the index and must not block
+        // behind a slow peer.
+        let key = Self.gateKey(for: workingDirectory)
+        let output = try await GitCommandGate.shared.withLock(key) {
+            try await self.runGit(
+                ["status", "--porcelain=v1", "--branch", "--untracked-files=all"],
+                retryOnSignalExit: true
+            )
+        }
         return try parseStatus(output)
     }
 
@@ -169,24 +252,25 @@ final class GitService {
 
     func diff(staged: Bool) async throws -> String {
         if staged {
-            return try await runGit(["diff", "--staged"])
+            return try await runGit(["diff", "--staged"], retryOnSignalExit: true)
         } else {
-            return try await runGit(["diff"])
+            return try await runGit(["diff"], retryOnSignalExit: true)
         }
     }
 
     func diff(for change: GitFileChange) async throws -> String {
         switch change.section {
         case .staged:
-            return try await runGit(["diff", "--staged", "--", change.path])
+            return try await runGit(["diff", "--staged", "--", change.path], retryOnSignalExit: true)
 
         case .modified:
-            return try await runGit(["diff", "--", change.path])
+            return try await runGit(["diff", "--", change.path], retryOnSignalExit: true)
 
         case .untracked:
             return try await runGit(
                 ["diff", "--no-index", "--", "/dev/null", change.path],
-                allowedExitCodes: [0, 1]
+                allowedExitCodes: [0, 1],
+                retryOnSignalExit: true
             )
         }
     }
@@ -217,8 +301,8 @@ final class GitService {
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-                process.arguments = ["git", "show", "\(ref):\(path)"]
+                process.executableURL = URL(fileURLWithPath: GitExecutable.resolvedPath)
+                process.arguments = ["show", "\(ref):\(path)"]
                 process.currentDirectoryURL = workingDirectory
 
                 let stdout = Pipe()
@@ -285,7 +369,7 @@ final class GitService {
             "-n", "\(limit)",
             "--skip=\(skip)",
             "--all"
-        ])
+        ], retryOnSignalExit: true)
 
         let fields = output.components(separatedBy: "\0")
         var entries: [GitLogEntry] = []
@@ -416,23 +500,58 @@ final class GitService {
 
         do {
             _ = try await runGit(["worktree", "remove", path, "--force"])
+            return .removed
         } catch {
-            // macOS drops .DS_Store into the directory behind git's back, which
-            // makes `--force` fail with "Directory not empty". Remove that one
-            // file and let git try again.
+            // `git worktree remove` unregisters the worktree (deletes its
+            // gitdir) *before* deleting the working directory. When the
+            // directory removal then fails the folder is left behind already
+            // orphaned. Failure modes on macOS: Finder dropping .DS_Store into
+            // an emptied directory ("Directory not empty"), read-only files or
+            // directories such as CocoaPods' Pods/ ("Permission denied"), and
+            // huge untracked trees.
             //
-            // This used to classify the failure by searching git's stderr for
-            // "not empty" and then `removeItem` the entire worktree. Git's
-            // messages are not a stable API — they change with version and
-            // locale — and the tree can hold work git had just refused to
-            // discard, so a misclassification deleted it unrecoverably.
-            let dsStore = URL(fileURLWithPath: path).appendingPathComponent(".DS_Store")
-            guard FileManager.default.fileExists(atPath: dsStore.path) else { throw error }
-            AppLogger.log("worktree", "remove failed, retrying without .DS_Store path=%@", path)
-            try FileManager.default.removeItem(at: dsStore)
-            _ = try await runGit(["worktree", "remove", path, "--force"])
+            // First retry once after clearing Finder's .DS_Store litter. It is
+            // dropped anywhere in the tree, not just at the root, and the
+            // files are pure junk — removing them can never lose work.
+            let worktreeURL = URL(fileURLWithPath: path)
+            var clearedDSStores = false
+            if let enumerator = FileManager.default.enumerator(
+                at: worktreeURL,
+                includingPropertiesForKeys: nil,
+                options: []
+            ) {
+                for case let url as URL in enumerator where url.lastPathComponent == ".DS_Store" {
+                    try? FileManager.default.removeItem(at: url)
+                    clearedDSStores = true
+                }
+            }
+            if clearedDSStores {
+                AppLogger.log("worktree", "remove failed, retrying after clearing .DS_Store path=%@", path)
+                do {
+                    _ = try await runGit(["worktree", "remove", path, "--force"])
+                    return .removed
+                } catch {
+                    // Fall through to the state check below.
+                }
+            }
+
+            // If git still cannot delete the folder, decide by actual state
+            // rather than by parsing git's stderr (which changes with version
+            // and locale). If the worktree is still registered, git refused
+            // before discarding anything — fail closed, the tree may hold work
+            // worth recovering. If the registration is gone, git already
+            // discarded the worktree state and the folder is orphaned junk;
+            // report .unregisteredPath so the caller can offer to trash it.
+            if try await isRegisteredWorktree(path: path) {
+                throw error
+            }
+            let gitPointer = worktreeURL.appendingPathComponent(".git")
+            if FileManager.default.fileExists(atPath: gitPointer.path) {
+                try? FileManager.default.removeItem(at: gitPointer)
+            }
+            AppLogger.log("worktree", "remove left orphaned folder path=%@", path)
+            return .unregisteredPath
         }
-        return .removed
     }
 
     private func normalizedWorktreePath(_ path: String) -> String {
@@ -731,55 +850,110 @@ extension GitService {
         return output
     }
 
-    func runGit(_ arguments: [String], allowedExitCodes: Set<Int32> = [0]) async throws -> String {
+    /// Serialized per-repo execution of a git command. `retryOnSignalExit`
+    /// re-runs the command once if the child was killed by a signal — the
+    /// signature of the mmap/truncation SIGBUS race (file shrank while git
+    /// was hashing it) — which usually succeeds on the second attempt once
+    /// the concurrent writer has moved on.
+    ///
+    /// Note: this is intentionally NOT gated per-repo. `status()` applies the
+    /// gate itself; other read commands (diff/log) must stay concurrent so a
+    /// blocking git call (e.g. reading a FIFO) can't stall the whole repo.
+    func runGit(_ arguments: [String], allowedExitCodes: Set<Int32> = [0], retryOnSignalExit: Bool = false) async throws -> String {
+        try await runGitSerialized(arguments, allowedExitCodes: allowedExitCodes, retryOnSignalExit: retryOnSignalExit)
+    }
+
+    private func runGitSerialized(_ arguments: [String], allowedExitCodes: Set<Int32>, retryOnSignalExit: Bool) async throws -> String {
         let workingDirectory = self.workingDirectory
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-                process.arguments = ["git"] + arguments
-                process.currentDirectoryURL = workingDirectory
+                let maxAttempts = retryOnSignalExit ? 2 : 1
+                var lastResult: (Data, Data, Int32, Process.TerminationReason)?
 
-                let stdoutPipe = Pipe()
-                let stderrPipe = Pipe()
-                process.standardOutput = stdoutPipe
-                process.standardError = stderrPipe
+                for attempt in 1...maxAttempts {
+                    do {
+                        let (stdoutData, stderrData, status, reason) = try Self.launchGit(arguments, workingDirectory: workingDirectory)
+                        lastResult = (stdoutData, stderrData, status, reason)
 
-                do {
-                    try process.run()
+                        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+                        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
 
-                    // Read pipe data BEFORE waitUntilExit to avoid deadlock.
-                    // If the process fills the pipe buffer (~64KB), it blocks on write.
-                    // waitUntilExit would then wait forever for the blocked process.
-                    let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                    let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                    process.waitUntilExit()
+                        if allowedExitCodes.contains(status) {
+                            continuation.resume(returning: stdout)
+                            return
+                        }
 
-                    let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
-                    let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+                        if reason == .uncaughtSignal, attempt < maxAttempts {
+                            AppLogger.log(
+                                "git",
+                                "git %@ killed by signal while %@ (attempt %d/%d); retrying",
+                                GitExecutable.resolvedPath,
+                                arguments.joined(separator: " "),
+                                attempt,
+                                maxAttempts
+                            )
+                            // Give the concurrent writer a beat to finish.
+                            Thread.sleep(forTimeInterval: 0.15)
+                            continue
+                        }
 
-                    if allowedExitCodes.contains(process.terminationStatus) {
-                        continuation.resume(returning: stdout)
-                        return
-                    }
+                        let command = (["git"] + arguments).joined(separator: " ")
+                        if stderr.contains("not a git repository") {
+                            continuation.resume(throwing: GitServiceError.notGitRepository)
+                            return
+                        }
 
-                    let command = (["git"] + arguments).joined(separator: " ")
-                    if stderr.contains("not a git repository") {
-                        continuation.resume(throwing: GitServiceError.notGitRepository)
-                        return
-                    }
-
-                    continuation.resume(
-                        throwing: GitServiceError.commandFailed(
-                            command: command,
-                            exitCode: process.terminationStatus,
-                            stderr: stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                        continuation.resume(
+                            throwing: GitServiceError.commandFailed(
+                                command: command,
+                                exitCode: status,
+                                stderr: stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                            )
                         )
-                    )
-                } catch {
-                    continuation.resume(throwing: error)
+                        return
+                    } catch {
+                        continuation.resume(throwing: error)
+                        return
+                    }
                 }
+
+                // Unreachable: every iteration either returns or retries.
+                continuation.resume(
+                    throwing: GitServiceError.commandFailed(
+                        command: (["git"] + arguments).joined(separator: " "),
+                        exitCode: lastResult?.2 ?? 0,
+                        stderr: ""
+                    )
+                )
             }
         }
+    }
+
+    /// Launches one git child and drains both pipes before waiting, so the
+    /// 64KB pipe buffer can never fill and deadlock the child.
+    private static func launchGit(
+        _ arguments: [String],
+        workingDirectory: URL
+    ) throws -> (Data, Data, Int32, Process.TerminationReason) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: GitExecutable.resolvedPath)
+        process.arguments = arguments
+        process.currentDirectoryURL = workingDirectory
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        try process.run()
+
+        // Read pipe data BEFORE waitUntilExit to avoid deadlock.
+        // If the process fills the pipe buffer (~64KB), it blocks on write.
+        // waitUntilExit would then wait forever for the blocked process.
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
+        return (stdoutData, stderrData, process.terminationStatus, process.terminationReason)
     }
 }

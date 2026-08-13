@@ -48,7 +48,10 @@ GitChangesStore (@MainActor)
 
 ### 3.2 Git CLI 封装
 
-`GitService` 通过 `Process` 调用 `/usr/bin/env git`，关键细节：
+`GitService` 通过 `Process` 调用固定解析的 git 二进制（`GitExecutable.resolvedPath`，候选顺序 `/usr/bin/git` → `/opt/homebrew/bin/git` → `/usr/local/bin/git` → PATH 兜底，启动时选择一次并写日志），关键细节：
+- **固定 git 路径**: 不再用 `/usr/bin/env git`——GUI 应用由 launchd 启动时的 PATH 不可控，可能解析到 Apple 旧版 git；固定路径保证行为可预期（2026-08-11 事故中实际跑的是 Apple Git 2.50.1）
+- **status 串行化**: `git status` 按标准化 working directory 加锁（`GitCommandGate`），FileExplorer 与 Git 面板对同一仓库的 status 不会并发执行；diff/log 保持并发（它们不刷新 index，且必须避免被慢命令阻塞，如 FIFO 测试模式）
+- **信号退出重试**: status/diff/log 如果被信号杀死（如并发写入者截断文件导致的 SIGBUS，内核报 `cluster_pagein past EOF`），自动重试一次（间隔 150ms），第二次通常成功；写操作（add/commit 等）不重试
 - **管道读取顺序**: 先读 stdout/stderr 再 `waitUntilExit()`，避免 64KB 管道缓冲区满导致死锁
 - **状态解析**: `git status --porcelain=v1 --branch` → `parseStatus()` 解析分支、upstream、ahead/behind、文件变更
 - **未诞生分支**: porcelain v1 的 `## No commits yet on <branch>` 与旧版 Git 的 `## Initial commit on <branch>` 都解析为真实 `<branch>`；Right Dock 与状态栏只显示分支名，不显示整句 header。detached HEAD 继续沿用原有解析与显示行为

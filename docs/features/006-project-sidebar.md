@@ -75,6 +75,7 @@ Worktree 目录统一存放在 `~/.openowl/workspace/projects/` 下。
 归档 worktree 会先进入进度态并禁用重复点击。openOwl 先以父仓库的 `git worktree list --porcelain` 判断当前登记状态：
 
 - 仍登记为 worktree **且目录仍存在**：检查未提交修改，再执行 `git worktree remove --force`。**未提交检查本身失败时 fail-closed** —— 提示用户并取消归档，绝不在「不知道有没有脏改动」的状态下走 `--force`（git 超时、`index.lock` 被占用、仓库损坏都会走到这条路径）。目录存在性是检查的前置条件：git 无法在不存在的工作目录下运行，少了这个前置判断，抛错会落进 fail-closed 分支，让下面那条「路径已不存在」的清理路径永远无法到达
+- `git worktree remove --force` 本身失败时：git 会**先删除 worktree 登记（gitdir）再删目录**，所以目录删不掉时 worktree 实际已注销、只剩一个孤儿文件夹。openOwl 先清掉整棵目录树下 Finder 随手丢的 `.DS_Store`（不只根目录，`--force` 也会因它们失败）并重试一次；仍失败则**以实际登记状态而非 git stderr 文案为准**（文案随版本/语言变化）判断：若登记仍在说明 git 在丢弃任何东西之前就拒绝了，保持 fail-closed 抛出错误；若登记已消失说明 worktree 状态已被 git 丢弃，按下方「路径存在但未登记」路径处理，由用户决定是否移入废纸篓——绝不静默删整棵树。目录内只读文件/目录（如 CocoaPods `Pods/`）是常见触发原因
 - 路径已经不存在：直接清理侧边栏中的失效记录
 - 路径存在但未登记：不再调用 `git worktree remove`；提示用户选择将残留目录移到废纸篓或保留
 
@@ -160,6 +161,7 @@ worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session lis
 | 2026-08-01 | `SessionRow` / pane 行 / rail popover 行迁到共享 `selectableRowChrome`；session list header 用 `panelToolHeader` 与 right dock 对齐 |
 | 2026-07-31 | `openowl.json` 隔离失败时本 session 改为只读且异步告警；active worktree 归档在 Git/文件副作用前执行 editor preflight；monogram hash 改用 magnitude |
 | 2026-07-31 | `openowl.json` 解码失败改为先隔离备份再继续（此前落到迁移分支后 `projects` 为空，第一次 `persist()` 就永久覆盖用户项目列表）；`removeWorktree` 不再按 git stderr 子串分类并递归删整棵工作树，改为只删 `.DS_Store` 后重试 git；两文件 NSLog 全部改 AppLogger |
+| 2026-08-12 | `removeWorktree` 的 `.DS_Store` 清理改为覆盖整棵目录树（Finder 会随手丢到任意子目录）；重试仍失败时不再直接报错，而是检查 worktree 实际登记状态——登记已被 git 丢弃（git 先删 gitdir 再删目录）则按「路径存在但未登记」路径交给用户决定是否移入废纸篓，登记仍在才 fail-closed 报错。修复归档含 CocoaPods `Pods/` 等只读文件/目录的 worktree 时报 `Directory not empty`、残留孤儿目录、侧边栏条目无法清理的问题 |
 | 2026-07-31 | `detectBranchPrefix` 收进 `activeProjectID.didSet`——此前只挂在 4 个调用点，删除项目/worktree 后回落的 5 条路径漏掉，那些项目的 worktree 按钮永久禁用 |
 | 2026-07-31 | 修 `6c52eda` 回归：归档的未提交检查加目录存在性前置，恢复「目录已删除但 git 仍登记」的清理路径；删除零调用且策略相反的死属性 `ProjectStore.branchPrefix`；`branchPrefix` 检测改为在 `init`/`addOrActivateProject` 也触发，避免新加或恢复的项目 worktree 按钮永久禁用 |
 | 2026-03-16 | 创建文档 |
