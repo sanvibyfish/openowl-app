@@ -46,7 +46,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.openowl.app
         PRODUCT_NAME: openOwl
         MARKETING_VERSION: "1.1.5"
-        CURRENT_PROJECT_VERSION: "8"
+        CURRENT_PROJECT_VERSION: "9"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: openOwl/Resources/Info.plist
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools

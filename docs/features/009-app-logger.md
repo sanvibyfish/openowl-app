@@ -54,6 +54,16 @@ AppLogger.log("resize-diag", "frame=%.1fx%.1f", width, height)
 
 每行包含：时间戳（毫秒精度）+ `[tag]` + 消息内容。
 
+### 3.5 进程退出监控 (AppExitMonitor)
+
+`~/Library/Logs/openOwl/exit.log` 记录绕过 AppKit 正常退出流程的进程退出（`openOwl/Shared/AppExitMonitor.swift`，在 `openOwlApp.init()` 与 `applicationDidFinishLaunching` 安装，幂等）：
+
+- **`atexit` 钩子**：任何 `exit()` / main 返回（含正常 ⌘Q）都会触发；handler 运行在调用 `exit()` 的线程上，记录的回溯能直接指认调用者
+- **致命信号 handler**（SIGBUS/SEGV/ABRT/ILL/FPE/TRAP/SYS + SIGTERM）：记录崩溃现场回溯后恢复默认 handler 并重新 raise，保证 macOS 仍会生成 .ips
+- 写入使用 POSIX `open`/`write`/`backtrace_symbols_fd`（async-signal-safe），信号上下文内也安全；正常退出只产生一行，无额外开销
+
+背景：2026-08-11 应用以 exit(1) 退出（launchd 记录、无 .ips、`applicationWillTerminate` 未执行），静态分析找不到源码里的 `exit()` 调用，故增加此监控以便下次定位。
+
 ## 4. 注意事项
 
 - 日志目录在首次写入时自动创建，无需手动创建

@@ -22,6 +22,7 @@
 | 006 | Claude 状态 Sidebar 指示器 | ⏸️ On Hold | [REQ-006-claude-status-sidebar.md](REQ-006-claude-status-sidebar.md) |
 | 007 | Right Dock + 独立 Terminals | ✅ Done | [REQ-007-right-dock.md](REQ-007-right-dock.md) |
 | 008 | 终端 AppleScript 自动化 | ✅ Done | [008-terminal-applescript.md](008-terminal-applescript.md) |
+| 009 | 跨 Agent 消息总线 (Message Bus) | 🟡 In Progress | [REQ-009-message-bus.md](REQ-009-message-bus.md) |
 
 ## 分类
 

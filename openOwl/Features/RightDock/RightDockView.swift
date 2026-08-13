@@ -172,6 +172,14 @@ struct RightDockView: View {
             }
             .opacity(dock.activeTab == .git ? 1 : 0)
             .allowsHitTesting(dock.activeTab == .git)
+
+            // Bus tab doesn't need persistent @State, so visibility-gating it
+            // keeps its scroll position cheap and avoids mounting watchers
+            // while inactive.
+            BusCenterView()
+                .accessibilityHidden(dock.activeTab != .bus)
+                .opacity(dock.activeTab == .bus ? 1 : 0)
+                .allowsHitTesting(dock.activeTab == .bus)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

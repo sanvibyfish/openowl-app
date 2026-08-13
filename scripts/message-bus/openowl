@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# openowl — unified CLI for openOwl tooling (message bus and friends).
+#
+# Usage:
+#   openowl bus-send <to> "<body>" [--from <agent>] [--kind message|task] [--reply-to <id>]
+#   openowl bus-ack <id>... | openowl bus-ack --agent <name>
+#   openowl bus-list [--online]
+#   openowl help
+#
+# The bus CLI intentionally lives OUTSIDE the GUI app process: agents call it
+# from bash at any time, including when openOwl.app is not running.
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  bus-send) exec "$DIR/bus-send" "$@" ;;
+  bus-ack)  exec "$DIR/bus-ack" "$@" ;;
+  bus-list) exec "$DIR/bus-list" "$@" ;;
+  help|--help|-h|"")
+    sed -n '3,10p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
+  *)
+    echo "openowl: unknown command '$cmd' (try: openowl help)" >&2
+    exit 2
+    ;;
+esac
