@@ -2072,6 +2072,7 @@ struct FileExplorerView: View {
         if let failure = saveTab(url, storage: storage) {
             store.errorMessage = "Failed to save \(url.lastPathComponent): \(failure.message)"
         } else {
+            store.errorMessage = nil
             store.refreshNow()
         }
     }
@@ -2101,9 +2102,17 @@ struct FileExplorerView: View {
 
     private func saveTab(_ url: URL, storage: NSTextStorage) -> SaveFailure? {
         guard let openedSignature = tabDiskSignatures[url],
-              let currentSignature = FileEditorDiskSignatureProvider.signature(for: url),
-              openedSignature == currentSignature else {
-            let message = "The file changed on disk after it was opened. Your edits were not written."
+              let currentSignature = FileEditorDiskSignatureProvider.signature(for: url) else {
+            let message = "The file is no longer available on disk. Your edits were not written."
+            AppLogger.log("file-editor-state", "save-blocked reason=disk-unavailable path=%@", url.path)
+            return SaveFailure(url: url, message: message)
+        }
+        guard openedSignature == currentSignature else {
+            // Treat the first rejected save as the overwrite warning. Advancing
+            // only to the signature we just observed makes the instructed second
+            // ⌘S succeed, while another intervening disk edit is still caught.
+            tabDiskSignatures[url] = currentSignature
+            let message = "The file changed on disk after it was opened. Your edits were not written. Press ⌘S again to overwrite the version on disk."
             AppLogger.log("file-editor-state", "save-blocked reason=disk-changed path=%@", url.path)
             return SaveFailure(url: url, message: message)
         }

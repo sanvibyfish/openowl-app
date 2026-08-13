@@ -9,6 +9,9 @@
 - Git 和 File 模块化拆分（待下个 session 开始，预估 3-4 天）
 - [ ] .dic 单击 1GB+ 内存暴涨根因定位（已加 DIAG-MEM 诊断日志，待用户实测回贴）
 - [x] 2026-07-28 UI：左侧宽项目树 → Muxy 风格 `ProjectRail`（48pt）；`ContentView` 去掉 NavigationSplitView
+- [x] 2026-08-11 git SIGBUS crash 修复：固定 git 路径 + status 串行化 + 信号退出重试 + `AppExitMonitor`（atexit/信号 handler 写 exit.log 定位 exit(1) 来源）
+- [x] 2026-08-11 REQ-009 跨 Agent 消息总线 Phase 1：bus 协议（`scripts/message-bus/`）+ codex hooks 适配器 + pi 扩展适配器（codex↔pi 已 E2E 打通）
+- [x] 2026-08-11 REQ-009 Phase 2：openOwl `MessageBusService`（注册表/pane/心跳/轮询）+ Right Dock `Bus` tab 消息中心 + 跨实现互操作测试（Swift↔Python）
 
 ## Release & Distribution
 

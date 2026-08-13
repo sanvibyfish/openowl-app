@@ -98,7 +98,7 @@ classifyGitState: GitFileChange → FileGitState
 - **打开失败不落地空缓冲区**：权限被拒、文件在 stat 后被删、内容非 UTF-8 都会关闭该 tab 并报错。若代之以空字符串，磁盘签名校验仍会通过（磁盘没变），用户会看到一个可编辑的空文档，首次 ⌘S 就把原文件截断
 - **上下文变更先否决、后执行**：`ProjectStore` 在项目/worktree/free terminal 切换或删除的任何副作用前同步调用 editor preflight；auto-save 失败则整个 action 不发生，不会先切换 `activeProjectID` 或 terminal namespace 再恢复旧状态。`activeKind` 监听覆盖 free terminal A → B
 - **异步 worktree 操作分阶段审批**：创建 worktree 在首个 Git 副作用前审批；Git 成功后先把新 worktree 登记为 inactive，实际激活时再次审批。归档 active worktree 则在任何 `await` / Git 副作用前审批并切到 parent，归档 in-flight 期间禁止重新激活
-- **三个保存出口共享签名冲突否决**：⌘S、关闭 dirty tab、上下文变更前 save-all 都调用 `saveTab`；磁盘签名与打开时不一致或无法取得签名时拒绝覆盖，保留 dirty buffer
+- **三个保存出口共享签名冲突否决**：⌘S、关闭 dirty tab、上下文变更前 save-all 都调用 `saveTab`；磁盘签名与打开时不一致或无法取得签名时拒绝覆盖，保留 dirty buffer。签名不一致时，首次拒绝会把当次观察到的磁盘签名记为新的确认基线，因此按提示再次 ⌘S 可以覆盖；若两次保存之间磁盘又变化，则再次拒绝。文件已不可用时不推进基线；覆盖成功后清除旧的保存失败横幅
 - **关闭 tab 时保存失败则不关闭**：dirty tab 的 buffer 是用户编辑的唯一副本，写盘失败或 storage 已被驱逐时弹窗并保留 tab。关闭 active tab A 后自动选择相邻 tab B，并通过正常 `switchToTab` / reload 流程核验 B 的磁盘内容
 - **错误横幅在两种布局下都渲染**：`errorBanner` 同时挂在 tree panel 与 editor-only panel。此前它只在 tree panel 内，而 editor-only 恰是长时间编辑、最可能触发保存失败的模式，错误对用户完全不可见
 - **未保存名称按 editor/window 隔离聚合**：每个 `FileExplorerView` 以自己的 token 发布 dirty tab 名称；view disappear 只移除该 token，不会清空其他窗口的数据。`AppDelegate` 读取 flattened、sorted 的计算结果，并与终端确认合并成一个退出提示；dock 折叠不会触发 view disappear

@@ -592,6 +592,16 @@ final class GitChangesStore {
             let diff = try await gitService.diff(for: change)
             if self.gitService === gitService, diffRequestRevision == requestRevision,
                selectedChange?.id == change.id {
+                guard !diff.isEmpty else {
+                    // git diff succeeded with empty output — the change is
+                    // stale (committed/reverted externally while the status
+                    // snapshot was in flight). Drop the selection and refresh
+                    // the list instead of parking on a dead "No diff output".
+                    selectedChange = nil
+                    selectedDiffText = ""
+                    refreshNow()
+                    return
+                }
                 selectedDiffText = diff
                 clearError(ifRevision: capturedErrorRevision)
             }
@@ -631,6 +641,15 @@ final class GitChangesStore {
             let diff = try await gitService.diff(for: stillExisting)
             guard self.gitService === gitService, diffRequestRevision == requestRevision,
                   selectedChange?.id == selectedID else { return }
+            guard !diff.isEmpty else {
+                // Same stale-change handling as loadDiff: empty diff means the
+                // file no longer has modifications, so the selected change is
+                // gone from the working tree. Clear it and refresh the list.
+                selectedChange = nil
+                selectedDiffText = ""
+                refreshNow()
+                return
+            }
             selectedDiffText = diff
             clearError(ifRevision: capturedErrorRevision)
         } catch {

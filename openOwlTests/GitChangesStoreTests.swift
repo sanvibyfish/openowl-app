@@ -564,3 +564,67 @@ struct GitChangesStoreTests {
         #expect(store.errorMessage == nil)
     }
 }
+
+// MARK: - Stale selection (empty diff)
+
+extension GitChangesStoreTests {
+    @Test @MainActor
+    func emptyDiffDropsStaleSelection() async throws {
+        let repositoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-git-stale-sel-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL) }
+
+        func runGit(_ arguments: [String]) throws {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["git"] + arguments
+            process.currentDirectoryURL = repositoryURL
+            try process.run()
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 0)
+        }
+
+        try runGit(["init", "--quiet"])
+        try runGit(["config", "user.name", "openOwl Tests"])
+        try runGit(["config", "user.email", "tests@openowl.local"])
+        try "base\n".write(
+            to: repositoryURL.appendingPathComponent("file.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try runGit(["add", "file.txt"])
+        try runGit(["commit", "--quiet", "-m", "base"])
+
+        let store = GitChangesStore(initialDirectory: repositoryURL)
+        await store.openRepository(at: repositoryURL)
+        try "edited\n".write(
+            to: repositoryURL.appendingPathComponent("file.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        store.refreshNow()
+        for _ in 0..<50 where store.statusSnapshot?.modified.isEmpty != false {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(store.statusSnapshot?.modified.count == 1)
+        guard let change = store.statusSnapshot?.modified.first else { return }
+
+        store.selectChange(change)
+        for _ in 0..<50 where store.selectedDiffText.isEmpty {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!store.selectedDiffText.isEmpty, "diff should load for a real modification")
+
+        // Externally revert the file (as if another tool/terminal committed it),
+        // then refresh: the stale selection must be dropped, not parked on
+        // "No diff output".
+        try runGit(["checkout", "--", "file.txt"])
+        store.refreshNow()
+        for _ in 0..<50 where store.selectedChange != nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(store.selectedChange == nil, "stale selection should be cleared")
+        #expect(store.selectedDiffText.isEmpty)
+    }
+}

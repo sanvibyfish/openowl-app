@@ -124,8 +124,16 @@ final class OutlineTreeCellView: NSTableCellView {
             nameField.delegate = self
             nameField.target = self
             nameField.action = #selector(renameCommitted)
-            window?.makeFirstResponder(nameField)
-            nameField.selectText(nil)
+            // During reloadItem/reloadData the cell is NOT in the view hierarchy
+            // yet, so a synchronous makeFirstResponder fails and the field never
+            // gets focus — Enter/Esc/click-away then all appear dead. Defer to
+            // the next runloop, and re-check isEditable in case the cell was
+            // reused (scrolled away) by then.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.nameField.isEditable else { return }
+                self.window?.makeFirstResponder(self.nameField)
+                self.nameField.selectText(nil)
+            }
         } else {
             nameField.isEditable = false
             nameField.isBezeled = false
@@ -225,5 +233,13 @@ extension OutlineTreeCellView: NSTextFieldDelegate {
             return true
         }
         return false
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        // Click-away commits the rename, matching Finder. Enter already commits
+        // via the action selector; the isEditable guard prevents a second
+        // commit after Enter flipped the field back to label mode.
+        guard nameField.isEditable else { return }
+        renameCommitted()
     }
 }
