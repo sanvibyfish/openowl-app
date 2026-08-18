@@ -10,8 +10,13 @@
 - [ ] .dic 单击 1GB+ 内存暴涨根因定位（已加 DIAG-MEM 诊断日志，待用户实测回贴）
 - [x] 2026-07-28 UI：左侧宽项目树 → Muxy 风格 `ProjectRail`（48pt）；`ContentView` 去掉 NavigationSplitView
 - [x] 2026-08-11 git SIGBUS crash 修复：固定 git 路径 + status 串行化 + 信号退出重试 + `AppExitMonitor`（atexit/信号 handler 写 exit.log 定位 exit(1) 来源）
-- [x] 2026-08-11 REQ-009 跨 Agent 消息总线 Phase 1：bus 协议（`scripts/message-bus/`）+ codex hooks 适配器 + pi 扩展适配器（codex↔pi 已 E2E 打通）
-- [x] 2026-08-11 REQ-009 Phase 2：openOwl `MessageBusService`（注册表/pane/心跳/轮询）+ Right Dock `Bus` tab 消息中心 + 跨实现互操作测试（Swift↔Python）
+- [x] 2026-08-14 C-6 退出监控加固：致命信号路径移入纯 C，预打开 fd 并仅写固定消息；正常 `atexit` 保留时间戳与回溯，两类 handler 独立安装且部分信号安装可回滚
+- [x] 2026-08-14 C-9 Git status 超时加固：仅 status 限制 30 秒，超时强制结束真实进程并停止 pipe 排空；gate 在正常/错误/超时后回收 tail
+- [x] 2026-08-14 C-12 Terminal surface 失败态：原 pane 显示可访问错误卡片，保留 pane，并阻止重挂载重试与重复 UI
+- [x] 2026-08-11 REQ-009 跨 Agent 消息总线 Phase 1 ➜ **2026-08-18 已整体删除**（含 codex hooks / pi 扩展适配器），详见 [REQ-009](../requirements/REQ-009-message-bus.md)
+- [x] 2026-08-11 REQ-009 Phase 2 （MessageBusService / Bus tab / 互操作测试）➜ 同上，已删除
+- [x] 2026-08-15 REQ-009 可测试性与写入安全 ➜ 同上，已删除
+- [x] 2026-08-15 Git Discard All 契约恢复：`git clean -f -f -d` 删除非 ignored untracked（含嵌套 Git repository），保留 staged/ignored。全量 430 tests / 37 suites / 0 failures，Debug build 成功
 
 ## Release & Distribution
 
@@ -176,6 +181,9 @@
 
 ## Notes
 
+- **v1.1.6 发布 (2026-08-17)** — `build/OpenOwl-1.1.6.dmg` (35MB)，签名 + 公证 + staple + Gatekeeper 通过。内容：分屏 pane 消息总线命名入口（三点手柄右键，REQ-009，**2026-08-18 已随 REQ-009 整体删除**）、Git 面板 EBADF 修复（启动失败自动重试 + `[git]` 日志诊断 + pipe 关闭幂等化）、terminal surface 失败占位提示、buslib ID 时间戳 UTC 化。详情：`docs/releases/v1.1.6.md`
+
+> **2026-08-18 更新**：本版本中的消息总线功能（分屏 pane 命名 / `openowl bus-send` 路由）已随 REQ-009 整体删除。本条为已发布版本的档案记录。
 - 从 Electron 版迁移到 macOS 原生 (Swift + libghostty)
 - 产品需求基本不变，技术栈完全重写
 - 参考实现：Ghostty macOS app (macos/Sources/), cmux (manaflow-ai/cmux)

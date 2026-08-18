@@ -1,6 +1,8 @@
 # REQ-009: 跨 Agent 消息总线 (Message Bus)
 
-> 状态：🟡 In Progress（Phase 1 ✅，Phase 2 实现中）| 优先级：P1 | 预估：Phase 1 一天 + Phase 2 两三天 | 创建日期：2026-08-11
+> 状态：❌ 已删除（2026-08-18）| 优先级：P1 | 创建日期：2026-08-11
+>
+> **本需求已整体删除**：MessageBusService、Bus tab、pane 命名入口、`scripts/message-bus/` CLI、pi 扩展、codex hooks、`~/.openowl/bin` / `~/.openowl/bus` 全部移除。以下为删除前历史存档。
 
 ---
 
@@ -35,6 +37,8 @@ openOwl / codex / claude / pi 四方之间互发消息：任意一方可以向�
 ~/.openowl/bus/
 ├── agents.json              # 注册表
 ├── inboxes/{agent}.jsonl    # 每 agent 消息队列（追加写 + flock）
+├── cursors/{agent}.cursor   # 每 agent 已读水位
+├── locks/{agent}.lock       # 每 inbox 追加锁
 └── replies/{agent}.jsonl    # 回执队列（可选，v1 用 inbox 里的 replyTo 即可）
 ```
 
@@ -59,7 +63,7 @@ openOwl / codex / claude / pi 四方之间互发消息：任意一方可以向�
 
 **id 规则（实现决策 2026-08-11）**：`YYYYMMDDHHMMSSffffff + pid(4hex) + 进程内计数器(4hex)`。原因：水位 = max(id) 字符串比较，随机 id 在同一微秒内不保证时间序，会静默丢消息（实测复现：同微秒第二条的随机后缀小于第一条 → 水位卡死 → 新消息永不返回）。微秒 + pid + 计数器保证全局唯一且时间单调。
 
-写入规则：flock 串行化追加。读取规则：每个接收方维护**已读水位**（cursor 文件），只处理水位之后的消息；消息不删除（审计 + 断点恢复）。回执：`bus-ack <id>` 按 id 定位所属 inbox 并推进该 agent 水位（`buslib.ack_by_id`）；`bus-ack --agent <name>` 整体清空。
+写入规则：flock 串行化追加。新 inbox 以不覆盖方式创建，已有 inbox 只追加；锁文件 open/flock 失败，或 inbox 的创建、追加、关闭失败时，发送必须返回 nil，不得退化为无锁写入或返回未落盘的消息 ID。读取规则：每个接收方维护**已读水位**（cursor 文件），只处理水位之后的消息；消息不删除（审计 + 断点恢复）。回执：`bus-ack <id>` 按 id 定位所属 inbox 并推进该 agent 水位（`buslib.ack_by_id`）；`bus-ack --agent <name>` 整体清空。
 
 ### 4.2 注入格式约定
 
@@ -129,7 +133,8 @@ hook / 扩展向对话注入时用固定包裹：
 ### 6.4 openOwl 集成（Phase 2）
 
 - **注册表维护**：`MessageBusService`（Swift，`openOwl/Services/`）在 app 启动时把 `openowl` 注册进 `agents.json`，监听 `workspaceStore` 的 pane 生命周期把每个终端 pane 注册为 `pane-{id}`（kind=`openowl-pane`，带 `paneId`），周期性刷新 heartbeat
-- **pane 总线命名（地址 ≠ 路由键）**：总线地址必须是人类可读的，pane UUID 只作内部路由键。命名优先级：**右键显式名 > pane 标题（OSC）> `pane-N` 序号**。Free Terminal 顶部 tab pill 右键 → 「Set Message Bus Name…」弹窗输入（NSAlert），命名后 tab 标签直接显示总线名，注册表条目保留 `paneId` 供路由。显式名存 `~/.openowl/bus/pane-names.json`（按 pane UUID，会话级——重启后重设）
+- **目录不变量**：`MessageBusService.init` 立即建立 bus root 及 `inboxes/`、`cursors/`、`locks/`，不依赖 `start()`。生产路径解析仍为 `OPENOWL_BUS` 环境变量优先，否则使用 `~/.openowl/bus`；测试可通过 `busDirectory` 注入独立目录，不改写全局进程环境
+- **pane 总线命名（地址 ≠ 路由键）**：总线地址必须是人类可读的，pane UUID 只作内部路由键。命名优先级：**右键显式名 > pane 标题（OSC）> `pane-N` 序号**。Free Terminal 顶部 tab pill 右键 → 「Set Message Bus Name…」弹窗输入（NSAlert），命名后 tab 标签直接显示总线名；项目分屏 pane 在**三点手柄（PaneDragHandle）右键**弹出同一入口（预览版在最大化 pane 与单 pane 场景下手柄保留/不显示，命名覆盖同样按 pane UUID 持久到 `pane-names.json`），手柄 hover 提示显示当前总线名。注册表条目保留 `paneId` 供路由
 - **消息中心 UI**：Right Dock 新增 `.bus` tab（`BusCenterView`）：在线 agent 列表 + 发给 openowl 的消息流 + 发送框（to + body）；复用 flock/JSONL 协议，与 `buslib.py` 完全兼容
 - **新消息通知**：`MessageBusService` 监听 `inboxes/` 目录（FSEventStream）→ 系统通知（含“交互式 codex 有新消息”的触发提示，REQ-009 用例 US-3 的补全）
 - **数据通路**：Swift 直接读写 bus 文件（flock + JSONL），不依赖 python3 运行时
@@ -143,14 +148,16 @@ hook / 扩展向对话注入时用固定包裹：
 - [ ] 回执：`bus-ack` 后消息不再注入（水位推进）
 - [ ] token 上限生效：超量/超长消息截断
 - [ ] 与现有 hooks（confirmo）共存，不破坏
+- [x] `MessageBusService` 初始化后 bus root、`inboxes/`、`cursors/`、`locks/` 必须立即存在
+- [x] send 仅在持有 flock 且 inbox 成功追加/新建后返回 ID；锁或写入链路任一失败都返回 nil
 
 ## 8. 里程碑
 
 - **Phase 1（本次）**：bus 协议 + `openowl` CLI + codex hooks 适配器 + pi 扩展适配器 + 验收 ✅ 2026-08-11
 - **Phase 2（进行中）**：
-  - ✅ `MessageBusService`（Swift，`openOwl/Services/`）：注册 `openowl` + 每个 pane（`pane-{id}`）+ heartbeat + inbox 轮询 + 发送/水位；与 `buslib.py` 字节级互通（`MessageBusServiceTests` 三个跨实现测试验证）
+  - ✅ `MessageBusService`（Swift，`openOwl/Services/`）：注册 `openowl` + 每个 pane（`pane-{id}`）+ heartbeat + inbox 轮询 + 发送/水位；与 `buslib.py` 字节级互通，并覆盖目录不变量与锁/写入失败契约（`MessageBusServiceTests` 7/7 通过）
   - ✅ Right Dock `.bus` tab（`BusCenterView`）：在线 agent chips + 消息流 + 发送框
-  - ✅ pane 总线命名：tab pill 右键设置名字（override > pane 标题 > 序号），tab 标签显示总线名
+  - ✅ pane 总线命名：tab pill 右键 / 分屏 pane 三点手柄右键设置名字（override > pane 标题 > 序号），tab 标签与手柄 hover 提示显示总线名；显式名存 `~/.openowl/bus/pane-names.json`（按 pane UUID，会话级——重启后重设）
   - ⬜ 新消息系统通知（app 已轮询 inbox，通知接入待做）
   - ⬜ 交互式 codex 触发提示
 - **Phase 2 已搁置项**：claude 原生 SendMessage 适配（v1 用 `openowl bus-send` 已满足）、多 pi session 的 BUS_AGENT 自动管理（文档已有手动方案）
@@ -159,3 +166,11 @@ hook / 扩展向对话注入时用固定包裹：
 
 - 调研记录：`docs/memory/2026-08-11.md`
 - Claude Code SendMessage 设计（参考）：https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md
+
+## 10. 更新记录
+
+| 日期 | 说明 |
+|------|------|
+| 2026-08-18 | 需求整体删除：应用内集成（MessageBusService / Bus tab / 命名入口）+ `scripts/message-bus/` + 已安装适配器（pi 扩展、codex hooks）全部移除，文档转入存档 |
+| 2026-08-17 | 项目分屏 pane 增加命名入口：三点手柄（`PaneDragHandle`）右键 → Set Message Bus Name…（复用 `setPaneName`/`pane-names.json`），手柄 hover 提示显示总线名；与 Free Terminal tab pill 入口并列，覆盖所有分屏场景（含最大化 pane） |
+| 2026-08-15 | `MessageBusService` 支持注入 `busDirectory`，初始化时建立 bus/inboxes/cursors/locks 目录不变量；send 在 open/flock 或 inbox append/create/close 失败时返回 nil，禁止无锁写入和幽灵 ID，新 inbox 不覆盖创建。`MessageBusServiceTests` 7/7 通过 |

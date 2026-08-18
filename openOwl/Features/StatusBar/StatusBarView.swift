@@ -60,7 +60,6 @@ struct StatusBarView: View {
         switch rightDockStore.activeTab {
         case .files: return .files
         case .git: return .git
-        case .bus: return .bus
         }
     }
 
@@ -135,7 +134,6 @@ enum StatusBarVisibleArea {
     case terminal
     case git
     case files
-    case bus
 }
 
 private struct StatusBarContextInfo: View {
@@ -170,12 +168,6 @@ private struct StatusBarContextInfo: View {
                     Text("Files")
                         .font(AppFonts.statusBar)
                 }
-
-            case .bus:
-                Image(systemName: "tray.2")
-                    .font(AppFonts.toolbarIcon)
-                Text("Bus")
-                    .font(AppFonts.statusBar)
             }
         }
         .foregroundStyle(AppPalette.textTertiary)

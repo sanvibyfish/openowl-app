@@ -10,7 +10,6 @@ struct openOwlApp: App {
     @State private var fileExplorerStore = FileExplorerStore()
     @State private var claudeStatusStore = ClaudeStatusStore()
     @State private var rightDockStore = RightDockStore()
-    @State private var messageBusService = MessageBusService()
 
     init() {
         // Install exit/signal instrumentation first so even a fatal path during
@@ -38,20 +37,9 @@ struct openOwlApp: App {
                 .environment(fileExplorerStore)
                 .environment(claudeStatusStore)
                 .environment(rightDockStore)
-                .environment(messageBusService)
                 .onAppear {
                     // Apply saved appearance preference (system/light/dark)
                     NSApp.appearance = AppAppearance.current.nsAppearance
-
-                    // Message bus (REQ-009): register openowl + panes, poll
-                    // inboxes for the Bus tab and notifications.
-                    messageBusService.start(panesProvider: { [weak workspaceStore] in
-                        workspaceStore?.tabs.flatMap { tab in
-                            tab.splitTree.allPaneIDs.map { paneID in
-                                (id: paneID.uuidString, title: workspaceStore?.paneTitles[paneID])
-                            }
-                        } ?? []
-                    })
 
                     appDelegate.workspaceStore = workspaceStore
                     appDelegate.ghosttyManager = ghosttyManager
@@ -275,8 +263,6 @@ struct openOwlApp: App {
             fileExplorerStore.setProject(cwd)
         case .git:
             gitChangesStore.setPreferredDirectory(cwd)
-        case .bus:
-            break // no project context needed
         }
     }
 }

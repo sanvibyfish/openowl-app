@@ -64,19 +64,9 @@ private struct FreeTerminalTabButton: View {
     let canClose: Bool
 
     @Environment(TerminalWorkspaceStore.self) private var workspace
-    @Environment(MessageBusService.self) private var bus
     @State private var hovering = false
 
-    private var paneID: String? {
-        (tab.focusedPaneID ?? tab.splitTree.firstPaneID)?.uuidString
-    }
-
     private var displayTitle: String {
-        // An explicit message-bus name (right-click → Set Message Bus Name)
-        // becomes the tab label so you can see where messages are routed.
-        if let pid = paneID, let busName = bus.paneName(for: pid) {
-            return busName
-        }
         if let pid = tab.focusedPaneID ?? tab.splitTree.firstPaneID,
            let title = workspace.paneTitles[pid], !title.isEmpty {
             return title
@@ -123,31 +113,6 @@ private struct FreeTerminalTabButton: View {
             workspace.selectTab(id: tab.id)
         }
         .onHover { hovering = $0 }
-        .contextMenu {
-            Button("Set Message Bus Name…") { promptForBusName() }
-            if let pid = paneID, bus.paneName(for: pid) != nil {
-                Button("Clear Message Bus Name") {
-                    if let pid = paneID { bus.setPaneName(paneID: pid, name: nil) }
-                }
-            }
-        }
         .accessibilityAddTraits(isActive ? .isSelected : [])
-    }
-
-    private func promptForBusName() {
-        guard let pid = paneID else { return }
-        let alert = NSAlert()
-        alert.messageText = "Message Bus Name"
-        alert.informativeText = "Name this terminal on the message bus. Others can send to it with:\nopenowl bus-send <name> \"…\" — e.g. codex-a, pi-main, keen-pine."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-        field.placeholderString = "e.g. codex-a"
-        field.stringValue = bus.paneName(for: pid) ?? ""
-        alert.accessoryView = field
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = field
-        if alert.runModal() == .alertFirstButtonReturn {
-            bus.setPaneName(paneID: pid, name: field.stringValue)
-        }
     }
 }
