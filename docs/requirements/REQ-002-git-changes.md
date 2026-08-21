@@ -52,7 +52,7 @@ Commit diff 验收文案：加载中为 `Loading commit diff`，空 patch 为 `N
 
 - [ ] 分支切换（dropdown selector）— **未实现**：`GitService` 无 `checkout`/`branches`
 - [ ] 创建/删除分支 — **未接入**：`GitService.deleteBranch` 与 `GitChangesStore.deleteBranch` 已实现，但 `GitConfirmationAction.deleteBranch` 在全仓库从未被构造，没有任何 UI 路径可触发；创建分支无实现
-- [x] untracked 超过 500 条时截断，`untrackedTruncated` 置位并显示常驻提示行；Stage All 走 `git add -A`，作用范围是全部 untracked 而非列出的 500 条
+- [x] untracked 超过 `GitStatusSnapshot.untrackedLimit`（500）条时截断，`untrackedTruncated` 置位并显示常驻提示行；Stage All 走 `git add -A`，作用范围是全部 untracked 而非列出的 500 条 —— **截断状态下 Stage All 必须先弹确认**，说明它会暂存列表之外的文件，否则 UI 只显示 500 条却暂存上万条，用户会在毫不知情的情况下提交 build 产物
 - [x] 图片与二进制文件的 diff：工作区图片走 `WorkingTreeImageDiffView`、提交内图片走 `CommitImageDiffView`，其余二进制显示 "Binary file changed"
 - [x] Pull / Push（Fetch **未接入**：`GitChangesStore.fetch()` 零调用点，工具栏只接了 Pull 与 Push）
 - [x] Ahead/Behind 显示

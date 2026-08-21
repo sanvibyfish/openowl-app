@@ -328,7 +328,13 @@ struct GitChangesView: View {
                             .help("Discard All")
                             .accessibilityLabel("Discard All")
 
-                            Button { store.stageAll() } label: {
+                            Button {
+                                if store.statusSnapshot?.untrackedTruncated == true {
+                                    confirmationAction = .stageAllBeyondList
+                                } else {
+                                    store.stageAll()
+                                }
+                            } label: {
                                 Image(systemName: "plus")
                                     .font(AppFonts.toolbarIcon.weight(.semibold))
                             }
@@ -367,7 +373,7 @@ struct GitChangesView: View {
             HStack(spacing: 4) {
                 Image(systemName: "exclamationmark.triangle")
                     .font(AppFonts.smallIcon)
-                Text("Showing first 500 untracked files. Consider updating .gitignore.")
+                Text("Showing first \(GitStatusSnapshot.untrackedLimit) untracked files. Stage All still stages all of them. Consider updating .gitignore.")
                     .font(AppFonts.caption)
             }
             .foregroundStyle(.orange)
@@ -1282,6 +1288,9 @@ struct GitChangesView: View {
         case .discardAll:
             Button("Discard All", role: .destructive) { store.discardAll(); confirmationAction = nil }
             Button("Cancel", role: .cancel) { confirmationAction = nil }
+        case .stageAllBeyondList:
+            Button("Stage All") { store.stageAll(); confirmationAction = nil }
+            Button("Cancel", role: .cancel) { confirmationAction = nil }
         }
     }
 
@@ -1295,6 +1304,10 @@ struct GitChangesView: View {
             // Spells out the one consequence users do not expect: clean -f -f -d
             // takes untracked nested Git repositories with it.
             return "Discard all staged, unstaged and untracked changes? Untracked nested Git repositories are deleted too. This cannot be undone."
+        case .stageAllBeyondList:
+            return "Stage All runs `git add -A`, which stages every untracked file in the repository — "
+                + "including the ones beyond the \(GitStatusSnapshot.untrackedLimit) listed here. "
+                + "Add build output to .gitignore first if you do not want it committed."
         }
     }
 
@@ -2092,4 +2105,8 @@ private enum GitConfirmationAction {
     case deleteBranch(branch: String)
     case discardChanges(changes: [GitFileChange])
     case discardAll
+    /// Only raised while the untracked list is truncated: `git add -A` reaches
+    /// every untracked file, so the list on screen understates what is about to
+    /// be staged.
+    case stageAllBeyondList
 }

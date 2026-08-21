@@ -9,6 +9,7 @@ import QuartzCore
 class TerminalNSView: NSView {
     private var surface: ghostty_surface_t?
     private var surfaceCreationFailed = false
+    private var failureNotice: NSView?
     private let ghosttyApp: ghostty_app_t
     private let paneID: UUID
     private var metalLayer: CAMetalLayer!
@@ -110,7 +111,10 @@ class TerminalNSView: NSView {
             return
         }
 
+        // Per REQ-001: a failed surface is not retried when the view remounts,
+        // and the notice is not stacked a second time.
         guard !surfaceCreationFailed else { return }
+
 
         // First time — create a new surface.
 
@@ -197,36 +201,9 @@ class TerminalNSView: NSView {
         }
 
         guard surface != nil else {
-            NSLog("openOwl: Failed to create ghostty surface")
+            AppLogger.log("terminal", "ghostty_surface_new returned NULL for pane %@", paneID.uuidString)
             surfaceCreationFailed = true
-
-            let message = "Terminal surface failed to initialize"
-            let errorLabel = NSTextField(labelWithString: message)
-            errorLabel.alignment = .center
-            errorLabel.textColor = .labelColor
-            errorLabel.translatesAutoresizingMaskIntoConstraints = false
-            errorLabel.setAccessibilityLabel(message)
-            errorLabel.setAccessibilityValue(message)
-
-            let errorBox = NSBox()
-            errorBox.boxType = .custom
-            errorBox.titlePosition = .noTitle
-            errorBox.borderWidth = 0
-            errorBox.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.92)
-            errorBox.cornerRadius = 8
-            errorBox.translatesAutoresizingMaskIntoConstraints = false
-            errorBox.addSubview(errorLabel)
-            addSubview(errorBox)
-            NSLayoutConstraint.activate([
-                errorBox.centerXAnchor.constraint(equalTo: centerXAnchor),
-                errorBox.centerYAnchor.constraint(equalTo: centerYAnchor),
-                errorBox.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 24),
-                errorBox.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -24),
-                errorLabel.leadingAnchor.constraint(equalTo: errorBox.leadingAnchor, constant: 16),
-                errorLabel.trailingAnchor.constraint(equalTo: errorBox.trailingAnchor, constant: -16),
-                errorLabel.topAnchor.constraint(equalTo: errorBox.topAnchor, constant: 10),
-                errorLabel.bottomAnchor.constraint(equalTo: errorBox.bottomAnchor, constant: -10),
-            ])
+            showFailureNotice()
             return
         }
 
@@ -268,7 +245,28 @@ class TerminalNSView: NSView {
     /// True when the surface exists and can never be created for this view, so
     /// callers can tell a permanent failure from "not attached yet" instead of
     /// telling an automation script to keep retrying forever.
-    var surfaceIsPermanentlyUnavailable: Bool { surfaceCreationFailed }
+    /// Shown in place of the terminal when the surface could not be created.
+    /// Points at the log rather than restating the failure, because the useful
+    /// detail (the ghostty error) is only there.
+    private func showFailureNotice() {
+        let notice = NSTextField(labelWithString:
+            "Terminal failed to start.\nSee ~/Library/Logs/openOwl/openowl.log for details.")
+        notice.alignment = .center
+        notice.maximumNumberOfLines = 2
+        notice.sizeToFit()
+        notice.frame.origin = CGPoint(
+            x: (bounds.width - notice.frame.width) / 2,
+            y: (bounds.height - notice.frame.height) / 2
+        )
+        notice.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+        addSubview(notice)
+        failureNotice = notice
+    }
+
+    /// True once surface creation has failed. Terminal by contract: REQ-001
+    /// specifies that remounting the view does not retry creation, so a caller
+    /// seeing this must not treat it as a transient "not ready yet".
+    var surfaceIsUnavailable: Bool { surfaceCreationFailed }
 
     @discardableResult
     func sendText(_ text: String) -> Bool {

@@ -33,6 +33,13 @@ struct GitStatusSnapshot {
     let untracked: [GitFileChange]
     let untrackedTruncated: Bool
 
+    /// Cap on how many untracked paths a snapshot carries. `status` runs with
+    /// `--untracked-files=all`, so an unignored build directory can expand into
+    /// tens of thousands of entries. Note this bounds the *list*, not the repo:
+    /// Stage All uses `git add -A` and reaches every untracked file, including
+    /// the ones past this cap.
+    static let untrackedLimit = 500
+
     var hasStagedChanges: Bool { !staged.isEmpty }
     var hasAnyChanges: Bool { hasStagedChanges || !modified.isEmpty || !untracked.isEmpty }
 }
@@ -810,12 +817,19 @@ final class GitService {
     }
 
     static func hasUncommittedChanges(at path: URL) async throws -> Bool {
-        // Routed through status() so it inherits the per-repo gate, the signal
-        // retry and the timeout. Running a bare `git status` here reopened the
-        // very SIGBUS window those three were added to close.
+        // Runs through runGit so it inherits the drain, the signal retry and a
+        // timeout — a bare `git status` here reopened the very SIGBUS window
+        // those were added to close. But not through status(): ProjectRail
+        // calls this once per worktree, and status() adds
+        // `--untracked-files=all` (which expands every untracked directory
+        // into individual files) plus a full parse, to answer one Bool.
         let service = GitService(workingDirectory: path)
-        let snapshot = try await service.status()
-        return snapshot.hasAnyChanges
+        let output = try await service.runGit(
+            ["status", "--porcelain"],
+            retryOnSignalExit: true,
+            timeout: 30
+        )
+        return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Extract GitHub/GitLab username from remote origin URL.
@@ -896,7 +910,7 @@ extension GitService {
             if line.hasPrefix("?? ") {
                 let rawPath = String(line.dropFirst(3))
                 let path = decodePath(rawPath)
-                if untracked.count >= 500 {
+                if untracked.count >= GitStatusSnapshot.untrackedLimit {
                     didTruncateUntracked = true
                     continue
                 }

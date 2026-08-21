@@ -65,7 +65,7 @@ GitChangesStore (@MainActor)
 - **冲突分组**: `UU/AA/DD/AU/UA/DU/UD` 统一只进入 Changes，避免同一冲突文件同时出现在 Staged；`MM` 仍按 index/worktree 两侧分别进入 Staged 与 Changes
 - **冲突操作保护**: commit（包括未暂存时的 auto-stage）与 Discard All 执行任何变更前，先通过 unmerged paths 检测拒绝未解决冲突；拒绝后 conflict markers、index 与冲突 status 保持不变
 - **重命名路径**: quoted rename 按完整的两个 Git path 字段解析，文件名自身包含 ` -> ` 时不会被误切分
-- **批量暂存**: Stage All 直接执行 `git add -A`，不受当前 status 快照或列表过滤影响
+- **批量暂存**: Stage All 直接执行 `git add -A`，不受当前 status 快照或列表过滤影响；当 untracked 列表被截断时先弹确认，说明作用范围超出屏幕所列
 - **未诞生分支取消暂存**: 没有 HEAD 时通过清空 index 取消暂存，工作树文件保持不变；已有 HEAD 时仍恢复 index 到 HEAD
 - **未跟踪文件 Diff**: `git diff --no-index` 只接受退出码 0（无差异）与 1（有差异），大于 1 的执行错误必须向 UI 暴露
 - **Discard All**: `git reset --hard HEAD` 将 tracked 内容恢复到 HEAD（staged 与 unstaged 一并丢弃、index 清空），并通过 double-force `git clean -ffd` 删除所有未忽略的 untracked 文件、目录及嵌套 Git repository；ignored 内容不受影响

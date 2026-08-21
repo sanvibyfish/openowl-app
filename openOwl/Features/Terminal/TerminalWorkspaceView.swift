@@ -431,7 +431,9 @@ private struct PaneDragHandle: View {
             .frame(maxWidth: .infinity)
             .frame(height: 12)
             .background(AppPalette.elevated)
-            .help(handleHelp)
+            .help(isMaximized
+                  ? "Double-click to restore split (⇧⌘↩)"
+                  : "Double-click to maximize (⇧⌘↩) · drag to move pane")
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(isMaximized ? "Restore split" : "Maximize pane")
             .accessibilityAddTraits(.isButton)
@@ -443,13 +445,6 @@ private struct PaneDragHandle: View {
                 .fill(AppPalette.border)
                 .frame(height: 1)
         }
-    }
-
-    private var handleHelp: String {
-        let base = isMaximized
-            ? "Double-click to restore split (⇧⌘↩)"
-            : "Double-click to maximize (⇧⌘↩) · drag to move pane"
-        return base
     }
 }
 
