@@ -239,7 +239,7 @@ struct GitServiceParsingTests {
         }
     }
 
-    @Test func discardAllPreservesIndexAndRemovesEveryUntrackedPath() async throws {
+    @Test func discardAllResetsIndexAndRemovesEveryUntrackedPath() async throws {
         let repository = try makeRepository()
         defer { try? FileManager.default.removeItem(at: repository) }
         let stagedFile = repository.appendingPathComponent("staged.txt")
@@ -265,9 +265,13 @@ struct GitServiceParsingTests {
 
         try await GitService(workingDirectory: repository).discardAll()
 
-        #expect(try String(contentsOf: stagedFile, encoding: .utf8) == "staged content")
-        #expect(try runGit(["diff", "--cached", "--name-only"], at: repository) == "staged.txt\n")
+        // Discard now means discard: the staged revision is gone too, and the
+        // index is empty. It used to restore the worktree *from* the index, so
+        // anything staged survived a "discard all".
+        #expect(try String(contentsOf: stagedFile, encoding: .utf8) == "base staged")
+        #expect(try runGit(["diff", "--cached", "--name-only"], at: repository) == "")
         #expect(try String(contentsOf: modifiedFile, encoding: .utf8) == "base modified")
+        // clean has no -x, so ignored files are still left alone.
         #expect(FileManager.default.fileExists(atPath: repository.appendingPathComponent("ignored.txt").path))
         #expect(!FileManager.default.fileExists(atPath: nestedRepository.path))
         for index in 0..<501 {
@@ -350,5 +354,141 @@ struct GitServiceParsingTests {
             )
         }
         return String(data: data, encoding: .utf8) ?? ""
+    }
+}
+
+@Suite("Git command gate")
+struct GitCommandGateTests {
+    @Test func serializesCommandsAndRemovesCompletedTail() async throws {
+        let gate = GitCommandGate()
+        let key = UUID().uuidString
+        let firstRelease = GitGateTestLatch()
+        let secondRelease = GitGateTestLatch()
+        let events = GitGateEventRecorder()
+
+        let first = Task {
+            try await gate.withLock(key) {
+                await events.append("first-start")
+                await firstRelease.wait()
+                await events.append("first-end")
+            }
+        }
+        await waitUntil { await events.values == ["first-start"] }
+
+        let second = Task {
+            try await gate.withLock(key) {
+                await events.append("second-start")
+                await secondRelease.wait()
+                await events.append("second-end")
+            }
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(await events.values == ["first-start"])
+
+        await firstRelease.open()
+        try await first.value
+        await waitUntil { await events.values == ["first-start", "first-end", "second-start"] }
+        #expect(gate.pendingCount(for: key) == 1)
+
+        await secondRelease.open()
+        try await second.value
+        #expect(await events.values == ["first-start", "first-end", "second-start", "second-end"])
+        #expect(gate.pendingCount(for: key) == 0)
+    }
+
+    @Test func timedOutProcessDoesNotBlockSuccessor() async throws {
+        let gate = GitCommandGate()
+        let key = UUID().uuidString
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-git-timeout-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let childPIDMarker = directory.appendingPathComponent("child.pid")
+        defer {
+            if let contents = try? String(contentsOf: childPIDMarker, encoding: .utf8),
+               let childPID = Int32(contents.trimmingCharacters(in: .whitespacesAndNewlines)),
+               kill(childPID, SIGKILL) != 0,
+               errno != ESRCH {
+                Issue.record("Failed to terminate fixture child PID \(childPID), errno=\(errno)")
+            }
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let script = directory.appendingPathComponent("orphan-pipe-writer.sh")
+        try "#!/bin/sh\nsleep 5 &\necho $! > child.pid\nwait\n"
+            .write(to: script, atomically: true, encoding: .utf8)
+        let events = GitGateEventRecorder()
+
+        let hanging = Task {
+            try await gate.withLock(key) {
+                await events.append("hanging-start")
+                _ = try GitService.launchGit(
+                    [script.path],
+                    workingDirectory: directory,
+                    timeout: 0.5,
+                    executableURL: URL(fileURLWithPath: "/bin/sh")
+                )
+            }
+        }
+        await waitUntil { await events.values == ["hanging-start"] }
+
+        let clock = ContinuousClock()
+        let start = clock.now
+        let successor = Task {
+            try await gate.withLock(key) {
+                await events.append("successor")
+                return "continued"
+            }
+        }
+
+        do {
+            try await hanging.value
+            Issue.record("Expected the process to time out")
+        } catch let error as GitServiceError {
+            guard case .commandTimedOut = error else {
+                Issue.record("Unexpected error: \(error)")
+                return
+            }
+        }
+
+        #expect(try await successor.value == "continued")
+        #expect(start.duration(to: clock.now) < .seconds(1))
+        let childPID = try String(contentsOf: childPIDMarker, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(Int32(childPID) != nil)
+        #expect(await events.values == ["hanging-start", "successor"])
+        #expect(gate.pendingCount(for: key) == 0)
+    }
+
+    private func waitUntil(
+        _ condition: @escaping @Sendable () async -> Bool
+    ) async {
+        for _ in 0..<100 {
+            if await condition() { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        Issue.record("Condition was not met before timeout")
+    }
+}
+
+private actor GitGateTestLatch {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var isOpen = false
+
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func open() {
+        isOpen = true
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private actor GitGateEventRecorder {
+    private(set) var values: [String] = []
+
+    func append(_ value: String) {
+        values.append(value)
     }
 }

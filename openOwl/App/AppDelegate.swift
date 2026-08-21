@@ -134,7 +134,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let resourceMonitor = ResourceMonitor()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        AppExitMonitor.install()
         GitExecutable.logChoice()
         OpenOwlScriptRuntime.appDelegate = self
         NSApp.setActivationPolicy(.regular)
@@ -697,18 +696,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func routeTerminalFallbackKeyDown(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
-        // DIAG (2026-08-11): unconditional probe for keyCode 53 — captures ESC
-        // presses that fail the strict `isEscape` check (non-standard keyCode,
-        // hidden modifiers) or never reach the monitor at all.
-        if event.keyCode == 53 {
-            AppLogger.log(
-                "keyboard-routing",
-                "DIAG esc-hit keyCode=53 flags=%#x chars=%@ firstResponder=%@",
-                flags.rawValue,
-                event.characters ?? "?",
-                NSApp.keyWindow?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
-            )
-        }
         let isEscape = event.keyCode == 53 && (flags.isEmpty || flags == [.shift])
         let isControlC = flags == [.control] && event.charactersIgnoringModifiers?.lowercased() == "c"
         guard isEscape || isControlC else { return false }

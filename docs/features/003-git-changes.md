@@ -11,19 +11,18 @@
 ## 2. 用户流程
 
 ### 暂存与提交
-1. 查看 Staged / Changes / Untracked 三个分区的文件列表
+1. 查看 Staged Changes 与 Changes 两个分区的文件列表（Changes 合并了 modified 与 untracked，untracked 以状态字母 `U` 区分）
 2. 点击文件查看 diff
 3. Stage / Unstage 单个文件或全部
 4. 输入 commit message（或点击 AI 生成）
 5. 点击 Commit（未暂存时自动 stage all）
 
-### 分支管理
-1. 下拉切换分支（checkout）
-2. 输入名称创建新分支
-3. 删除分支（支持 force）
+### 分支管理（未实现）
+
+Git Graph 工具栏当前只显示只读的分支名与 ahead/behind。切换分支、创建分支均无实现；删除分支的 service 与 store 方法存在，但确认动作 `GitConfirmationAction.deleteBranch` 从未被构造，没有可达的 UI 路径。
 
 ### 远程操作
-- Fetch / Pull（rebase + autostash）/ Push
+- Pull（rebase + autostash）/ Push。Fetch 的 store 方法存在但未接入工具栏
 
 ### Git Graph
 - 分页加载提交日志（每页 50 条）
@@ -48,12 +47,17 @@ GitChangesStore (@MainActor)
 
 ### 3.2 Git CLI 封装
 
-`GitService` 通过 `Process` 调用固定解析的 git 二进制（`GitExecutable.resolvedPath`，候选顺序 `/usr/bin/git` → `/opt/homebrew/bin/git` → `/usr/local/bin/git` → PATH 兜底，启动时选择一次并写日志），关键细节：
+`GitService` 通过 `Process` 调用固定解析的 git 二进制（`GitExecutable.resolvedPath`，候选顺序 `/usr/bin/git` → `/opt/homebrew/bin/git` → `/usr/local/bin/git`，启动时选择一次并写日志；三者都不可执行即 `preconditionFailure`，不再回落 PATH），关键细节：
 - **固定 git 路径**: 不再用 `/usr/bin/env git`——GUI 应用由 launchd 启动时的 PATH 不可控，可能解析到 Apple 旧版 git；固定路径保证行为可预期（2026-08-11 事故中实际跑的是 Apple Git 2.50.1）
 - **status 串行化**: `git status` 按标准化 working directory 加锁（`GitCommandGate`），FileExplorer 与 Git 面板对同一仓库的 status 不会并发执行；diff/log 保持并发（它们不刷新 index，且必须避免被慢命令阻塞，如 FIFO 测试模式）
+- **status 超时边界**: 仅 `git status` 设置 30 秒超时；超时时向真实 `Process` 发送 `SIGKILL`，并停止并发排空 stdout/stderr 的 `DispatchIO`，即使后代 helper 仍持有 pipe 也不会卡住 status 或后续请求。diff/log/fetch/push 不套用该 30 秒上限
+- **gate 回收**: `GitCommandGate` 以 token 确认当前 tail 所有权，正常返回、命令错误和超时都会清除完成的 tail，不在每仓库门禁中留下已结束任务
 - **信号退出重试**: status/diff/log 如果被信号杀死（如并发写入者截断文件导致的 SIGBUS，内核报 `cluster_pagein past EOF`），自动重试一次（间隔 150ms），第二次通常成功；写操作（add/commit 等）不重试
-- **管道读取顺序**: 先读 stdout/stderr 再 `waitUntilExit()`，避免 64KB 管道缓冲区满导致死锁
-- **状态解析**: `git status --porcelain=v1 --branch` → `parseStatus()` 解析分支、upstream、ahead/behind、文件变更
+- **管道读取**: stdout/stderr 通过 `DispatchIO` 并发排空，避免任一管道的缓冲区写满后阻塞子进程
+- **DispatchIO fd 所有权（2026-08-19 修复）**: libdispatch 对 fd-based 通道**不会**在 `dispatch_io_close` 时自动关闭文件描述符——fd 由调用方持有，必须在通道的 cleanup handler 中显式 `close(descriptor)`。此前每次 git 启动泄漏 2 个 dup 读端 fd（独立复现 50 次启动 = 100 fd），应用连续运行约 37 小时后 fd 表耗尽（~10K fd，软上限 10240），此后**所有** git 子进程启动即 `Bad file descriptor`（EBADF），重试换新 pipe 无效——这是 Git 面板反复报该错误的根因。修复后独立复现 200 次启动 0 泄漏
+- **状态解析**: `git status --porcelain=v1 --branch --untracked-files=all` → `parseStatus()` 解析分支、upstream、ahead/behind、文件变更
+  - `--untracked-files=all` 会把未跟踪目录展开为逐个文件，这是 untracked 数量可能极大、进而触发下述 500 条上限的原因
+  - untracked 超过 500 条时**静默截断**，`GitStatusSnapshot.untrackedTruncated` 置位，列表顶部显示常驻提示行。注意 Stage All 走 `git add -A`，作用于全部 untracked 而非仅列出的 500 条
 - **未诞生分支**: porcelain v1 的 `## No commits yet on <branch>` 与旧版 Git 的 `## Initial commit on <branch>` 都解析为真实 `<branch>`；Right Dock 与状态栏只显示分支名，不显示整句 header。detached HEAD 继续沿用原有解析与显示行为
 - **路径解码**: `GitService.decodeGitPath()` 统一处理 Git C 风格 quoted path（引号、反斜杠与 UTF-8 八进制转义）；status 与 commit diff 文件拆分复用同一逻辑，中文/非 ASCII 路径不会退化为 `unknown`
 - **冲突分组**: `UU/AA/DD/AU/UA/DU/UD` 统一只进入 Changes，避免同一冲突文件同时出现在 Staged；`MM` 仍按 index/worktree 两侧分别进入 Staged 与 Changes
@@ -62,7 +66,7 @@ GitChangesStore (@MainActor)
 - **批量暂存**: Stage All 直接执行 `git add -A`，不受当前 status 快照或列表过滤影响
 - **未诞生分支取消暂存**: 没有 HEAD 时通过清空 index 取消暂存，工作树文件保持不变；已有 HEAD 时仍恢复 index 到 HEAD
 - **未跟踪文件 Diff**: `git diff --no-index` 只接受退出码 0（无差异）与 1（有差异），大于 1 的执行错误必须向 UI 暴露
-- **Discard All**: tracked 工作树恢复到当前 index、保留 staged 内容，并通过 double-force `git clean -ffd` 删除所有未忽略的 untracked 文件、目录及嵌套 Git repository；ignored 内容不受影响
+- **Discard All**: `git reset --hard HEAD` 将 tracked 内容恢复到 HEAD（staged 与 unstaged 一并丢弃、index 清空；空仓库改用 `git rm -r --cached`），并通过 double-force `git clean -ffd` 删除所有未忽略的 untracked 文件、目录及嵌套 Git repository；ignored 内容不受影响
 
 ### 3.3 实时刷新
 
@@ -88,12 +92,14 @@ GitChangesStore (@MainActor)
 
 回归覆盖：`GitChangesStoreTests.preferredDirectorySwitchesFromOuterToNestedRepository` 从外层仓库切换到其目录中的嵌套仓库，验证当前仓库身份更新为内层 root；本批定向 `GitChangesStoreTests` 为 5 tests / 1 suite，完整 XCTest 为 395 tests / 34 suites。SPM patch 已应用，`git diff --check` 通过。
 
+**2026-08-19 追加 — Git 面板 EBADF 根因（fd 泄漏）**：老版本将管道 fd 交给 `DispatchIO` 后从未回收（libdispatch 不关闭 fd-based 通道的 fd）。每次 git 启动泄漏 2 fd，约 37 小时连续运行后填满 fd 表，随后所有 git 命令启动失败 EBADF——日志 2026-08-19 07:39 起连续 2461 次。诊断链：`lsof` 见 10.9K 无主 pipe fd → `sample` 无阻塞读取线程 → 独立 Swift 复现定位 `DispatchIO.close()` 后 fd 仍 open → 修复（cleanup handler 中 `close(descriptor)`）后 200 次启动 0 泄漏 → Debug 构建通过。修复同时消除反复横跳的“重试一次”逻辑依赖：EBADF 现在只可能是真·瞬时抖动。运行中的 1.1.6 实例需重启才能恢复（重启即释放全部 fd）。
+
 ### 3.4 Git Graph 分页一致性
 
 - 同一 `GitService` 同时只允许一个加载更多任务；`LazyVStack` 底部 sentinel 连续触发 `onAppear` 时，后续相同 `skip` 请求直接忽略，避免重复追加同一批 commit
 - 仓库切换会重置分页任务的服务身份；旧任务结束时只清理自己的身份，不得解除新仓库的分页互斥
 - 刷新/reset 会递增 log generation，旧 generation 的分页成功或失败结果均不得写回；刷新期间不启动加载更多，避免 reset 与分页交错造成错页或缺页
-- `GitService.log()` 使用 `git log -z` 与 `%x00` 输出 NUL 分隔协议，每条提交固定解析 hash、abbrev、subject、author、date、refs、parents 7 个字段；不再依赖可与提交标题碰撞的可见文本 `---OPENOWL-RECORD---` 切分 record
+- `GitService.log()` 使用 `git log -z --all` 与 `%x00` 输出 NUL 分隔协议，每条提交固定解析 hash、abbrev、subject、author、date、refs、parents 7 个字段；不再依赖可与提交标题碰撞的可见文本 `---OPENOWL-RECORD---` 切分 record。`--all` 使 Git Graph 呈现全部 ref 而非仅当前分支
 - subject 即使完整等于旧 record marker `---OPENOWL-RECORD---` 也必须原样显示；空 refs 与 root commit 的空 parents 字段必须保留，parents 解析为 `[]`，且分页边界不能改变字段归属或遗漏提交
 - 仓库尚无提交时，Git Graph 保持 `No commits yet` 空态，不因 `git log` 无记录产生 error banner；未诞生分支的真实名称仍由 status 提供给 Right Dock 与状态栏
 - `GitGraphContentView` 在列表末尾增加一个 `graphRowHeight` 的底部 padding，避免最早一条提交被面板底边裁掉或无法点击
@@ -150,6 +156,7 @@ Commit diff 使用独立的详情状态，不以空字符串同时表示“尚�
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-14 | `git status` 增加专属 30 秒超时：超时 `SIGKILL` 真实 `Process`，并停止并发 `DispatchIO` 排空，避免后代 helper 占用 pipe 阻塞后续 status；diff/log/fetch/push 无统一 30 秒限制。`GitCommandGate` 以 token 清理正常/错误/超时 tail。`GitCommandGateTests` 覆盖串行、tail 回收及后代进程超时后 successor 继续执行 |
 | 2026-08-09 | commit auto-stage 与 Discard All 在变更前拒绝 unresolved conflicts 并保留 markers/status；Discard All 以 double-force clean 删除非 ignored 嵌套 Git repository，同时保留 ignored/staged。仓库切换立即淘汰旧 UI completion，但 command mutex 延续到底层 operation 退出；选择工作区 change 时按来源即时清理旧 commit-detail 全局错误。定向 GitService 28 tests、GitChangesStore 11 tests，完整 XCTest 419 tests / 35 suites 通过；SPM patch 已应用且 `git diff --check` 通过 |
 | 2026-08-09 | Right Dock Git 状态按真实 repository root 隔离 commit draft；仓库切换意图立即淘汰旧 command/AI/diff completion，工作区 diff 增加 revision + selection 门禁，commit 详情错误按来源即时清理。Stage All 改用 `git add -A`；Discard All 保留 index/staged、恢复 tracked 工作树并清除全部非 ignored untracked；补齐 unborn unstage、7 类冲突分组、quoted rename 内含箭头、untracked diff 退出码以及 commit message 进程句柄并发契约。定向 GitChangesStore 10 tests、GitService 40 tests、CommitMessageGenerator 2 tests，完整 XCTest 416 tests / 35 suites 通过；SPM patch 已应用且 `git diff --check` 通过 |
 | 2026-08-09 | Git porcelain v1 的 unborn branch header 同时支持 `No commits yet on <branch>` 与旧 `Initial commit on <branch>`，仅向 Right Dock/状态栏暴露真实分支名；空仓库 Git Graph 保持 `No commits yet` 空态且不显示 error banner，detached HEAD 行为不变。新增 `GitServiceParsingTests.parseBranch_unbornBranch`、`GitChangesStoreTests.emptyRepositoryReportsUnbornBranchName`；定向 26 tests / 2 suites、完整 398 tests / 34 suites 通过，SPM patch 已应用且 `git diff --check` 通过 |

@@ -8,6 +8,7 @@ import QuartzCore
 /// - Composing keyAction skipped: key encoder leaks first character during composition.
 class TerminalNSView: NSView {
     private var surface: ghostty_surface_t?
+    private var surfaceCreationFailed = false
     private let ghosttyApp: ghostty_app_t
     private let paneID: UUID
     private var metalLayer: CAMetalLayer!
@@ -109,6 +110,8 @@ class TerminalNSView: NSView {
             return
         }
 
+        guard !surfaceCreationFailed else { return }
+
         // First time — create a new surface.
 
         lastSyncedScale = window.backingScaleFactor
@@ -195,6 +198,35 @@ class TerminalNSView: NSView {
 
         guard surface != nil else {
             NSLog("openOwl: Failed to create ghostty surface")
+            surfaceCreationFailed = true
+
+            let message = "Terminal surface failed to initialize"
+            let errorLabel = NSTextField(labelWithString: message)
+            errorLabel.alignment = .center
+            errorLabel.textColor = .labelColor
+            errorLabel.translatesAutoresizingMaskIntoConstraints = false
+            errorLabel.setAccessibilityLabel(message)
+            errorLabel.setAccessibilityValue(message)
+
+            let errorBox = NSBox()
+            errorBox.boxType = .custom
+            errorBox.titlePosition = .noTitle
+            errorBox.borderWidth = 0
+            errorBox.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.92)
+            errorBox.cornerRadius = 8
+            errorBox.translatesAutoresizingMaskIntoConstraints = false
+            errorBox.addSubview(errorLabel)
+            addSubview(errorBox)
+            NSLayoutConstraint.activate([
+                errorBox.centerXAnchor.constraint(equalTo: centerXAnchor),
+                errorBox.centerYAnchor.constraint(equalTo: centerYAnchor),
+                errorBox.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 24),
+                errorBox.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -24),
+                errorLabel.leadingAnchor.constraint(equalTo: errorBox.leadingAnchor, constant: 16),
+                errorLabel.trailingAnchor.constraint(equalTo: errorBox.trailingAnchor, constant: -16),
+                errorLabel.topAnchor.constraint(equalTo: errorBox.topAnchor, constant: 10),
+                errorLabel.bottomAnchor.constraint(equalTo: errorBox.bottomAnchor, constant: -10),
+            ])
             return
         }
 
@@ -228,11 +260,18 @@ class TerminalNSView: NSView {
 
     // MARK: - Public API
 
-    func sendText(_ text: String) {
-        guard let surface else { return }
+    /// Returns false when there is no surface to write to. The surface is only
+    /// created in `viewDidMoveToWindow`, so a pane created moments earlier — the
+    /// normal `make new tab` then `input text` script sequence — has none yet,
+    /// and silently swallowing the text there made automation report success
+    /// for a command that never ran.
+    @discardableResult
+    func sendText(_ text: String) -> Bool {
+        guard let surface else { return false }
         text.withCString { cstr in
             ghostty_surface_text(surface, cstr, UInt(text.utf8.count))
         }
+        return true
     }
 
     /// Execute a ghostty keybinding action (e.g. "scroll_to_row:42")

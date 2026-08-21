@@ -239,7 +239,15 @@ extension OutlineTreeCellView: NSTextFieldDelegate {
         // Click-away commits the rename, matching Finder. Enter already commits
         // via the action selector; the isEditable guard prevents a second
         // commit after Enter flipped the field back to label mode.
-        guard nameField.isEditable else { return }
+        //
+        // The programmatic case — reloadData pulling the field editor out from
+        // under an in-progress rename, which an FSEvent burst during a build
+        // triggers routinely — is detected by the cell having left the view
+        // hierarchy. `currentEditor()` cannot tell the two apart: whether the
+        // field editor has already resigned by the time this notification
+        // arrives is not ordered by AppKit, so testing it was as likely to drop
+        // every click-away rename as to admit a programmatic one.
+        guard nameField.isEditable, window != nil, superview != nil else { return }
         renameCommitted()
     }
 }

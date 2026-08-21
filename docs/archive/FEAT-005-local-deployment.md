@@ -96,7 +96,7 @@ struct Deployment: Identifiable, Codable {
 
 ## 5. 相关需求
 
-- [REQ-004: 本地部署服务](../requirements/REQ-004-local-deployment.md)
+- [REQ-004: 本地部署服务](./REQ-004-local-deployment.md)
 
 ## 6. 更新记录
 

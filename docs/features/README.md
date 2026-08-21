@@ -20,7 +20,7 @@
 | 004 | 文件浏览器 | ✅ Done | [004-file-explorer.md](004-file-explorer.md) |
 | 005 | 本地部署服务 | ⏸️ Archived | [archive/FEAT-005-local-deployment.md](../archive/FEAT-005-local-deployment.md) |
 | 006 | 项目管理侧边栏（Project Rail） | ✅ Done | [006-project-sidebar.md](006-project-sidebar.md) |
-| 007 | UI 设计系统 | ✅ Done | [007-ui-design-system.md](007-ui-design-system.md) |
+| 007 | UI 设计系统升级 | 🔵 Draft | [007-ui-design-system.md](007-ui-design-system.md) |
 | 008 | Right Dock + 独立 Terminals | ✅ Done | [008-right-dock.md](008-right-dock.md) |
 | 009 | 文件日志系统 (AppLogger) | ✅ Done | [009-app-logger.md](009-app-logger.md) |
 | 010 | 进程资源异常监控 | 🟡 In Progress | [010-resource-monitor.md](010-resource-monitor.md) |
@@ -86,6 +86,9 @@
 | 2026-07-28 | 006/008：左侧改为 Muxy 风格 Project Rail，移除宽 NavigationSplitView 侧栏 |
 | 2026-07-30 | 004/006：强化编辑器异步读取提交门禁与交互状态保持，并统一 worktree 归档并发 guard |
 | 2026-07-31 | 004/006/008：同步 editor context preflight、持久化保护、Right Dock 常驻与 resize 中断语义 |
+| 2026-08-21 | 009：移除 `AppExitMonitor` 与 exit.log 相关章节；补记 `[resize-diag]`/`[keyboard-routing]` 为 UserDefaults opt-in（此前照文档操作会等一个默认构建永不写入的输出），tag 清单补入 `[git]` 与 `[worktree]` |
+| 2026-08-21 | 003：Discard All 契约更新为 `reset --hard HEAD`；修正分支管理描述（切换/创建未实现、删除无 UI 路径、Fetch 未接入）；状态与日志命令补齐 `--untracked-files=all` 与 `--all` 两个被漏写的 flag；补记 untracked 500 条截断与图片/二进制 diff；分区数由「三个」更正为实际的两个 |
+| 2026-08-21 | 007：索引状态由 ✅ Done 更正为 🔵 Draft —— 文档本体是现状审查与差距分析的提案，无完成记录 |
 | 2026-08-09 | 003：补充 Git Graph 分页串行化、刷新 generation 隔离、末行可点击空间、root commit 日志与文件详情，以及 commit diff 加载/空 patch/失败状态契约 |
 | 2026-08-09 | 003：补充 commit 切换时折叠/文件选择/滚动状态隔离，以及 quoted UTF-8 路径的统一解码与回归验收 |
 | 2026-08-09 | 003：Git Graph 支持展开 commit 修改文件、点击文件定位 diff、展开区域泳道对齐，以及右键复制完整 Commit ID |

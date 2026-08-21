@@ -60,14 +60,26 @@ final class CommitMessageGenerator {
         proc.standardOutput = stdoutPipe
         proc.standardError = stderrPipe
 
-        processState.install(proc)
+        // Start draining before the child runs. Reading only in the
+        // terminationHandler deadlocks: a claude CLI that fills the 64KB stdout
+        // buffer blocks in write(), never exits, so the handler never fires and
+        // the caller's `isGeneratingMessage` spins forever.
+        let stdoutDrain = try GitPipeDrain(fileHandle: stdoutPipe.fileHandleForReading)
+        let stderrDrain = try GitPipeDrain(fileHandle: stderrPipe.fileHandleForReading)
 
         return try await withCheckedThrowingContinuation { continuation in
             proc.terminationHandler = { [weak self] process in
                 self?.processState.clear(ifCurrent: process)
 
-                let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                let outData: Data
+                let errData: Data
+                do {
+                    outData = try stdoutDrain.finish(command: "claude")
+                    errData = try stderrDrain.finish(command: "claude")
+                } catch {
+                    continuation.resume(throwing: GeneratorError.cliError(error.localizedDescription))
+                    return
+                }
                 let output = (String(data: outData, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let errOutput = (String(data: errData, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -87,9 +99,13 @@ final class CommitMessageGenerator {
 
             do {
                 try proc.run()
+                // Register only once it is actually running: cancel() calls
+                // terminate(), and terminate() on a Process that was never
+                // launched raises NSInvalidArgumentException — an ObjC
+                // exception Swift cannot catch, so it takes the app down.
+                processState.install(proc)
                 NSLog("CommitMessageGenerator: process started, pid=%d", proc.processIdentifier)
             } catch {
-                processState.clear(ifCurrent: proc)
                 continuation.resume(throwing: GeneratorError.cliError(error.localizedDescription))
             }
         }

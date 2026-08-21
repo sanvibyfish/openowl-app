@@ -9,14 +9,15 @@
 - Git 和 File 模块化拆分（待下个 session 开始，预估 3-4 天）
 - [ ] .dic 单击 1GB+ 内存暴涨根因定位（已加 DIAG-MEM 诊断日志，待用户实测回贴）
 - [x] 2026-07-28 UI：左侧宽项目树 → Muxy 风格 `ProjectRail`（48pt）；`ContentView` 去掉 NavigationSplitView
-- [x] 2026-08-11 git SIGBUS crash 修复：固定 git 路径 + status 串行化 + 信号退出重试 + `AppExitMonitor`（atexit/信号 handler 写 exit.log 定位 exit(1) 来源）
+- [x] 2026-08-11 git SIGBUS crash 修复：固定 git 路径 + status 串行化 + 信号退出重试（同期的 `AppExitMonitor`/exit.log 已于 2026-08-21 移除，见 [FEAT-009](features/009-app-logger.md)）
 - [x] 2026-08-14 C-6 退出监控加固：致命信号路径移入纯 C，预打开 fd 并仅写固定消息；正常 `atexit` 保留时间戳与回溯，两类 handler 独立安装且部分信号安装可回滚
 - [x] 2026-08-14 C-9 Git status 超时加固：仅 status 限制 30 秒，超时强制结束真实进程并停止 pipe 排空；gate 在正常/错误/超时后回收 tail
 - [x] 2026-08-14 C-12 Terminal surface 失败态：原 pane 显示可访问错误卡片，保留 pane，并阻止重挂载重试与重复 UI
-- [x] 2026-08-11 REQ-009 跨 Agent 消息总线 Phase 1 ➜ **2026-08-18 已整体删除**（含 codex hooks / pi 扩展适配器），详见 [REQ-009](../requirements/REQ-009-message-bus.md)
+- [x] 2026-08-11 REQ-009 跨 Agent 消息总线 Phase 1 ➜ **2026-08-18 已整体删除**（含 codex hooks / pi 扩展适配器），详见 [REQ-009](requirements/REQ-009-message-bus.md)
 - [x] 2026-08-11 REQ-009 Phase 2 （MessageBusService / Bus tab / 互操作测试）➜ 同上，已删除
 - [x] 2026-08-15 REQ-009 可测试性与写入安全 ➜ 同上，已删除
 - [x] 2026-08-15 Git Discard All 契约恢复：`git clean -f -f -d` 删除非 ignored untracked（含嵌套 Git repository），保留 staged/ignored。全量 430 tests / 37 suites / 0 failures，Debug build 成功
+- [x] 2026-08-19 Git 面板 EBADF 根因修复：`GitPipeDrain` 的 `DispatchIO` 通道泄漏 dup 读端 fd（libdispatch 不自动关闭 fd-based 通道的 fd），每次 git 启动 +2 fd，连续运行 ~37h 后 fd 表耗尽（~10.9K fd）导致全部 git 启动 EBADF。修复：cleanup handler 显式 `close(descriptor)`，复现 200 次启动 0 泄漏。运行中 1.1.6 实例需重启恢复。详见 [FEAT-003](../docs/features/003-git-changes.md) 与 [2026-08-19 日志](memory/2026-08-19.md)
 
 ## Release & Distribution
 
@@ -181,9 +182,11 @@
 
 ## Notes
 
-- **v1.1.6 发布 (2026-08-17)** — `build/OpenOwl-1.1.6.dmg` (35MB)，签名 + 公证 + staple + Gatekeeper 通过。内容：分屏 pane 消息总线命名入口（三点手柄右键，REQ-009，**2026-08-18 已随 REQ-009 整体删除**）、Git 面板 EBADF 修复（启动失败自动重试 + `[git]` 日志诊断 + pipe 关闭幂等化）、terminal surface 失败占位提示、buslib ID 时间戳 UTC 化。详情：`docs/releases/v1.1.6.md`
+- **v1.1.6 — 尚未发布**（发布说明 🟢 Ready，详情：`docs/releases/v1.1.6.md`）
 
-> **2026-08-18 更新**：本版本中的消息总线功能（分屏 pane 命名 / `openowl bus-send` 路由）已随 REQ-009 整体删除。本条为已发布版本的档案记录。
+> **2026-08-21 更正**：本条先前记为「v1.1.6 发布 (2026-08-17)，签名 + 公证 + staple + Gatekeeper 通过」，与事实不符。核查结果：`git tag` 最新为 `v1.1.4-2`，v1.1.5 与 v1.1.6 均无 tag；2026-08-13 至 08-18 之间仓库只有一个提交；`build/OpenOwl-1.1.6.dmg` 的 mtime 是 2026-08-19 而非 08-17。该 dmg 亦早于 2026-08-21 的管道层与 Discard All 修复，不可作为 v1.1.6 的发布件。先前条目中列出的「分屏 pane 消息总线命名入口」经核查从未实现（见 `docs/releases/v1.1.6.md` 的「已撤回的内容」）。
+
+> **2026-08-19 更新**：本条中“Git 面板 EBADF 已修复”实为转饰——重试机制只扛瞬时抖动。真正根因是 `GitPipeDrain` 的 `DispatchIO` 泄漏 dup 读端 fd（libdispatch 不自动关闭 fd-based 通道的 fd），每次 git 启动 +2 fd；连续运行约 37 小时后 fd 表耗尽，之后所有 git 启动 EBADF。修复见 FEAT-003：cleanup handler 显式 `close(descriptor)`。运行中的 1.1.6 实例需重启恢复。
 - 从 Electron 版迁移到 macOS 原生 (Swift + libghostty)
 - 产品需求基本不变，技术栈完全重写
 - 参考实现：Ghostty macOS app (macos/Sources/), cmux (manaflow-ai/cmux)

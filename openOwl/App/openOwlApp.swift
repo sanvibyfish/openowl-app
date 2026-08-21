@@ -12,10 +12,6 @@ struct openOwlApp: App {
     @State private var rightDockStore = RightDockStore()
 
     init() {
-        // Install exit/signal instrumentation first so even a fatal path during
-        // early setup (GhosttyAppManager init, store loading) is captured.
-        AppExitMonitor.install()
-
         Self.setupEnvironment()
 
         // ProjectStore loads projects and restores security-scoped bookmarks.

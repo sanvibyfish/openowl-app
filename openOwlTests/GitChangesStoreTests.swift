@@ -126,7 +126,21 @@ struct GitChangesStoreTests {
         try runGit(["add", "change.txt"], at: firstURL)
 
         let hookURL = firstURL.appendingPathComponent(".git/hooks/pre-commit")
-        try "#!/bin/sh\nsleep 0.4\nexit 1\n".write(to: hookURL, atomically: true, encoding: .utf8)
+        let startedMarkerURL = hookURL.appendingPathExtension("started")
+        let releaseMarkerURL = hookURL.appendingPathExtension("release")
+        defer { try? Data().write(to: releaseMarkerURL) }
+        try """
+        #!/bin/sh
+        started_marker="$0.started"
+        release_marker="$0.release"
+        : > "$started_marker"
+        remaining=250
+        while [ ! -e "$release_marker" ] && [ "$remaining" -gt 0 ]; do
+            sleep 0.02
+            remaining=$((remaining - 1))
+        done
+        exit 1
+        """.write(to: hookURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hookURL.path)
 
         let store = GitChangesStore(initialDirectory: firstURL)
@@ -134,6 +148,10 @@ struct GitChangesStoreTests {
         store.commitMessage = "stale commit"
         store.commit()
         #expect(store.isRunningCommand)
+        for _ in 0..<200 where !FileManager.default.fileExists(atPath: startedMarkerURL.path) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(FileManager.default.fileExists(atPath: startedMarkerURL.path))
 
         let switchTask = Task { @MainActor in
             await store.openRepository(at: secondURL)
@@ -143,7 +161,8 @@ struct GitChangesStoreTests {
         await switchTask.value
         #expect(store.isRunningCommand)
         store.commitMessage = "current draft"
-        for _ in 0..<100 where store.isRunningCommand {
+        try Data().write(to: releaseMarkerURL)
+        for _ in 0..<200 where store.isRunningCommand {
             try await Task.sleep(for: .milliseconds(20))
         }
 

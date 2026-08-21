@@ -396,6 +396,11 @@ struct FileExplorerView: View {
     @State private var fileReadRequestIDs: [URL: UUID] = [:]
     @State private var editorSessionGeneration = UUID()
     @State private var dirtyTabs: Set<URL> = []
+    /// Tabs whose save was refused because the file changed on disk, and whose
+    /// user has therefore been warned once. Kept separate from
+    /// `tabDiskSignatures` so that consenting to an overwrite never implies
+    /// "this tab is in sync with disk" — see `saveTab`.
+    @State private var pendingOverwriteConfirmation: Set<URL> = []
     @State private var editorSessionProjectKey: String?
     @State private var persistDebounceWork: DispatchWorkItem?
 
@@ -1700,6 +1705,9 @@ struct FileExplorerView: View {
     }
 
     private func reloadOpenTabFromDisk(_ url: URL, signature: FileEditorDiskSignature, reason: String) {
+        // A reload replaces the buffer with the disk content, so any consent to
+        // overwrite the previous disk version is now meaningless.
+        pendingOverwriteConfirmation.remove(url)
         guard FileEditorAutomaticReadPolicy.allowsRead(
             fileSize: signature.fileSize,
             isImage: isImageURL(url),
@@ -1992,7 +2000,7 @@ struct FileExplorerView: View {
                 presentSaveFailureAlert([SaveFailure(url: url, message: "The edits are no longer held in memory.")])
                 return
             }
-            if let failure = saveTab(url, storage: storage) {
+            if let failure = saveTab(url, storage: storage, allowOverwriteAfterWarning: false) {
                 AppLogger.log("file-editor-state", "close-blocked path=%@ error=%@", url.path, failure.message)
                 presentSaveFailureAlert([failure])
                 return
@@ -2020,6 +2028,7 @@ struct FileExplorerView: View {
         tabDiskSignatures.removeValue(forKey: url)
         fileReadRequestIDs.removeValue(forKey: url)
         dirtyTabs.remove(url)
+        pendingOverwriteConfirmation.remove(url)
         largeModeTabs.remove(url)
         clearHeavyProgress(for: url)
         if pendingActivationURL == url { pendingActivationURL = nil }
@@ -2069,7 +2078,7 @@ struct FileExplorerView: View {
         guard let url = activeTabURL,
               dirtyTabs.contains(url),
               let storage = tabStorages[url] else { return }
-        if let failure = saveTab(url, storage: storage) {
+        if let failure = saveTab(url, storage: storage, allowOverwriteAfterWarning: true) {
             store.errorMessage = "Failed to save \(url.lastPathComponent): \(failure.message)"
         } else {
             store.errorMessage = nil
@@ -2093,34 +2102,48 @@ struct FileExplorerView: View {
                 failures.append(SaveFailure(url: url, message: "The edits are no longer held in memory."))
                 continue
             }
-            if let failure = saveTab(url, storage: storage) {
+            if let failure = saveTab(url, storage: storage, allowOverwriteAfterWarning: false) {
                 failures.append(failure)
             }
         }
         return failures
     }
 
-    private func saveTab(_ url: URL, storage: NSTextStorage) -> SaveFailure? {
+    /// - Parameter allowOverwriteAfterWarning: whether this call may spend an
+    ///   overwrite consent the user has already given by pressing ⌘S a second
+    ///   time. Only the explicit single-tab save passes `true`; batch saves
+    ///   (⌘Q, project switch) must never overwrite a changed file on the user's
+    ///   behalf, because nobody is there to read the warning.
+    private func saveTab(
+        _ url: URL,
+        storage: NSTextStorage,
+        allowOverwriteAfterWarning: Bool
+    ) -> SaveFailure? {
         guard let openedSignature = tabDiskSignatures[url],
               let currentSignature = FileEditorDiskSignatureProvider.signature(for: url) else {
             let message = "The file is no longer available on disk. Your edits were not written."
             AppLogger.log("file-editor-state", "save-blocked reason=disk-unavailable path=%@", url.path)
             return SaveFailure(url: url, message: message)
         }
-        guard openedSignature == currentSignature else {
-            // Treat the first rejected save as the overwrite warning. Advancing
-            // only to the signature we just observed makes the instructed second
-            // ⌘S succeed, while another intervening disk edit is still caught.
-            tabDiskSignatures[url] = currentSignature
-            let message = "The file changed on disk after it was opened. Your edits were not written. Press ⌘S again to overwrite the version on disk."
-            AppLogger.log("file-editor-state", "save-blocked reason=disk-changed path=%@", url.path)
-            return SaveFailure(url: url, message: message)
+        if openedSignature != currentSignature {
+            // Never advance `tabDiskSignatures` on a refused save. Doing so
+            // marks the tab as in sync while its edits are still unwritten, so
+            // `reloadOpenTabFromDiskIfNeeded` skips it forever and the editor
+            // shows stale content while claiming to be current. Consent to
+            // overwrite is tracked separately and only an explicit ⌘S spends it.
+            guard allowOverwriteAfterWarning, pendingOverwriteConfirmation.contains(url) else {
+                pendingOverwriteConfirmation.insert(url)
+                let message = "The file changed on disk after it was opened. Your edits were not written. Press ⌘S again to overwrite the version on disk."
+                AppLogger.log("file-editor-state", "save-blocked reason=disk-changed path=%@", url.path)
+                return SaveFailure(url: url, message: message)
+            }
         }
 
         do {
             try storage.string.write(to: url, atomically: true, encoding: .utf8)
             tabDiskSignatures[url] = FileEditorDiskSignatureProvider.signature(for: url)
             dirtyTabs.remove(url)
+            pendingOverwriteConfirmation.remove(url)
             return nil
         } catch {
             AppLogger.log(

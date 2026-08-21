@@ -1,5 +1,7 @@
 # REQ-002: Git 变更管理
 
+> 状态：✅ Done | 优先级：P0 | 创建日期：2026-03-14
+
 ## 概述
 
 简易 Git 管理面板，支持查看变更、Stage/Unstage、提交、查看 Diff。
@@ -8,8 +10,8 @@
 
 ### P0 — 基础 Git 操作
 
-- [x] Git 状态获取：通过 `Process` 调用 `git status --porcelain=v1`
-- [x] 变更分组：Staged Changes / Changes (Modified) / Untracked
+- [x] Git 状态获取：通过 `Process` 调用 `git status --porcelain=v1 --branch --untracked-files=all`
+- [x] 变更分组：Staged Changes 与 Changes 两个分区（Changes 合并 modified 与 untracked，untracked 以状态字母 `U` 区分）
 - [x] Stage/Unstage：单文件和批量操作 (`git add` / `git restore --staged`)
 - [x] 提交：多行 commit message，Cmd+Enter 快捷键
 - [x] Auto-stage：如果没有 staged 文件，提交时自动 stage 所有变更
@@ -17,6 +19,10 @@
 - [x] Stage All 必须使用 `git add -A` 覆盖完整仓库，不依赖当前展示或缓存的 status 列表
 - [x] 未诞生分支取消暂存必须清空 index 并保留工作树；已有 HEAD 时恢复 index 到 HEAD
 - [x] `UU/AA/DD/AU/UA/DU/UD` 冲突文件只进入 Changes，`MM` 同时按 index/worktree 两侧进入 Staged 与 Changes
+- [x] 仅 `git status` 设置 30 秒超时；超时必须 `SIGKILL` 真实子进程并停止 stdout/stderr 排空，后代 helper 持有 pipe 不得阻塞后续 status。diff/log/fetch/push 不得套用该 30 秒限制
+- [x] `GitCommandGate` 必须串行同仓库 status，并在正常、错误、超时结束后清理已完成 tail，使 successor 可继续执行
+- [x] git 子进程启动失败（管道 dup / posix_spawn 的 `EBADF`/`EMFILE`/`ENFILE`/`EAGAIN`）必须自动重试一次并换新管道；该错误发生在子进程运行前，重试不会重复执行写命令。所有启动失败必须写入 `[git]` 日志（含命令与错误详情），不得只在 UI banner 展示不可诊断的 `Bad file descriptor`
+- [x] `GitPipeDrain` 关闭必须幂等：`finish()` 与超时路径 `stop()` 及 `deinit` 均可触发 close，底层 dup fd 不得被重复关闭；dup 失败时记录 fd/errno
 
 ### P0 — Diff 视图
 
@@ -44,9 +50,11 @@ Commit diff 验收文案：加载中为 `Loading commit diff`，空 patch 为 `N
 
 ### P1 — 分支管理
 
-- [x] 分支切换（dropdown selector）
-- [x] 创建/删除分支
-- [x] Pull / Push / Fetch
+- [ ] 分支切换（dropdown selector）— **未实现**：`GitService` 无 `checkout`/`branches`
+- [ ] 创建/删除分支 — **未接入**：`GitService.deleteBranch` 与 `GitChangesStore.deleteBranch` 已实现，但 `GitConfirmationAction.deleteBranch` 在全仓库从未被构造，没有任何 UI 路径可触发；创建分支无实现
+- [x] untracked 超过 500 条时截断，`untrackedTruncated` 置位并显示常驻提示行；Stage All 走 `git add -A`，作用范围是全部 untracked 而非列出的 500 条
+- [x] 图片与二进制文件的 diff：工作区图片走 `WorkingTreeImageDiffView`、提交内图片走 `CommitImageDiffView`，其余二进制显示 "Binary file changed"
+- [x] Pull / Push（Fetch **未接入**：`GitChangesStore.fetch()` 零调用点，工具栏只接了 Pull 与 Push）
 - [x] Ahead/Behind 显示
 - [x] porcelain v1 的 unborn branch header `No commits yet on <branch>` 与旧 `Initial commit on <branch>` 必须解析为真实 `<branch>`；Right Dock 与状态栏不得显示整句 header
 - [x] detached HEAD 的解析与显示行为保持不变
@@ -62,7 +70,7 @@ Commit diff 验收文案：加载中为 `Loading commit diff`，空 patch 为 `N
 - [x] 同一仓库的加载更多请求必须串行化；底部 sentinel 重复出现不得以相同 `skip` 重复追加 commit
 - [x] 刷新/reset 后，较早 generation 的分页结果不得写回；刷新进行中不得启动加载更多
 - [x] 仓库切换后，旧分页任务结束不得清除新仓库的分页互斥状态
-- [x] Git 日志必须使用 `git log -z` + `%x00` 的 NUL 协议，每条提交固定解析 hash、abbrev、subject、author、date、refs、parents 7 个字段，不得使用可能与提交内容碰撞的可见文本作为 record separator
+- [x] Git 日志必须使用 `git log -z --all` + `%x00` 的 NUL 协议（`--all` 使 Graph 覆盖全部 ref），每条提交固定解析 hash、abbrev、subject、author、date、refs、parents 7 个字段，不得使用可能与提交内容碰撞的可见文本作为 record separator
 - [x] 合法提交标题即使完整等于旧分隔文本 `---OPENOWL-RECORD---` 也必须原样显示
 - [x] 日志解析必须保留空 refs 与 root commit 的空 parents 字段，使没有 parent 的 root commit 仍出现在 Git Graph；分页不得造成字段错位、提交遗漏或重复
 - [x] 尚无提交的仓库必须在 Git Graph 显示 `No commits yet` 空态，不得因日志为空产生 error banner
@@ -80,7 +88,7 @@ Commit diff 验收文案：加载中为 `Loading commit diff`，空 patch 为 `N
 
 - [x] AI commit message 生成（调用本地 claude CLI）；进程句柄需同步并按实例清理，旧 termination 不得清除新任务句柄
 - [x] Discard changes（with confirmation）
-- [x] Discard All 将 tracked 工作树恢复到当前 index，保留 staged 内容，删除全部非 ignored untracked 文件与目录，并保留 ignored 内容
+- [x] Discard All 将 tracked 内容恢复到 HEAD（staged 与 unstaged 一并丢弃、index 清空），删除全部非 ignored untracked 文件与目录（含嵌套 Git repository），并保留 ignored 内容
 - [x] Discard All 在任何恢复/清理前必须拒绝 unresolved conflicts；无冲突时以 double-force clean 删除非 ignored 的嵌套 Git repository，同时仍保留 ignored 与 staged 内容
 
 ## 技术要点
@@ -96,10 +104,11 @@ final class GitService {
     func unstage(files: [String]) async throws
     func commit(message: String, autoStageWhenNeeded: Bool) async throws
     func diff(for change: GitFileChange) async throws -> String
-    func branches() async throws -> [String]
-    func checkout(branch: String) async throws
-    func createBranch(name: String, checkout: Bool) async throws
-    func deleteBranch(name: String, force: Bool) async throws
+    // 以下三个为计划接口，当前未实现：
+    // func branches() async throws -> [String]
+    // func checkout(branch: String) async throws
+    // func createBranch(name: String, checkout: Bool) async throws
+    func deleteBranch(name: String, force: Bool) async throws  // 已实现，但无 UI 触发路径
     func fetch() async throws
     func pull() async throws
     func push() async throws
@@ -137,7 +146,7 @@ final class GitService {
 ## 已落地实现
 
 - `GitChangesView`：变更分组列表、Stage/Unstage、Stage All/Unstage All、Discard/Discard All（确认弹窗）、Diff 面板（含轻量语法高亮）、Commit 面板
-- `GitChangesStore`：仓库选择、状态刷新、提交后回刷、branch create/delete/checkout、fetch/pull/push、discard、错误/提示状态管理
+- `GitChangesStore`：仓库选择、状态刷新、提交后回刷、pull/push、discard、错误/提示状态管理（branch create/checkout 未实现；delete 与 fetch 已实现但无 UI 触发路径）
 - `GitService`：新增 `discardModified` (`git restore --worktree`) 与 `discardUntracked` (`git clean -f -d`)
 - `FileWatcher`：FSEvents 目录事件 -> 忽略规则过滤 -> 防抖刷新
 - 侧边栏新增 `Git Changes` 面板入口
@@ -146,6 +155,12 @@ final class GitService {
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-21 | **`discardAll` 契约变更**：由 `checkout-index --all --force`（从 index 恢复，staged 内容因而幸存）改为 `git reset --hard HEAD` + `git clean -f -f -d`，空仓库走 `git rm -r --cached`。原实现下 UI 的「Discard all…」在 index 脏时是假的——而 `commit()` 自动 stage 使 index 脏成为常态，用户以为已丢弃的改动会在下次提交时一并提交。确认对话框同步写明「staged/unstaged/untracked 全部丢弃，且删除未跟踪的嵌套 Git repository」。关联 `discardAllResetsIndexAndRemovesEveryUntrackedPath` |
+| 2026-08-21 | 管道层加固：`GitPipeDrain` 的 DispatchIO 读错误不再被丢弃（此前读到一半 EIO/ECANCELED 仍照常 signal，`finish()` 返回截断数据而上游只看 exit code，于是半截 `git status`/`git diff` 被当作完整结果）；`finish()` 改为抛错并以 5 秒宽限期有界等待——子进程已退出后管道仍不 EOF 意味着孙进程（hook/credential helper/fsmonitor）继承了写端，此前会永久阻塞并连带锁死该仓库 gate lane 的全部后续 `status`。超时终止由 `SIGKILL` 改为 `SIGTERM`（SIGKILL 掉正在刷 index 的 git 会留下 stale `.git/index.lock`）。`fileData` 与 `hasUncommittedChanges` 收编进 `launchGit`/`status()`，不再各自绕开 drain、gate、重试与超时 |
+| 2026-08-21 | 删除三处兜底：git 启动失败（EBADF/EMFILE 等）的换管道重试（其根因 DispatchIO fd 泄漏已修，重试与信号重试叠成两层且共用 attempt 预算，反而削弱了 SIGBUS 重试）；`GitExecutable` 的 `return "git"` PATH 回落（`Process` 对相对路径按 cwd 解析而非 PATH，该兜底从不生效）；循环后自称不可达的 defensive fallback（实为可达，会把启动失败伪装成 `exitCode: 0` 的 git 判决）。成功但 stderr 非空的 git 调用现在写入 `[git]` 日志 |
+| 2026-08-17 | 增加 git 子进程启动失败（EBADF/EMFILE/ENFILE/EAGAIN）换新管道重试一次的验收，所有 git 启动错误写入 `[git]` 日志便于诊断；`GitPipeDrain` close 幂等化（finish/timeout/deinit 三路并发安全），dup 失败记录 fd/errno。现象：右侧 Git 面板偶发 `The operation couldn't be completed. Bad file descriptor` 且列表停留在旧快照；已确认 git CLI、Pinned 二进制与单发压测（300 次 DispatchIO 管道排空）均正常，属 app 进程内 fd 环境瞬态问题 ⚠️ **该归因已于 2026-08-19 被推翻**：真因是 `GitPipeDrain` 的 `DispatchIO` 泄漏 dup 读端 fd（每次 git 启动 +2 fd，约 37 小时后 fd 表耗尽），并非瞬态。重试机制已于 2026-08-21 随根因修复一并移除
+| 2026-08-15 | `discardAll` 恢复 double-force `git clean -f -f -d`，再次与已确认契约一致：删除非 ignored untracked 文件、目录及嵌套 Git repository，保留 staged 与 ignored 内容 |
+| 2026-08-14 | 增加 status 专属 30 秒超时、真实进程 `SIGKILL`、并发 pipe 排空停止、后代 helper 不阻塞 successor，以及 gate 在正常/错误/超时后回收 tail 的验收。关联 `GitCommandGateTests.serializesCommandsAndRemovesCompletedTail` 与 `timedOutProcessDoesNotBlockSuccessor` |
 | 2026-08-09 | 增加 unresolved conflicts 的 commit/discard-all 前置拒绝与状态保留、double-force clean 嵌套仓库、仓库切换期间 command mutex 生命周期，以及工作区选择按 provenance 清理 commit-detail 全局错误的验收。关联 GitService 28 tests、GitChangesStore 11 tests；完整 XCTest 419 tests / 35 suites 通过 |
 | 2026-08-09 | 增加仓库级 commit draft、切仓意图 generation、diff revision/selection、commit error provenance 与 AI Process identity 验收；补齐 `git add -A` Stage All、保留 staged 的 Discard All、unborn unstage、冲突分组、quoted rename arrow 与 untracked diff exit-code 契约。关联 GitChangesStore 10 tests、GitService 40 tests、CommitMessageGenerator 2 tests；完整 XCTest 416 tests / 35 suites 通过 |
 | 2026-08-09 | 增加 unborn branch 验收：porcelain v1 的新版 `No commits yet on <branch>` 与旧版 `Initial commit on <branch>` 均只解析出真实分支名，空仓库 Git Graph 显示 `No commits yet` 且不产生 error banner，detached HEAD 行为不变。关联 `parseBranch_unbornBranch`、`emptyRepositoryReportsUnbornBranchName`；定向 26 tests / 2 suites、完整 398 tests / 34 suites 通过 |

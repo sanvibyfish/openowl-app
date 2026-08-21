@@ -86,7 +86,7 @@ cmux (manaflow-ai/cmux) 是同样基于 libghostty 的 macOS 终端应用，是�
   - [REQ-001: libghostty 终端集成](./requirements/REQ-001-terminal.md)
   - [REQ-002: Git 变更管理](./requirements/REQ-002-git-changes.md)
   - [REQ-003: 文件浏览器](./requirements/REQ-003-file-explorer.md)
-  - [REQ-004: 本地部署服务](./requirements/REQ-004-local-deployment.md)
+  - [REQ-004: 本地部署服务](./archive/REQ-004-local-deployment.md)
   - [REQ-005: 终端 Pane 通知系统](./requirements/REQ-005-terminal-notifications.md)
   - [REQ-006: Claude 状态 Sidebar 指示器](./requirements/REQ-006-claude-status-sidebar.md)
 - [里程碑计划](./milestones/)

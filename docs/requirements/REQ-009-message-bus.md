@@ -139,25 +139,25 @@ hook / 扩展向对话注入时用固定包裹：
 - **新消息通知**：`MessageBusService` 监听 `inboxes/` 目录（FSEventStream）→ 系统通知（含“交互式 codex 有新消息”的触发提示，REQ-009 用例 US-3 的补全）
 - **数据通路**：Swift 直接读写 bus 文件（flock + JSONL），不依赖 python3 运行时
 
-## 7. 验收标准
+## 7. 验收标准（归档，不再适用）
 
-- [ ] `bus-send` 四方互发：codex → pi、pi → codex、claude → codex、任意 → openowl（Phase 1 内）
-- [ ] codex exec 模式：写 inbox + 触发 exec → codex 回合包含 `<inbox-message>` 内容，且不重复注入（水位正确）
-- [ ] 交互式 codex：`UserPromptSubmit` hook 注入生效（spike 实测确认 stdout 语义）
-- [ ] pi 扩展：外部写 inbox → 运行中 pi 收到新回合并触发处理
-- [ ] 回执：`bus-ack` 后消息不再注入（水位推进）
-- [ ] token 上限生效：超量/超长消息截断
-- [ ] 与现有 hooks（confirmo）共存，不破坏
-- [x] `MessageBusService` 初始化后 bus root、`inboxes/`、`cursors/`、`locks/` 必须立即存在
-- [x] send 仅在持有 flock 且 inbox 成功追加/新建后返回 ID；锁或写入链路任一失败都返回 nil
+> 本需求已于 2026-08-18 整体删除，以下标准不再是待办项，仅作为当时的设计记录保留。删除时已通过的两条：`MessageBusService` 的目录不变量、send 的 flock/写入失败契约。其余各条（四方互发、codex exec 注入、交互式 codex hook、pi 扩展、回执水位、token 上限、与 confirmo 共存）在删除前未完成验收。
+
+- `bus-send` 四方互发：codex → pi、pi → codex、claude → codex、任意 → openowl（Phase 1 内）
+- codex exec 模式：写 inbox + 触发 exec → codex 回合包含 `<inbox-message>` 内容，且不重复注入（水位正确）
+- 交互式 codex：`UserPromptSubmit` hook 注入生效（spike 实测确认 stdout 语义）
+- pi 扩展：外部写 inbox → 运行中 pi 收到新回合并触发处理
+- 回执：`bus-ack` 后消息不再注入（水位推进）
+- token 上限生效：超量/超长消息截断
+- 与现有 hooks（confirmo）共存，不破坏
 
 ## 8. 里程碑
 
 - **Phase 1（本次）**：bus 协议 + `openowl` CLI + codex hooks 适配器 + pi 扩展适配器 + 验收 ✅ 2026-08-11
-- **Phase 2（进行中）**：
+- **Phase 2（未完成，已随需求删除）**：
   - ✅ `MessageBusService`（Swift，`openOwl/Services/`）：注册 `openowl` + 每个 pane（`pane-{id}`）+ heartbeat + inbox 轮询 + 发送/水位；与 `buslib.py` 字节级互通，并覆盖目录不变量与锁/写入失败契约（`MessageBusServiceTests` 7/7 通过）
   - ✅ Right Dock `.bus` tab（`BusCenterView`）：在线 agent chips + 消息流 + 发送框
-  - ✅ pane 总线命名：tab pill 右键 / 分屏 pane 三点手柄右键设置名字（override > pane 标题 > 序号），tab 标签与手柄 hover 提示显示总线名；显式名存 `~/.openowl/bus/pane-names.json`（按 pane UUID，会话级——重启后重设）
+  - ⚠️ pane 总线命名：**仅 Free Terminal 的 tab pill 右键入口实现过**（`FreeTerminalTabBar.swift`）。本条先前记载的「分屏 pane 三点手柄右键」从未实现——`git log -S "Set Message Bus Name"` 仅命中引入与删除两个提交，引入提交从未触及定义 `PaneDragHandle` 的 `TerminalWorkspaceView.swift`。该错误记载曾被 v1.1.6 发布说明当作头号新功能引用，已一并更正
   - ⬜ 新消息系统通知（app 已轮询 inbox，通知接入待做）
   - ⬜ 交互式 codex 触发提示
 - **Phase 2 已搁置项**：claude 原生 SendMessage 适配（v1 用 `openowl bus-send` 已满足）、多 pi session 的 BUS_AGENT 自动管理（文档已有手动方案）

@@ -1292,7 +1292,9 @@ struct GitChangesView: View {
             if changes.count == 1, let c = changes.first { return "Discard changes for `\(c.path)`? This cannot be undone." }
             return "Discard \(changes.count) changes? This cannot be undone."
         case .discardAll:
-            return "Discard all tracked and untracked changes? This cannot be undone."
+            // Spells out the one consequence users do not expect: clean -f -f -d
+            // takes untracked nested Git repositories with it.
+            return "Discard all staged, unstaged and untracked changes? Untracked nested Git repositories are deleted too. This cannot be undone."
         }
     }
 

@@ -105,17 +105,17 @@ extension AppDelegate {
                     "The target terminal window is not available."
                 ))
             }
-            guard bindings.ghostty.focusPane(paneID) else {
-                return .failure(.notReady(
-                    "The target terminal surface cannot receive focus yet."
-                ))
-            }
             if let failure = activate(
                 location: location,
                 workspace: bindings.workspace,
                 project: bindings.project
             ) {
                 return .failure(failure)
+            }
+            guard bindings.ghostty.focusPane(paneID) else {
+                return .failure(.notReady(
+                    "The target terminal surface cannot receive focus yet."
+                ))
             }
             NSApp.activate(ignoringOtherApps: true)
             return .success(())
@@ -202,7 +202,9 @@ extension AppDelegate {
             guard let terminalView = bindings.ghostty.terminalView(for: paneID) else {
                 return .failure(.notReady("The target terminal surface is not ready."))
             }
-            terminalView.sendText(text)
+            guard terminalView.sendText(text) else {
+                return .failure(.notReady("The target terminal surface has not started yet."))
+            }
             return .success(())
         }
     }

@@ -29,7 +29,6 @@
 		467A828AC1805D834ABAFF66 /* OrderedProjectTabsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00642698655A3329F3C67DB7 /* OrderedProjectTabsTests.swift */; };
 		4897E77332A433283D871460 /* TerminalScrollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79636F7D772A467ADC94B313 /* TerminalScrollView.swift */; };
 		4D9AE12397A51C88BD1D3B4F /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A99F1BD2E832DC109BCC03A /* AppLogger.swift */; };
-		A1B2C3D4E5F60718293A4B5D /* AppExitMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5C /* AppExitMonitor.swift */; };
 		4EB8B6468815663DFB8126CA /* NotificationNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA86C7ADE1E696F8BF004DAD /* NotificationNames.swift */; };
 		502E0FCB5AEF997F4C45E298 /* TerminalWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F733F678544F126652F6B93E /* TerminalWorkspaceView.swift */; };
 		51578B805F1E2D6511363059 /* ResourceMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8453895B9F389F5D9284651 /* ResourceMonitor.swift */; };
@@ -146,7 +145,6 @@
 		5533A6D4B3B1811FF42BB1D1 /* FreeTerminalTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeTerminalTabBar.swift; sourceTree = "<group>"; };
 		56D3EFADA4D64C3ABBF4887E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		56EC8F9FC165C061D79F5952 /* TerminalKeyboardRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalKeyboardRoutingTests.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F60718293A4B5C /* AppExitMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppExitMonitor.swift; sourceTree = "<group>"; };
 		5A99F1BD2E832DC109BCC03A /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
 		5BAFE9E75DAA3DB62ECD73CB /* FileWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileWatcher.swift; sourceTree = "<group>"; };
 		61BBA8C4BCDD5442FF64552D /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
@@ -262,7 +260,6 @@
 			isa = PBXGroup;
 			children = (
 				5A99F1BD2E832DC109BCC03A /* AppLogger.swift */,
-				A1B2C3D4E5F60718293A4B5C /* AppExitMonitor.swift */,
 				3C32FF68B777207179BFEFB0 /* BranchNameGenerator.swift */,
 				38E541F2A395A5EB308D9C38 /* Constants.swift */,
 				AB19182518A4ECF2CB2EFE7D /* EmptyStateView.swift */,
@@ -594,7 +591,6 @@
 				D4E0202304DEB18FD601BAC5 /* AppDelegate+AppleScript.swift in Sources */,
 				BBD5731ED2E2CA722DF77BA0 /* AppDelegate.swift in Sources */,
 				4D9AE12397A51C88BD1D3B4F /* AppLogger.swift in Sources */,
-				A1B2C3D4E5F60718293A4B5D /* AppExitMonitor.swift in Sources */,
 				25638B8C67FB225663CCE5A1 /* BookmarkStore.swift in Sources */,
 				68E8E1B4A11A9861636A80B3 /* BranchNameGenerator.swift in Sources */,
 				F9DFB41D15D5628E3305431E /* CommitMessageGenerator.swift in Sources */,
@@ -761,7 +757,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = openOwl/Resources/openOwl.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 12;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(PROJECT_DIR)",
 				);
@@ -779,7 +775,7 @@
 				LIBRARY_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
-				MARKETING_VERSION = 1.1.5;
+				MARKETING_VERSION = 1.1.6;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-framework Metal",
@@ -808,7 +804,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconDev;
 				CODE_SIGN_ENTITLEMENTS = openOwl/Resources/openOwl.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 12;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(PROJECT_DIR)",
 				);
@@ -826,7 +822,7 @@
 				LIBRARY_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/GhosttyKit.xcframework/macos-arm64_x86_64",
 				);
-				MARKETING_VERSION = 1.1.5;
+				MARKETING_VERSION = 1.1.6;
 				OTHER_LDFLAGS = (
 					"-lghostty",
 					"-framework Metal",
