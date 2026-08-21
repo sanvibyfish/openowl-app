@@ -56,7 +56,7 @@ enum GitServiceError: LocalizedError {
     case invalidCommitMessage
     case unresolvedConflicts(operation: String)
     case pipeReadFailed(command: String, code: Int32)
-    case pipeDrainStalled(command: String)
+    case gitNotInstalled(searched: [String])
 
     var errorDescription: String? {
         switch self {
@@ -71,11 +71,15 @@ enum GitServiceError: LocalizedError {
             return "Commit message cannot be empty."
         case .unresolvedConflicts(let operation):
             return "Resolve all merge conflicts before \(operation)."
+        case .gitNotInstalled(let searched):
+            return "Could not find a git binary. Install the Xcode Command Line Tools "
+                + "(`xcode-select --install`) or Homebrew git. Looked in: "
+                + searched.joined(separator: ", ")
         case .pipeReadFailed(let command, let code):
             let detail = String(cString: strerror(code))
-            return "`\(command)` output could not be read (\(detail)). The result would have been incomplete."
-        case .pipeDrainStalled(let command):
-            return "`\(command)` exited but its output pipe stayed open — a background child is still holding it."
+            return "`\(command)` output could not be read (\(detail)), so the result would have been "
+                + "incomplete and was discarded. Retry; if it persists, check this repository for a "
+                + "hung git hook or a filesystem that stopped responding."
         }
     }
 }
@@ -105,14 +109,26 @@ final class GitPipeDrain: @unchecked Sendable {
     private var collectedData = Data()
     private var completed = false
     private var readErrorCode: Int32 = 0
+    /// Set when *we* cancelled the channel (timeout path). The resulting
+    /// ECANCELED is self-inflicted and must not be reported as a read failure.
+    private var stopRequested = false
 
     init(fileHandle: FileHandle) throws {
         let descriptor = dup(fileHandle.fileDescriptor)
         guard descriptor >= 0 else {
+            // Capture errno once: strerror and the logging call are both
+            // allowed to clobber it, so reading it three times could log one
+            // error and throw a different (or garbage) one.
+            let code = errno
             let failedFD = fileHandle.fileDescriptor
-            let detail = String(cString: strerror(errno))
-            NSLog("GitService: pipe setup failed (dup fd %d): %s (errno %d)", failedFD, detail, errno)
-            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            AppLogger.log(
+                "git",
+                "pipe setup failed (dup fd %d): %@ (errno %d)",
+                failedFD,
+                String(cString: strerror(code)),
+                code
+            )
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
         }
         fileHandle.closeFile()
 
@@ -158,19 +174,35 @@ final class GitPipeDrain: @unchecked Sendable {
     }
 
     func stop() {
+        lock.withLock { stopRequested = true }
         closeChannel(flags: .stop)
     }
 
-    /// Returns the drained bytes, or throws if the read failed or stalled.
+    /// Returns the drained bytes, or throws if the read genuinely failed.
     /// Never returns a partial buffer as if it were the whole output.
+    ///
+    /// A stall is not a read failure. The child has already exited by the time
+    /// this is called, so everything it wrote has been delivered; the pipe
+    /// staying open means a *grandchild* inherited the write end and is still
+    /// alive — `git fsmonitor--daemon` does this on every status in a repo with
+    /// core.fsmonitor enabled. Throwing there would discard a complete, correct
+    /// result and leave such repos permanently broken.
     func finish(command: String) throws -> Data {
-        guard completion.wait(timeout: .now() + Self.drainGracePeriod) == .success else {
-            closeChannel(flags: .stop)
-            throw GitServiceError.pipeDrainStalled(command: command)
+        let drained = completion.wait(timeout: .now() + Self.drainGracePeriod) == .success
+        closeChannel(flags: drained ? [] : .stop)
+        let (data, errorCode, wasStopped) = lock.withLock {
+            (collectedData, readErrorCode, stopRequested)
         }
-        closeChannel(flags: [])
-        let (data, errorCode) = lock.withLock { (collectedData, readErrorCode) }
-        if errorCode != 0 {
+        if !drained {
+            AppLogger.log(
+                "git",
+                "output pipe still held after exit; using %d bytes already read: %@",
+                data.count,
+                command
+            )
+        }
+        // ECANCELED after our own stop() is self-inflicted, not a read failure.
+        if errorCode != 0, !wasStopped {
             throw GitServiceError.pipeReadFailed(command: command, code: errorCode)
         }
         return data
@@ -200,25 +232,30 @@ final class GitPipeDrain: @unchecked Sendable {
 /// version isn't the culprit (mmap semantics exist in every git), but the
 /// binary choice should not be an accident of the environment.
 enum GitExecutable {
-    static let resolvedPath: String = {
-        let candidates = [
-            "/usr/bin/git",           // Apple git (CLT / active Xcode)
-            "/opt/homebrew/bin/git",  // Apple Silicon homebrew
-            "/usr/local/bin/git",     // Intel homebrew / manual installs
-        ]
-        for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate) {
-            return candidate
-        }
-        // No PATH fallback: Process resolves a relative executable against the
-        // app's cwd, not PATH, so returning "git" here never worked — it turned
-        // "git is not installed" into an opaque launch error that the retry
-        // logic then classified as transient.
-        preconditionFailure(
-            "No git binary found. Looked in: \(candidates.joined(separator: ", "))"
-        )
-    }()
+    static let candidates = [
+        "/usr/bin/git",           // Apple git (CLT / active Xcode)
+        "/opt/homebrew/bin/git",  // Apple Silicon homebrew
+        "/usr/local/bin/git",     // Intel homebrew / manual installs
+    ]
+
+    /// nil when no git binary exists.
+    ///
+    /// There is deliberately no PATH fallback: `Process` resolves a relative
+    /// executable against the app's cwd, not PATH, so returning "git" never
+    /// worked — it only turned "git is not installed" into an opaque launch
+    /// error. But the absence of git is a condition of the user's machine, not
+    /// a programmer error, and openOwl is a terminal as much as a Git client:
+    /// it must surface this as an error the Git panel can show, not trap the
+    /// process and take every terminal session down with it.
+    static let resolvedPath: String? = candidates.first {
+        FileManager.default.isExecutableFile(atPath: $0)
+    }
 
     static func logChoice() {
+        guard let resolvedPath else {
+            AppLogger.log("git", "no git binary found in: %@", candidates.joined(separator: ", "))
+            return
+        }
         AppLogger.log("git", "using git binary: %@", resolvedPath)
     }
 }
@@ -367,9 +404,30 @@ final class GitService {
         if try await hasHead() {
             _ = try await runGit(["reset", "--hard", "HEAD"])
         } else {
-            // No HEAD to reset to: empty the index directly. `rm --cached`
-            // leaves the files on disk, and clean then takes them.
-            _ = try await runGit(["rm", "-r", "--cached", "-f", "--", ":/"], allowedExitCodes: [0, 128])
+            // HEAD does not resolve — but that has two causes, and only one of
+            // them is safe here. A genuinely unborn branch (fresh `git init`)
+            // has no commits anywhere, so emptying the index and letting clean
+            // take the files is exactly "discard everything". A *broken* HEAD
+            // (a ref that went missing after an interrupted checkout, a
+            // truncated .git/refs write, packed-refs disagreeing with a loose
+            // ref) looks identical to `rev-parse --verify HEAD` while the index
+            // still holds the entire tracked tree — clearing it there would
+            // hand `clean -f -f -d` every tracked file in the repository.
+            let commitCount = try await runGit(["rev-list", "--all", "--count"])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard commitCount == "0" else {
+                throw GitServiceError.commandFailed(
+                    command: "git reset --hard HEAD",
+                    exitCode: 1,
+                    stderr: "HEAD does not resolve to a commit, but this repository has commits. "
+                        + "Refusing to discard, because the working tree may be recoverable. "
+                        + "Repair HEAD first, e.g. `git symbolic-ref HEAD refs/heads/<branch>`."
+                )
+            }
+            // `--ignore-unmatch` makes an already-empty index exit 0, so this
+            // needs no exit-code allowance that could also mask a real fatal
+            // (index.lock held, corrupt index, permission denied).
+            _ = try await runGit(["rm", "-r", "--cached", "-q", "-f", "--ignore-unmatch", "--", ":/"])
         }
         _ = try await runGit(["clean", "-f", "-f", "-d"])
     }
@@ -589,19 +647,27 @@ final class GitService {
             return name
         }
 
-        // No remote HEAD (never fetched, or no remote at all). Fall back to the
-        // local default only if it actually exists.
-        for candidate in ["main", "master"] {
-            let listed = try await runGit(["branch", "--list", candidate])
-            if !listed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return candidate
-            }
+        // No remote HEAD to consult. Fall back to the branch that is currently
+        // checked out — not to a guess. A local branch named `main` existing
+        // does not make it the default (that guess is how the old hardcoded
+        // "master" branched worktrees off the wrong baseline), but "the branch
+        // the user is on right now" is a fact, and it is the baseline they
+        // would expect a new worktree to start from.
+        let current = try await runGit(
+            ["symbolic-ref", "--short", "--quiet", "HEAD"],
+            allowedExitCodes: [0, 1]
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !current.isEmpty {
+            return current
         }
 
+        // Detached HEAD and no remote: there is no branch to base anything on.
         throw GitServiceError.commandFailed(
             command: "git symbolic-ref refs/remotes/origin/HEAD",
             exitCode: 1,
-            stderr: "Could not determine the repository's default branch. Set it with `git remote set-head origin -a`."
+            stderr: "Could not determine a branch to base the worktree on: this repository has no "
+                + "remote HEAD and is not on a branch. Check out a branch first, or set the remote "
+                + "default with `git remote set-head origin -a`."
         )
     }
 
@@ -749,9 +815,7 @@ final class GitService {
         // very SIGBUS window those three were added to close.
         let service = GitService(workingDirectory: path)
         let snapshot = try await service.status()
-        return !snapshot.staged.isEmpty
-            || !snapshot.modified.isEmpty
-            || !snapshot.untracked.isEmpty
+        return snapshot.hasAnyChanges
     }
 
     /// Extract GitHub/GitLab username from remote origin URL.
@@ -1081,8 +1145,7 @@ extension GitService {
                         if reason == .uncaughtSignal, attempt < maxAttempts {
                             AppLogger.log(
                                 "git",
-                                "git %@ killed by signal while %@ (attempt %d/%d); retrying",
-                                GitExecutable.resolvedPath,
+                                "killed by signal: git %@ (attempt %d/%d); retrying",
                                 arguments.joined(separator: " "),
                                 attempt,
                                 maxAttempts
@@ -1095,9 +1158,10 @@ extension GitService {
                         if reason == .exit, allowedExitCodes.contains(status) {
                             // git reports partial failure as "exit 0 + stderr
                             // warning" (a directory it could not read, a file it
-                            // could not remove). Dropping stderr here is what
-                            // lets the UI report "Staged all files." when some
-                            // were skipped.
+                            // could not remove). Logging it is only half the
+                            // fix — the UI still reports "Staged all files."
+                            // because runGit returns stdout alone. Surfacing it
+                            // needs a result type; TODO tracked in REQ-002.
                             let trimmedStderr = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
                             if !trimmedStderr.isEmpty {
                                 AppLogger.log(
@@ -1129,8 +1193,7 @@ extension GitService {
                     } catch {
                         AppLogger.log(
                             "git",
-                            "git %@ %@ failed: %@",
-                            GitExecutable.resolvedPath,
+                            "git %@ failed: %@",
                             arguments.joined(separator: " "),
                             error.localizedDescription
                         )
@@ -1142,14 +1205,27 @@ extension GitService {
         }
     }
 
+    /// How long a timed-out child gets to handle SIGTERM before it is killed.
+    /// Long enough for git to drop its lockfiles, short enough that a wedged
+    /// child cannot hold the calling thread.
+    static let terminateGracePeriod: TimeInterval = 2
+
     /// Launches one git child and drains both pipes before waiting, so the
     /// 64KB pipe buffer can never fill and deadlock the child.
     static func launchGit(
         _ arguments: [String],
         workingDirectory: URL,
         timeout: TimeInterval? = nil,
-        executableURL: URL = URL(fileURLWithPath: GitExecutable.resolvedPath)
+        executableURL: URL? = nil
     ) throws -> (Data, Data, Int32, Process.TerminationReason) {
+        guard let executableURL = try executableURL ?? {
+            guard let path = GitExecutable.resolvedPath else {
+                throw GitServiceError.gitNotInstalled(searched: GitExecutable.candidates)
+            }
+            return URL(fileURLWithPath: path)
+        }() else {
+            throw GitServiceError.gitNotInstalled(searched: GitExecutable.candidates)
+        }
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
@@ -1174,17 +1250,29 @@ extension GitService {
                     guard process.isRunning else { return }
                     didTimeOut = true
                     AppLogger.log("git", "hung for %.1fs; terminating: %@", duration, command)
-                    // SIGTERM, not SIGKILL: killing a `git status` mid index
-                    // refresh leaves a stale .git/index.lock that wedges every
-                    // later git command in the repo. git handles SIGTERM and
-                    // cleans up; if it ever ignores one, the drain deadline
-                    // below still bounds us.
+                    // SIGTERM first, so git can release .git/index.lock —
+                    // SIGKILL'ing a status mid index-refresh leaves a stale
+                    // lock that wedges every later git command in the repo.
                     process.terminate()
                     stdoutDrain.stop()
                     stderrDrain.stop()
                 }
             }
             DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + duration, execute: item)
+            // Bounded escalation. `waitUntilExit()` below is unbounded, and it
+            // runs *before* the drain deadline — so a child that ignores or
+            // blocks SIGTERM would hang this thread forever, and for status()
+            // that wedges the repo's whole gate lane. Termination has to be
+            // guaranteed, not requested.
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(
+                deadline: .now() + duration + Self.terminateGracePeriod
+            ) {
+                timeoutLock.withLock {
+                    guard process.isRunning else { return }
+                    AppLogger.log("git", "ignored SIGTERM; killing: %@", command)
+                    kill(process.processIdentifier, SIGKILL)
+                }
+            }
             return item
         }
 
@@ -1194,16 +1282,17 @@ extension GitService {
         // the window where its pid could already have been recycled.
         timeoutWorkItem?.cancel()
 
-        // Decide the timeout before draining. The timeout path already called
-        // stop() on both drains, so their reads come back ECANCELED — a
-        // cancellation we caused ourselves, which must not be reported as a
-        // pipe read failure.
-        if timeoutLock.withLock({ didTimeOut }) {
-            throw GitServiceError.commandTimedOut(command: command, seconds: timeout ?? 0)
-        }
-
         let stdoutData = try stdoutDrain.finish(command: command)
         let stderrData = try stderrDrain.finish(command: command)
+
+        // A timeout only wins when the child failed to deliver. The work item
+        // can fire in the same instant the child exits normally — it checks
+        // `isRunning`, which is still true while the child is on its way out —
+        // and reporting a timeout then would throw away a complete, successful
+        // result. A child we actually terminated exits via .uncaughtSignal.
+        if timeoutLock.withLock({ didTimeOut }), process.terminationReason != .exit {
+            throw GitServiceError.commandTimedOut(command: command, seconds: timeout ?? 0)
+        }
 
         return (stdoutData, stderrData, process.terminationStatus, process.terminationReason)
     }

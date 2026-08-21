@@ -396,11 +396,12 @@ struct FileExplorerView: View {
     @State private var fileReadRequestIDs: [URL: UUID] = [:]
     @State private var editorSessionGeneration = UUID()
     @State private var dirtyTabs: Set<URL> = []
-    /// Tabs whose save was refused because the file changed on disk, and whose
-    /// user has therefore been warned once. Kept separate from
+    /// Tabs whose save was refused because the file changed on disk, mapped to
+    /// the disk signature the user was warned about. Kept separate from
     /// `tabDiskSignatures` so that consenting to an overwrite never implies
-    /// "this tab is in sync with disk" — see `saveTab`.
-    @State private var pendingOverwriteConfirmation: Set<URL> = []
+    /// "this tab is in sync with disk"; keyed by signature so that a *further*
+    /// disk change invalidates the consent and warns again — see `saveTab`.
+    @State private var pendingOverwriteConfirmation: [URL: FileEditorDiskSignature] = [:]
     @State private var editorSessionProjectKey: String?
     @State private var persistDebounceWork: DispatchWorkItem?
 
@@ -645,6 +646,9 @@ struct FileExplorerView: View {
         )
         tabDiskSignatures = FileEditorURLMutationPolicy.remappingValues(
             tabDiskSignatures, moving: source, to: destination
+        )
+        pendingOverwriteConfirmation = FileEditorURLMutationPolicy.remappingValues(
+            pendingOverwriteConfirmation, moving: source, to: destination
         )
         fileReadRequestIDs = FileEditorURLMutationPolicy.remappingValues(
             fileReadRequestIDs, moving: source, to: destination
@@ -1568,6 +1572,7 @@ struct FileExplorerView: View {
         tabStorages.removeAll()
         tabImageCache.removeAll()
         tabDiskSignatures.removeAll()
+        pendingOverwriteConfirmation.removeAll()
         fileReadRequestIDs.removeAll()
         editorSessionGeneration = UUID()
         dirtyTabs.removeAll()
@@ -1705,9 +1710,6 @@ struct FileExplorerView: View {
     }
 
     private func reloadOpenTabFromDisk(_ url: URL, signature: FileEditorDiskSignature, reason: String) {
-        // A reload replaces the buffer with the disk content, so any consent to
-        // overwrite the previous disk version is now meaningless.
-        pendingOverwriteConfirmation.remove(url)
         guard FileEditorAutomaticReadPolicy.allowsRead(
             fileSize: signature.fileSize,
             isImage: isImageURL(url),
@@ -2028,7 +2030,7 @@ struct FileExplorerView: View {
         tabDiskSignatures.removeValue(forKey: url)
         fileReadRequestIDs.removeValue(forKey: url)
         dirtyTabs.remove(url)
-        pendingOverwriteConfirmation.remove(url)
+        pendingOverwriteConfirmation.removeValue(forKey: url)
         largeModeTabs.remove(url)
         clearHeavyProgress(for: url)
         if pendingActivationURL == url { pendingActivationURL = nil }
@@ -2067,6 +2069,7 @@ struct FileExplorerView: View {
         tabStorages.removeValue(forKey: evictURL)
         tabImageCache.removeValue(forKey: evictURL)
         tabDiskSignatures.removeValue(forKey: evictURL)
+        pendingOverwriteConfirmation.removeValue(forKey: evictURL)
         fileReadRequestIDs.removeValue(forKey: evictURL)
         largeModeTabs.remove(evictURL)
         persistEditorSession(reason: "evict-tab")
@@ -2131,8 +2134,15 @@ struct FileExplorerView: View {
             // `reloadOpenTabFromDiskIfNeeded` skips it forever and the editor
             // shows stale content while claiming to be current. Consent to
             // overwrite is tracked separately and only an explicit ⌘S spends it.
-            guard allowOverwriteAfterWarning, pendingOverwriteConfirmation.contains(url) else {
-                pendingOverwriteConfirmation.insert(url)
+            guard allowOverwriteAfterWarning,
+                  pendingOverwriteConfirmation[url] == currentSignature else {
+                // Only record consent on the path that actually showed someone
+                // the warning. A batch save (⌘Q, project switch) must not grant
+                // it on the user's behalf — that would let the next single ⌘S
+                // overwrite silently, having never warned at all.
+                if allowOverwriteAfterWarning {
+                    pendingOverwriteConfirmation[url] = currentSignature
+                }
                 let message = "The file changed on disk after it was opened. Your edits were not written. Press ⌘S again to overwrite the version on disk."
                 AppLogger.log("file-editor-state", "save-blocked reason=disk-changed path=%@", url.path)
                 return SaveFailure(url: url, message: message)
@@ -2143,7 +2153,7 @@ struct FileExplorerView: View {
             try storage.string.write(to: url, atomically: true, encoding: .utf8)
             tabDiskSignatures[url] = FileEditorDiskSignatureProvider.signature(for: url)
             dirtyTabs.remove(url)
-            pendingOverwriteConfirmation.remove(url)
+            pendingOverwriteConfirmation.removeValue(forKey: url)
             return nil
         } catch {
             AppLogger.log(

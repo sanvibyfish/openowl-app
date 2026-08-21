@@ -203,6 +203,12 @@ extension AppDelegate {
                 return .failure(.notReady("The target terminal surface is not ready."))
             }
             guard terminalView.sendText(text) else {
+                // Distinguish the two: a surface that failed to initialise never
+                // recovers, and reporting it as "not ready" sends scripts into a
+                // retry loop that can never succeed.
+                if terminalView.surfaceIsPermanentlyUnavailable {
+                    return .failure(.failed("The target terminal surface failed to initialize and cannot accept input."))
+                }
                 return .failure(.notReady("The target terminal surface has not started yet."))
             }
             return .success(())

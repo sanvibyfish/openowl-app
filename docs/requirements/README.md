@@ -35,7 +35,7 @@
 
 ### Workspace
 
-- [REQ-006-claude-status-sidebar.md](REQ-006-claude-status-sidebar.md) — 已搁置的 Claude 状态展示
+- [REQ-006-claude-status-sidebar.md](REQ-006-claude-status-sidebar.md) — Claude 状态展示
 - [REQ-007-right-dock.md](REQ-007-right-dock.md) — Terminal 主工作区与 Right Dock
 
 ### Git 与文件

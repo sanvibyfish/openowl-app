@@ -321,6 +321,51 @@ struct GitServiceParsingTests {
         #expect(try String(contentsOf: conflictedFile, encoding: .utf8) == conflictContents)
     }
 
+    /// A HEAD that does not resolve has two causes, and only one is safe to
+    /// treat as "empty repository". An interrupted checkout, a truncated ref
+    /// write or packed-refs disagreeing with a loose ref all leave HEAD
+    /// pointing at a missing branch while the index still holds the whole
+    /// tracked tree — clearing it there would hand `clean -f -f -d` every
+    /// tracked file in the repository.
+    @Test func discardAllRefusesToClearIndexWhenHeadIsBrokenRatherThanUnborn() async throws {
+        let repository = try makeRepository()
+        defer { try? FileManager.default.removeItem(at: repository) }
+        let tracked = repository.appendingPathComponent("tracked.txt")
+        try write("committed content", to: tracked)
+        _ = try runGit(["add", "."], at: repository)
+        _ = try runGit(["commit", "--quiet", "-m", "base"], at: repository)
+
+        // Point HEAD at a branch that does not exist. `rev-parse --verify
+        // --quiet HEAD` now exits 1 with empty output — indistinguishable from
+        // a fresh repository by that check alone.
+        _ = try runGit(["symbolic-ref", "HEAD", "refs/heads/ghost"], at: repository)
+
+        await #expect(throws: GitServiceError.self) {
+            try await GitService(workingDirectory: repository).discardAll()
+        }
+
+        // The working tree must survive untouched.
+        #expect(FileManager.default.fileExists(atPath: tracked.path))
+        #expect(try String(contentsOf: tracked, encoding: .utf8) == "committed content")
+        #expect(try runGit(["ls-files"], at: repository) == "tracked.txt\n")
+    }
+
+    /// The genuinely unborn case must still work: a fresh repository with
+    /// staged files and no commits anywhere discards down to nothing.
+    @Test func discardAllClearsIndexOnGenuinelyUnbornBranch() async throws {
+        let repository = try makeRepository()
+        defer { try? FileManager.default.removeItem(at: repository) }
+        try write("staged", to: repository.appendingPathComponent("staged.txt"))
+        try write("loose", to: repository.appendingPathComponent("loose.txt"))
+        _ = try runGit(["add", "staged.txt"], at: repository)
+
+        try await GitService(workingDirectory: repository).discardAll()
+
+        #expect(try runGit(["ls-files"], at: repository) == "")
+        #expect(!FileManager.default.fileExists(atPath: repository.appendingPathComponent("staged.txt").path))
+        #expect(!FileManager.default.fileExists(atPath: repository.appendingPathComponent("loose.txt").path))
+    }
+
     private func makeRepository() throws -> URL {
         let repository = FileManager.default.temporaryDirectory
             .appendingPathComponent("openowl-git-service-\(UUID().uuidString)", isDirectory: true)

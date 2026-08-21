@@ -172,5 +172,5 @@ hook / 扩展向对话注入时用固定包裹：
 | 日期 | 说明 |
 |------|------|
 | 2026-08-18 | 需求整体删除：应用内集成（MessageBusService / Bus tab / 命名入口）+ `scripts/message-bus/` + 已安装适配器（pi 扩展、codex hooks）全部移除，文档转入存档 |
-| 2026-08-17 | 项目分屏 pane 增加命名入口：三点手柄（`PaneDragHandle`）右键 → Set Message Bus Name…（复用 `setPaneName`/`pane-names.json`），手柄 hover 提示显示总线名；与 Free Terminal tab pill 入口并列，覆盖所有分屏场景（含最大化 pane） |
+| 2026-08-17 | ⚠️ **该记载已于 2026-08-21 证伪，此功能从未实现**。原文称「项目分屏 pane 增加命名入口：三点手柄（`PaneDragHandle`）右键 → Set Message Bus Name…，覆盖所有分屏场景」。核查：`git log -S "Set Message Bus Name"` 仅命中引入与删除两个提交，而引入提交唯一触及的终端 UI 文件是 `FreeTerminalTabBar.swift`，从未碰过定义 `PaneDragHandle` 的 `TerminalWorkspaceView.swift`。实际只有 Free Terminal 的 tab pill 入口存在过。v1.1.6 发布说明曾据此把它列为头号新功能 |
 | 2026-08-15 | `MessageBusService` 支持注入 `busDirectory`，初始化时建立 bus/inboxes/cursors/locks 目录不变量；send 在 open/flock 或 inbox append/create/close 失败时返回 nil，禁止无锁写入和幽灵 ID，新 inbox 不覆盖创建。`MessageBusServiceTests` 7/7 通过 |

@@ -124,7 +124,12 @@ final class OutlineTreeViewController: NSViewController {
         isProgrammaticSelection = true
         defer { isProgrammaticSelection = false }
 
+        // Announce the rebuild so a cell whose rename is mid-edit drops it
+        // instead of committing half-typed text (see OutlineTreeCellView).
+        OutlineTreeCellView.isReloading = true
         outlineView.reloadData()
+        OutlineTreeCellView.isReloading = false
+
         restoreExpandedState(expandedPaths)
         restoreSelectedState(selectedPaths)
     }

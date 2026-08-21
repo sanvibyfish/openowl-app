@@ -4,6 +4,33 @@ final class CommitMessageGenerator {
     final class ProcessState {
         private let lock = NSLock()
         private var process: Process?
+        private var cancelled = false
+
+        /// Starts a new run. Clears any cancellation left by the previous one.
+        func reset() {
+            lock.lock()
+            process = nil
+            cancelled = false
+            lock.unlock()
+        }
+
+        var wasCancelled: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return cancelled
+        }
+
+        /// Records that termination was requested by the user and hands back
+        /// the process to terminate, so the handler can end quietly instead of
+        /// reporting the resulting non-zero exit as a CLI failure.
+        func cancel() -> Process? {
+            lock.lock()
+            cancelled = true
+            let running = process
+            process = nil
+            lock.unlock()
+            return running
+        }
 
         func install(_ process: Process) {
             lock.lock()
@@ -19,19 +46,13 @@ final class CommitMessageGenerator {
             lock.unlock()
         }
 
-        func take() -> Process? {
-            lock.lock()
-            let process = process
-            self.process = nil
-            lock.unlock()
-            return process
-        }
     }
 
     private let maxDiffChars = 20_000
     private let processState = ProcessState()
 
     func generate(diff: String) async throws -> String {
+        processState.reset()
         let truncatedDiff: String
         if diff.count > maxDiffChars {
             truncatedDiff = String(diff.prefix(maxDiffChars))
@@ -71,6 +92,18 @@ final class CommitMessageGenerator {
             proc.terminationHandler = { [weak self] process in
                 self?.processState.clear(ifCurrent: process)
 
+                if self?.processState.wasCancelled == true {
+                    // The user asked for this. Stop the drains rather than
+                    // waiting out their grace period — `claude` runs inside the
+                    // shell's pipeline and keeps the write end open after the
+                    // shell dies, so finish() would block for the full timeout
+                    // and then report the user's own cancellation as a failure.
+                    stdoutDrain.stop()
+                    stderrDrain.stop()
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+
                 let outData: Data
                 let errData: Data
                 do {
@@ -104,6 +137,12 @@ final class CommitMessageGenerator {
                 // launched raises NSInvalidArgumentException — an ObjC
                 // exception Swift cannot catch, so it takes the app down.
                 processState.install(proc)
+                // terminationHandler runs on another queue and can fire before
+                // this line for a child that exits immediately (claude missing
+                // → shell exits 127), leaving a dead Process registered forever.
+                if !proc.isRunning {
+                    processState.clear(ifCurrent: proc)
+                }
                 NSLog("CommitMessageGenerator: process started, pid=%d", proc.processIdentifier)
             } catch {
                 continuation.resume(throwing: GeneratorError.cliError(error.localizedDescription))
@@ -112,7 +151,7 @@ final class CommitMessageGenerator {
     }
 
     func cancel() {
-        processState.take()?.terminate()
+        processState.cancel()?.terminate()
     }
 
     enum GeneratorError: LocalizedError {

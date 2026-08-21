@@ -13,15 +13,30 @@ struct CommitMessageGeneratorTests {
         state.install(newProcess)
         state.clear(ifCurrent: oldProcess)
 
-        #expect(state.take() === newProcess)
+        #expect(state.cancel() === newProcess)
     }
 
-    @Test func takeAtomicallyClearsCurrentProcess() {
+    @Test func cancelAtomicallyClearsCurrentProcess() {
         let state = CommitMessageGenerator.ProcessState()
         let process = Process()
         state.install(process)
 
-        #expect(state.take() === process)
-        #expect(state.take() == nil)
+        #expect(state.cancel() === process)
+        #expect(state.cancel() == nil)
+    }
+
+    /// A cancelled run must be distinguishable from a failed one: the
+    /// terminationHandler uses this to end quietly instead of reporting the
+    /// user's own cancellation as a CLI error.
+    @Test func cancellationIsRecordedAndClearedByNextRun() {
+        let state = CommitMessageGenerator.ProcessState()
+        state.install(Process())
+        #expect(state.wasCancelled == false)
+
+        _ = state.cancel()
+        #expect(state.wasCancelled == true)
+
+        state.reset()
+        #expect(state.wasCancelled == false)
     }
 }

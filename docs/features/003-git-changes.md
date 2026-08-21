@@ -47,10 +47,12 @@ GitChangesStore (@MainActor)
 
 ### 3.2 Git CLI 封装
 
-`GitService` 通过 `Process` 调用固定解析的 git 二进制（`GitExecutable.resolvedPath`，候选顺序 `/usr/bin/git` → `/opt/homebrew/bin/git` → `/usr/local/bin/git`，启动时选择一次并写日志；三者都不可执行即 `preconditionFailure`，不再回落 PATH），关键细节：
+`GitService` 通过 `Process` 调用固定解析的 git 二进制（`GitExecutable.resolvedPath`，候选顺序 `/usr/bin/git` → `/opt/homebrew/bin/git` → `/usr/local/bin/git`，启动时选择一次并写日志；三者都不可执行时 `resolvedPath` 为 nil，git 命令抛 `gitNotInstalled` 并提示安装 CLT，终端功能不受影响；不再回落 PATH），关键细节：
 - **固定 git 路径**: 不再用 `/usr/bin/env git`——GUI 应用由 launchd 启动时的 PATH 不可控，可能解析到 Apple 旧版 git；固定路径保证行为可预期（2026-08-11 事故中实际跑的是 Apple Git 2.50.1）
 - **status 串行化**: `git status` 按标准化 working directory 加锁（`GitCommandGate`），FileExplorer 与 Git 面板对同一仓库的 status 不会并发执行；diff/log 保持并发（它们不刷新 index，且必须避免被慢命令阻塞，如 FIFO 测试模式）
-- **status 超时边界**: 仅 `git status` 设置 30 秒超时；超时时向真实 `Process` 发送 `SIGKILL`，并停止并发排空 stdout/stderr 的 `DispatchIO`，即使后代 helper 仍持有 pipe 也不会卡住 status 或后续请求。diff/log/fetch/push 不套用该 30 秒上限
+- **超时边界**: `git status` 与 `git show`（`fileData`）设置 30 秒超时；超时时先向真实 `Process` 发送 `SIGTERM` 并停止并发排空 stdout/stderr 的 `DispatchIO`，2 秒宽限后仍存活则 `SIGKILL`。diff/log/fetch/push 不套用该 30 秒上限
+  - 升级不可省略：`waitUntilExit()` 位于 drain 的宽限期**之前**，子进程若忽略 SIGTERM 就会永久阻塞调用线程，对 `status()` 而言会连带锁死该仓库 gate lane 的全部后续请求
+  - 后代 helper（`git fsmonitor--daemon`、hook、credential helper）继承管道写端并长期存活时，drain 等满宽限期后**返回已读数据并记日志**，不作为失败——子进程已退出，它写的内容均已送达
 - **gate 回收**: `GitCommandGate` 以 token 确认当前 tail 所有权，正常返回、命令错误和超时都会清除完成的 tail，不在每仓库门禁中留下已结束任务
 - **信号退出重试**: status/diff/log 如果被信号杀死（如并发写入者截断文件导致的 SIGBUS，内核报 `cluster_pagein past EOF`），自动重试一次（间隔 150ms），第二次通常成功；写操作（add/commit 等）不重试
 - **管道读取**: stdout/stderr 通过 `DispatchIO` 并发排空，避免任一管道的缓冲区写满后阻塞子进程
@@ -66,7 +68,8 @@ GitChangesStore (@MainActor)
 - **批量暂存**: Stage All 直接执行 `git add -A`，不受当前 status 快照或列表过滤影响
 - **未诞生分支取消暂存**: 没有 HEAD 时通过清空 index 取消暂存，工作树文件保持不变；已有 HEAD 时仍恢复 index 到 HEAD
 - **未跟踪文件 Diff**: `git diff --no-index` 只接受退出码 0（无差异）与 1（有差异），大于 1 的执行错误必须向 UI 暴露
-- **Discard All**: `git reset --hard HEAD` 将 tracked 内容恢复到 HEAD（staged 与 unstaged 一并丢弃、index 清空；空仓库改用 `git rm -r --cached`），并通过 double-force `git clean -ffd` 删除所有未忽略的 untracked 文件、目录及嵌套 Git repository；ignored 内容不受影响
+- **Discard All**: `git reset --hard HEAD` 将 tracked 内容恢复到 HEAD（staged 与 unstaged 一并丢弃、index 清空），并通过 double-force `git clean -ffd` 删除所有未忽略的 untracked 文件、目录及嵌套 Git repository；ignored 内容不受影响
+  - HEAD 无法解析时**必须区分两种成因**：仅当 `git rev-list --all --count` 为 0（仓库确实没有任何 commit）才走 `git rm -r --cached --ignore-unmatch` 清空索引；若仓库有 commit 而 HEAD 指向缺失的 ref（checkout 中断、ref 写入被截断、packed-refs 与 loose ref 不一致），必须拒绝操作并提示修复 HEAD——此时索引持有完整的已跟踪树，清空它会让随后的 `clean` 删掉整个工作区
 
 ### 3.3 实时刷新
 

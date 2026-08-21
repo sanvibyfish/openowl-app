@@ -19,9 +19,9 @@
 - [x] Stage All 必须使用 `git add -A` 覆盖完整仓库，不依赖当前展示或缓存的 status 列表
 - [x] 未诞生分支取消暂存必须清空 index 并保留工作树；已有 HEAD 时恢复 index 到 HEAD
 - [x] `UU/AA/DD/AU/UA/DU/UD` 冲突文件只进入 Changes，`MM` 同时按 index/worktree 两侧进入 Staged 与 Changes
-- [x] 仅 `git status` 设置 30 秒超时；超时必须 `SIGKILL` 真实子进程并停止 stdout/stderr 排空，后代 helper 持有 pipe 不得阻塞后续 status。diff/log/fetch/push 不得套用该 30 秒限制
+- [x] `git status` 与 `git show`（`fileData`）设置 30 秒超时；超时必须先向真实子进程发 `SIGTERM`（让 git 释放 `.git/index.lock`），2 秒宽限后仍存活则升级 `SIGKILL`——终止必须是保证而非请求，否则 `waitUntilExit()` 会永久阻塞。后代 helper 持有 pipe 不得阻塞后续 status。diff/log/fetch/push 不得套用该 30 秒限制
 - [x] `GitCommandGate` 必须串行同仓库 status，并在正常、错误、超时结束后清理已完成 tail，使 successor 可继续执行
-- [x] git 子进程启动失败（管道 dup / posix_spawn 的 `EBADF`/`EMFILE`/`ENFILE`/`EAGAIN`）必须自动重试一次并换新管道；该错误发生在子进程运行前，重试不会重复执行写命令。所有启动失败必须写入 `[git]` 日志（含命令与错误详情），不得只在 UI banner 展示不可诊断的 `Bad file descriptor`
+- [x] git 子进程启动失败（管道 dup / posix_spawn 的 `EBADF`/`EMFILE`/`ENFILE`/`EAGAIN`）必须写入 `[git]` 日志（含命令与错误详情），不得只在 UI banner 展示不可诊断的 `Bad file descriptor`。**不得重试**：EBADF 的根因（`GitPipeDrain` 泄漏 dup 读端 fd）已修，重试只会掩盖新的根因，且会与信号重试共用 attempt 预算、削弱 SIGBUS 重试（2026-08-21 移除）
 - [x] `GitPipeDrain` 关闭必须幂等：`finish()` 与超时路径 `stop()` 及 `deinit` 均可触发 close，底层 dup fd 不得被重复关闭；dup 失败时记录 fd/errno
 
 ### P0 — Diff 视图
@@ -89,6 +89,7 @@ Commit diff 验收文案：加载中为 `Loading commit diff`，空 patch 为 `N
 - [x] AI commit message 生成（调用本地 claude CLI）；进程句柄需同步并按实例清理，旧 termination 不得清除新任务句柄
 - [x] Discard changes（with confirmation）
 - [x] Discard All 将 tracked 内容恢复到 HEAD（staged 与 unstaged 一并丢弃、index 清空），删除全部非 ignored untracked 文件与目录（含嵌套 Git repository），并保留 ignored 内容
+- [x] HEAD 不可解析时，只有 `git rev-list --all --count` 为 0 的仓库才允许清空索引；HEAD 损坏（指向缺失 ref）但仓库有 commit 时必须拒绝 Discard All 并提示修复 HEAD，不得触碰工作区
 - [x] Discard All 在任何恢复/清理前必须拒绝 unresolved conflicts；无冲突时以 double-force clean 删除非 ignored 的嵌套 Git repository，同时仍保留 ignored 与 staged 内容
 
 ## 技术要点
@@ -155,6 +156,7 @@ final class GitService {
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-22 | 第二轮 cross-review 修复自身缺陷：① `discardAll` 的 unborn 分支此前以 `hasHead()` 为判据，而 HEAD 指向缺失 ref 时它同样返回 false，会清空持有完整跟踪树的索引并由 `clean` 删光工作区——改为要求 `rev-list --all --count == 0`，否则拒绝（关联 `discardAllRefusesToClearIndexWhenHeadIsBrokenRatherThanUnborn`）；② 命令超时的 SIGTERM 增加有界 SIGKILL 升级——此前 `waitUntilExit()` 在 drain deadline 之前，子进程忽略 SIGTERM 即永久阻塞，严格劣于被替换掉的 SIGKILL；③ drain 停滞不再抛错而是返回已读数据，否则启用 `core.fsmonitor` 的仓库（守护进程继承管道且长期存活）每次 status 都稳定失败；④ 超时判定改为仅在子进程非正常退出时胜出，避免与正常退出竞态时丢弃完整结果；⑤ 移除 `git rm --cached` 的 `allowedExitCodes: [0,128]` 与 `detectMainBranch` 的 main/master 猜测阶梯——两者都是上一轮自己新增的兜底；⑥ 缺 git 由 `preconditionFailure` 改为 `gitNotInstalled` 错误，不再让终端功能陪葬；⑦ `detectMainBranch` 删掉猜测阶梯后回落到**当前检出分支**（`symbolic-ref --short HEAD`）——只删不补会让「默认分支为 develop 且无 remote」的仓库无法再创建 worktree，且当时给出的修复提示 `git remote set-head origin -a` 在无 remote 时无法执行 |
 | 2026-08-21 | **`discardAll` 契约变更**：由 `checkout-index --all --force`（从 index 恢复，staged 内容因而幸存）改为 `git reset --hard HEAD` + `git clean -f -f -d`，空仓库走 `git rm -r --cached`。原实现下 UI 的「Discard all…」在 index 脏时是假的——而 `commit()` 自动 stage 使 index 脏成为常态，用户以为已丢弃的改动会在下次提交时一并提交。确认对话框同步写明「staged/unstaged/untracked 全部丢弃，且删除未跟踪的嵌套 Git repository」。关联 `discardAllResetsIndexAndRemovesEveryUntrackedPath` |
 | 2026-08-21 | 管道层加固：`GitPipeDrain` 的 DispatchIO 读错误不再被丢弃（此前读到一半 EIO/ECANCELED 仍照常 signal，`finish()` 返回截断数据而上游只看 exit code，于是半截 `git status`/`git diff` 被当作完整结果）；`finish()` 改为抛错并以 5 秒宽限期有界等待——子进程已退出后管道仍不 EOF 意味着孙进程（hook/credential helper/fsmonitor）继承了写端，此前会永久阻塞并连带锁死该仓库 gate lane 的全部后续 `status`。超时终止由 `SIGKILL` 改为 `SIGTERM`（SIGKILL 掉正在刷 index 的 git 会留下 stale `.git/index.lock`）。`fileData` 与 `hasUncommittedChanges` 收编进 `launchGit`/`status()`，不再各自绕开 drain、gate、重试与超时 |
 | 2026-08-21 | 删除三处兜底：git 启动失败（EBADF/EMFILE 等）的换管道重试（其根因 DispatchIO fd 泄漏已修，重试与信号重试叠成两层且共用 attempt 预算，反而削弱了 SIGBUS 重试）；`GitExecutable` 的 `return "git"` PATH 回落（`Process` 对相对路径按 cwd 解析而非 PATH，该兜底从不生效）；循环后自称不可达的 defensive fallback（实为可达，会把启动失败伪装成 `exitCode: 0` 的 git 判决）。成功但 stderr 非空的 git 调用现在写入 `[git]` 日志 |

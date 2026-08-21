@@ -265,6 +265,11 @@ class TerminalNSView: NSView {
     /// normal `make new tab` then `input text` script sequence — has none yet,
     /// and silently swallowing the text there made automation report success
     /// for a command that never ran.
+    /// True when the surface exists and can never be created for this view, so
+    /// callers can tell a permanent failure from "not attached yet" instead of
+    /// telling an automation script to keep retrying forever.
+    var surfaceIsPermanentlyUnavailable: Bool { surfaceCreationFailed }
+
     @discardableResult
     func sendText(_ text: String) -> Bool {
         guard let surface else { return false }

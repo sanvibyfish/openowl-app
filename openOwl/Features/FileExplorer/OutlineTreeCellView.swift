@@ -11,6 +11,12 @@ final class OutlineTreeCellView: NSTableCellView {
 
     private var trackingArea: NSTrackingArea?
     private var isHovering = false
+    /// True while `OutlineTreeViewController` is rebuilding the outline. A field
+    /// editor torn down inside that window ended editing without the user
+    /// asking, so an in-progress rename must be dropped rather than committed.
+    /// Main-thread only, like every other AppKit view property here.
+    static var isReloading = false
+
     private var currentNode: FileExplorerNode?
 
     var onStage: (() -> Void)?
@@ -242,12 +248,13 @@ extension OutlineTreeCellView: NSTextFieldDelegate {
         //
         // The programmatic case — reloadData pulling the field editor out from
         // under an in-progress rename, which an FSEvent burst during a build
-        // triggers routinely — is detected by the cell having left the view
-        // hierarchy. `currentEditor()` cannot tell the two apart: whether the
-        // field editor has already resigned by the time this notification
-        // arrives is not ordered by AppKit, so testing it was as likely to drop
-        // every click-away rename as to admit a programmatic one.
-        guard nameField.isEditable, window != nil, superview != nil else { return }
+        // triggers routinely — is identified by the controller announcing it,
+        // not by inspecting the view. Two things that look like evidence are
+        // not: `currentEditor()` is not ordered against this notification, and
+        // detachment from the view hierarchy also happens when the user simply
+        // scrolls the row out of sight or closes the window — cases where
+        // Finder commits, and where dropping the edit loses the user's work.
+        guard nameField.isEditable, !Self.isReloading else { return }
         renameCommitted()
     }
 }

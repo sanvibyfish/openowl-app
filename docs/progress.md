@@ -10,7 +10,7 @@
 - [ ] .dic 单击 1GB+ 内存暴涨根因定位（已加 DIAG-MEM 诊断日志，待用户实测回贴）
 - [x] 2026-07-28 UI：左侧宽项目树 → Muxy 风格 `ProjectRail`（48pt）；`ContentView` 去掉 NavigationSplitView
 - [x] 2026-08-11 git SIGBUS crash 修复：固定 git 路径 + status 串行化 + 信号退出重试（同期的 `AppExitMonitor`/exit.log 已于 2026-08-21 移除，见 [FEAT-009](features/009-app-logger.md)）
-- [x] 2026-08-14 C-6 退出监控加固：致命信号路径移入纯 C，预打开 fd 并仅写固定消息；正常 `atexit` 保留时间戳与回溯，两类 handler 独立安装且部分信号安装可回滚
+- [x] 2026-08-14 C-6 退出监控加固：致命信号路径移入纯 C，预打开 fd 并仅写固定消息 ➜ **2026-08-21 整个退出监控子系统已移除**（纯 C handler 用 `signal()` 不保存原 handler、无 `SA_ONSTACK`，最需要它时最可能是空的），见 [FEAT-009](features/009-app-logger.md)
 - [x] 2026-08-14 C-9 Git status 超时加固：仅 status 限制 30 秒，超时强制结束真实进程并停止 pipe 排空；gate 在正常/错误/超时后回收 tail
 - [x] 2026-08-14 C-12 Terminal surface 失败态：原 pane 显示可访问错误卡片，保留 pane，并阻止重挂载重试与重复 UI
 - [x] 2026-08-11 REQ-009 跨 Agent 消息总线 Phase 1 ➜ **2026-08-18 已整体删除**（含 codex hooks / pi 扩展适配器），详见 [REQ-009](requirements/REQ-009-message-bus.md)

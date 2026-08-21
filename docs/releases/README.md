@@ -12,9 +12,9 @@
 | v1.1.5 | 🟢 Ready | 2026-08-10 | [Release Notes](v1.1.5.md) |
 | v1.1.4-2 | ✅ Done | 2026-08-09 | [Release Notes](v1.1.4-2.md) |
 | v1.1.4 | ✅ Done | 2026-08-05 | [Release Notes](v1.1.4.md)（含 v1.1.4-1 patch tag，2026-08-08） |
-| v1.1.3 | 🟢 Ready | 2026-08-03 | [Release Notes](v1.1.3.md) |
+| v1.1.3 | ✅ Done | 2026-08-03 | [Release Notes](v1.1.3.md) |
 | v1.1.2 | ✅ Done | 2026-08-01 | [Release Notes](v1.1.2.md) |
-| v1.1.1 | 🟢 Ready | 2026-07-30 | [Release Notes](v1.1.1.md) |
+| v1.1.1 | ✅ Done | 2026-07-30 | [Release Notes](v1.1.1.md) |
 | v1.1.0 | ✅ Done | 2026-06-16 | [Release Notes](v1.1.0.md) |
 | v1.0.9 | ✅ Done | 2026-05-30 | [Release Notes](v1.0.9.md) |
 | v1.0.8 | ✅ Done | 2026-05-10 | [Release Notes](v1.0.8.md) |
