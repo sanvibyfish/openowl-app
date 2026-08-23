@@ -16,7 +16,7 @@
 - [x] 输入处理：键盘事件转换为 `ghostty_input_key_s`，鼠标事件处理
 - [x] 终端配置：字体、字号、主题颜色由 libghostty 配置驱动
 - [x] 读取 `~/.config/ghostty/config` 用户已有配置（含 recursive include）
-- [x] `ghostty_surface_new()` 失败时必须在原 pane 显示可访问的失败提示（`Terminal failed to start.` + 指向 `~/Library/Logs/openOwl/openowl.log`——失败详情只在日志里）；pane 不得自动移除，view 重新挂载不得重试创建 surface 或重复叠加错误 UI。AppleScript 对该 pane 的输入必须返回终态错误而非 `notReady`，否则脚本会陷入永不成功的重试循环
+- [x] `ghostty_surface_new()` 失败时必须在原 pane 显示可访问的失败提示（`Terminal failed to start.` + 指向 `~/Library/Logs/openOwl/openowl.log`——失败详情只在日志里）；pane 不得自动移除；view 重新挂载到窗口时可重试创建 surface（失败常为瞬时：ghostty app 尚未就绪、Metal device 暂不可用），但重试前必须先移除旧提示，错误 UI 不得叠加。AppleScript 对该 pane 的输入必须返回终态错误而非 `notReady`，否则脚本会陷入永不成功的重试循环
 
 ### P0 — 多标签 + 分屏
 
@@ -98,3 +98,4 @@ Swift 需要实现以下回调供 libghostty 调用：
 | 日期 | 说明 |
 |------|------|
 | 2026-08-14 | 增加 terminal surface 创建失败验收：原 pane 内显示可访问错误卡片，保留 pane，并阻止重挂载重试与重复 UI |
+| 2026-08-24 | 修订：view 重新挂载到窗口时允许重试创建 surface（仅在 window 变化时触发，不会自旋），错误 UI 仍不得叠加；AppleScript 仍返回终态错误 |

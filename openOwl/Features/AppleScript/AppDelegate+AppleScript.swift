@@ -203,10 +203,11 @@ extension AppDelegate {
                 return .failure(.notReady("The target terminal surface is not ready."))
             }
             guard terminalView.sendText(text) else {
-                // Distinguish the two: surface creation failure is terminal by
-                // contract (REQ-001: no retry on remount), so reporting it as
-                // "not ready" would send scripts into a retry loop that can
-                // never succeed. Only a not-yet-attached pane is worth retrying.
+                // Distinguish the two. Creation is retried when the view
+                // reattaches to a window, but a script cannot cause that — so
+                // reporting this as "not ready" would send it into a retry loop
+                // that its own retries can never resolve. Only a pane that has
+                // not attached yet is worth retrying.
                 if terminalView.surfaceIsUnavailable {
                     return .failure(.failed("The target terminal failed to start and cannot accept input."))
                 }

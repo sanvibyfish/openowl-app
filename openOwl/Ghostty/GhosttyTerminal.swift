@@ -111,9 +111,20 @@ class TerminalNSView: NSView {
             return
         }
 
-        // Per REQ-001: a failed surface is not retried when the view remounts,
-        // and the notice is not stacked a second time.
-        guard !surfaceCreationFailed else { return }
+        // A previous attempt failed. Moving into a window is a genuinely new
+        // one — surface creation needs a real window (it reads backingScaleFactor
+        // for the Metal layer), and the conditions that break it are often
+        // transient: the ghostty app still initialising, the Metal device
+        // momentarily unavailable, memory pressure. Clear the failure and try
+        // again. This runs only when the window changes, never per layout, so
+        // a persistent failure cannot spin — it just re-posts the notice, and
+        // the old one is removed first so they never stack.
+        if surfaceCreationFailed {
+            AppLogger.log("terminal", "retrying surface creation on reattach for pane %@", paneID.uuidString)
+            surfaceCreationFailed = false
+            failureNotice?.removeFromSuperview()
+            failureNotice = nil
+        }
 
 
         // First time — create a new surface.
@@ -263,9 +274,10 @@ class TerminalNSView: NSView {
         failureNotice = notice
     }
 
-    /// True once surface creation has failed. Terminal by contract: REQ-001
-    /// specifies that remounting the view does not retry creation, so a caller
-    /// seeing this must not treat it as a transient "not ready yet".
+    /// True while the last surface creation attempt failed. Creation is retried
+    /// when the view is reattached to a window, but nothing an automation
+    /// client can do will trigger that, so callers must not treat this as a
+    /// "retry in a moment" state.
     var surfaceIsUnavailable: Bool { surfaceCreationFailed }
 
     @discardableResult
