@@ -1,6 +1,6 @@
 # openOwl 发布记录
 
-> 状态说明：🟢 Ready 表示发布说明已完成、等待最终构建与发布；✅ Done 表示对应 Git tag 与 GitHub Release 已发布。
+> 状态说明：🟢 Ready 表示发布说明已完成、等待最终构建与发布；✅ Done 表示对应 Git tag 与 GitHub Release 已发布；⤴️ Merged 表示该版本未单独发布，内容并入后续版本。
 
 ---
 
@@ -8,8 +8,8 @@
 
 | 版本 | 状态 | 发布日期 | 文档 |
 |------|------|----------|------|
-| v1.1.6 | 🟢 Ready | 2026-08-21 | [Release Notes](v1.1.6.md) |
-| v1.1.5 | 🟢 Ready | 2026-08-10 | [Release Notes](v1.1.5.md) |
+| v1.1.6 | ✅ Done | 2026-08-24 | [Release Notes](v1.1.6.md) |
+| v1.1.5 | ⤴️ Merged | — | [Release Notes](v1.1.5.md)（未单独发布，并入 v1.1.6） |
 | v1.1.4-2 | ✅ Done | 2026-08-09 | [Release Notes](v1.1.4-2.md) |
 | v1.1.4 | ✅ Done | 2026-08-05 | [Release Notes](v1.1.4.md)（含 v1.1.4-1 patch tag，2026-08-08） |
 | v1.1.3 | ✅ Done | 2026-08-03 | [Release Notes](v1.1.3.md) |
@@ -39,6 +39,7 @@
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-24 | 发布 v1.1.6：并入原定 v1.1.5 的 Right Dock 与 Terminal AppleScript 内容，新增终端 surface 重挂载重试与侧边栏 header 对齐修复；v1.1.5 标记为 ⤴️ Merged，从未单独发布 |
 | 2026-08-21 | v1.1.6 发布说明就绪：git 子进程管道层加固（读错误不再被吞、等待有界、超时改用 SIGTERM）、Discard All 契约修正为真正的全部丢弃、⌘Q 编辑内容丢失修复；移除三处兜底与 `AppExitMonitor`。同时更正了先前「v1.1.6 已于 2026-08-17 发布」的错误记录——该版本从未发布，且原发布说明的头号功能从未实现 |
 | 2026-08-10 | v1.1.5 发布说明就绪：新增 Terminal AppleScript 自动化，修复 Right Dock 文件即时 reload、Git diff/Graph 状态隔离、Git 边界场景与 File Explorer 文件操作生命周期；DMG 签名、公证、staple 与 Gatekeeper 验证完成，等待 tag、上传与发布 |
 | 2026-08-09 | 发布 v1.1.4-2：pane 与 Finder 拖放统一迁到 AppKit，修复嵌套分屏命中、终端输入阻塞和隐藏 pane 抢拖放事件 |
