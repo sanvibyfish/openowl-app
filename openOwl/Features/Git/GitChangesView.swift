@@ -46,6 +46,20 @@ struct GitChangesView: View {
             expandedHunks.removeAll()
             fileLines = .idle
         }
+        .onChange(of: store.selectedCommitHash) { _, hash in
+            collapsedCommitFiles.removeAll()
+            selectedCommitFilePath = nil
+            scrollTarget = nil
+            guard hash != nil else { return }
+            selectedIDs.removeAll()
+            lastClickedID = nil
+        }
+        .onChange(of: allChangeIDs) { _, ids in
+            selectedIDs.formIntersection(ids)
+            if let lastClickedID, !ids.contains(lastClickedID) {
+                self.lastClickedID = nil
+            }
+        }
         .alert("Confirm Action", isPresented: isShowingConfirmation, presenting: confirmationAction) { action in
             confirmationButtons(for: action)
         } message: { action in
@@ -98,7 +112,7 @@ struct GitChangesView: View {
             // Error/Info banners
             if let errorMessage = store.errorMessage {
                 statusBanner(text: errorMessage, color: .red) {
-                    store.errorMessage = nil
+                    store.clearErrorMessage()
                 }
             } else if let infoMessage = store.infoMessage {
                 statusBanner(text: infoMessage, color: .green) {
@@ -305,7 +319,7 @@ struct GitChangesView: View {
                     AnyView(
                         HStack(spacing: 2) {
                             Button {
-                                requestDiscard(changes: changes)
+                                confirmationAction = .discardAll
                             } label: {
                                 Image(systemName: "arrow.uturn.backward")
                                     .font(AppFonts.badge.weight(.semibold))
@@ -314,7 +328,13 @@ struct GitChangesView: View {
                             .help("Discard All")
                             .accessibilityLabel("Discard All")
 
-                            Button { store.stageAll() } label: {
+                            Button {
+                                if store.statusSnapshot?.untrackedTruncated == true {
+                                    confirmationAction = .stageAllBeyondList
+                                } else {
+                                    store.stageAll()
+                                }
+                            } label: {
                                 Image(systemName: "plus")
                                     .font(AppFonts.toolbarIcon.weight(.semibold))
                             }
@@ -353,7 +373,7 @@ struct GitChangesView: View {
             HStack(spacing: 4) {
                 Image(systemName: "exclamationmark.triangle")
                     .font(AppFonts.smallIcon)
-                Text("Showing first 500 untracked files. Consider updating .gitignore.")
+                Text("Showing first \(GitStatusSnapshot.untrackedLimit) untracked files. Stage All still stages all of them. Consider updating .gitignore.")
                     .font(AppFonts.caption)
             }
             .foregroundStyle(.orange)
@@ -456,6 +476,8 @@ struct GitChangesView: View {
                     GitGraphContentView(
                         entries: store.logEntries,
                         selectedHash: store.selectedCommitHash,
+                        expandedFiles: store.commitFiles,
+                        isLoadingFiles: store.isLoadingCommitDetail,
                         onSelect: { hash in
                             // Same auto-expand: a commit click in list-only mode
                             // would otherwise update state with no visible result.
@@ -464,9 +486,15 @@ struct GitChangesView: View {
                             }
                             store.selectCommit(hash)
                         },
+                        onSelectFile: { path in
+                            selectedCommitFilePath = path
+                            collapsedCommitFiles.remove(path)
+                            scrollTarget = path
+                        },
                         onLoadMore: { store.loadMoreLog() },
                         hasMore: store.hasMoreLog
                     )
+                    .padding(.bottom, graphRowHeight)
                 }
             }
         }
@@ -480,7 +508,16 @@ struct GitChangesView: View {
             // Header — trailing controls are fixedSize so path/hash never shove
             // them off-screen; path truncates first (full string in help).
             HStack(spacing: 6) {
-                if let hash = store.selectedCommitHash, !store.commitDiffText.isEmpty {
+                if let hash = store.selectedCommitHash, store.isLoadingCommitDetail {
+                    Text("Loading commit…")
+                        .font(AppFonts.primaryLabel)
+                        .foregroundStyle(AppPalette.textSecondary)
+                    Text("(\(String(hash.prefix(7))))")
+                        .font(AppFonts.caption)
+                        .foregroundStyle(AppPalette.textTertiary)
+                        .fixedSize()
+                        .help(hash)
+                } else if let hash = store.selectedCommitHash, !store.commitDiffText.isEmpty {
                     let short = String(hash.prefix(7))
                     let count = store.commitFiles.count
                     Text("\(count) file\(count == 1 ? "" : "s") changed")
@@ -489,6 +526,15 @@ struct GitChangesView: View {
                         .lineLimit(1)
                         .layoutPriority(1)
                     Text("(\(short))")
+                        .font(AppFonts.caption)
+                        .foregroundStyle(AppPalette.textTertiary)
+                        .fixedSize()
+                        .help(hash)
+                } else if let hash = store.selectedCommitHash {
+                    Text(store.commitDetailErrorMessage == nil ? "No changes" : "Diff unavailable")
+                        .font(AppFonts.primaryLabel)
+                        .foregroundStyle(AppPalette.textSecondary)
+                    Text("(\(String(hash.prefix(7))))")
                         .font(AppFonts.caption)
                         .foregroundStyle(AppPalette.textTertiary)
                         .fixedSize()
@@ -512,44 +558,44 @@ struct GitChangesView: View {
                 }
 
                 Spacer(minLength: 4)
-
-                if store.selectedCommitHash != nil, !store.commitDiffText.isEmpty {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            showCommitFileList.toggle()
-                        }
-                    } label: {
-                        Image(systemName: "sidebar.left")
-                    }
-                    .buttonStyle(.icon(
-                        isActive: showCommitFileList,
-                        font: AppFonts.toolbarIcon,
-                        size: 22
-                    ))
-                    .help("Toggle file list")
-                    .accessibilityLabel("Toggle file list")
-                }
             }
             .padding(.horizontal, 10)
             .panelToolHeader(background: AppPalette.elevated)
 
             // Content
-            if store.selectedCommitHash != nil, !store.commitDiffText.isEmpty {
-                let sections = splitDiffByFile(store.commitDiffText)
-                HStack(spacing: 0) {
-                    if showCommitFileList {
-                        commitFileSidebar(sections: sections)
-                        // `PanelDivider` is fixed horizontal and width-greedy;
-                        // between two side-by-side panes it needs the vertical
-                        // form, which is what the old `Divider()` resolved to
-                        // here on its own.
-                        Rectangle()
-                            .fill(AppPalette.border)
-                            .frame(width: 1)
-                            .frame(maxHeight: .infinity)
-                    }
-                    commitDiffByFile(sections: sections)
+            if store.selectedCommitHash != nil, store.isLoadingCommitDetail {
+                Spacer(minLength: 0)
+                VStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading commit diff…")
+                        .font(AppFonts.caption)
+                        .foregroundStyle(AppPalette.textTertiary)
                 }
+                Spacer(minLength: 0)
+            } else if store.selectedCommitHash != nil, !store.commitDiffText.isEmpty {
+                let sections = splitDiffByFile(store.commitDiffText)
+                commitDiffByFile(sections: sections)
+                    .id(store.selectedCommitHash)
+            } else if let error = store.commitDetailErrorMessage,
+                      store.selectedCommitHash != nil {
+                Spacer(minLength: 0)
+                EmptyStateView(
+                    "Could not load commit diff",
+                    subtitle: error,
+                    systemImage: "exclamationmark.triangle",
+                    density: .compact
+                )
+                Spacer(minLength: 0)
+            } else if store.selectedCommitHash != nil {
+                Spacer(minLength: 0)
+                EmptyStateView(
+                    "No changes in this commit",
+                    subtitle: "This commit does not contain a patch",
+                    systemImage: "doc.text.magnifyingglass",
+                    density: .compact
+                )
+                Spacer(minLength: 0)
             } else if let change = store.selectedChange, isImagePath(change.path) {
                 WorkingTreeImageDiffView(
                     change: change,
@@ -582,59 +628,12 @@ struct GitChangesView: View {
     // MARK: - Commit Diff (file-by-file sections)
 
     @State private var collapsedCommitFiles: Set<String> = []
-    @State private var showCommitFileList = true
     @State private var scrollTarget: String?
     @State private var selectedCommitFilePath: String?
 
     private static let imageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp", "heic", "ico", "svg", "icns"
     ]
-
-    private func commitFileSidebar(sections: [FileDiffSection]) -> some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(sections, id: \.path) { section in
-                    let isSelected = selectedCommitFilePath == section.path
-                    let isImage = Self.imageExtensions.contains(
-                        URL(fileURLWithPath: section.path).pathExtension.lowercased()
-                    )
-                    HStack(spacing: 6) {
-                        if isImage {
-                            Image(systemName: "photo")
-                                .font(AppFonts.smallIcon)
-                                .foregroundStyle(AppPalette.textSecondary)
-                                .frame(width: 12)
-                        } else {
-                            Text(String(section.status.rawValue))
-                                .font(AppFonts.diffMeta)
-                                .foregroundStyle(commitStatusColor(section.status))
-                                .frame(width: 12)
-                        }
-
-                        Text(URL(fileURLWithPath: section.path).lastPathComponent)
-                            .font(AppFonts.secondaryLabel)
-                            .foregroundStyle(isSelected ? AppPalette.textPrimary : AppPalette.textSecondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .selectableRowChrome(isSelected: isSelected, accentBarHeight: 12)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        selectedCommitFilePath = section.path
-                        collapsedCommitFiles.remove(section.path)
-                        scrollTarget = section.path
-                    }
-                }
-            }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 6)
-        }
-        .frame(width: 168)
-        .background(AppPalette.elevated)
-    }
 
     private func commitDiffByFile(sections: [FileDiffSection]) -> some View {
         GeometryReader { geo in
@@ -1196,6 +1195,10 @@ struct GitChangesView: View {
         return (s?.staged ?? []) + (s?.modified ?? []) + (s?.untracked ?? [])
     }
 
+    private var allChangeIDs: Set<String> {
+        Set(allChanges.map(\.id))
+    }
+
     private func handleClick(_ change: GitFileChange) {
         let modifiers = NSEvent.modifierFlags
 
@@ -1282,6 +1285,12 @@ struct GitChangesView: View {
         case .discardChanges(let changes):
             Button("Discard", role: .destructive) { store.discard(changes); confirmationAction = nil }
             Button("Cancel", role: .cancel) { confirmationAction = nil }
+        case .discardAll:
+            Button("Discard All", role: .destructive) { store.discardAll(); confirmationAction = nil }
+            Button("Cancel", role: .cancel) { confirmationAction = nil }
+        case .stageAllBeyondList:
+            Button("Stage All") { store.stageAll(); confirmationAction = nil }
+            Button("Cancel", role: .cancel) { confirmationAction = nil }
         }
     }
 
@@ -1291,6 +1300,14 @@ struct GitChangesView: View {
         case .discardChanges(let changes):
             if changes.count == 1, let c = changes.first { return "Discard changes for `\(c.path)`? This cannot be undone." }
             return "Discard \(changes.count) changes? This cannot be undone."
+        case .discardAll:
+            // Spells out the one consequence users do not expect: clean -f -f -d
+            // takes untracked nested Git repositories with it.
+            return "Discard all staged, unstaged and untracked changes? Untracked nested Git repositories are deleted too. This cannot be undone."
+        case .stageAllBeyondList:
+            return "Stage All runs `git add -A`, which stages every untracked file in the repository — "
+                + "including the ones beyond the \(GitStatusSnapshot.untrackedLimit) listed here. "
+                + "Add build output to .gitignore first if you do not want it committed."
         }
     }
 
@@ -1525,6 +1542,10 @@ func splitDiffByFile(_ fullDiff: String) -> [FileDiffSection] {
             // Use " b/" separator (not space split) to handle paths with spaces
             if let bRange = line.range(of: " b/", options: .backwards) {
                 currentPath = String(line[line.index(bRange.lowerBound, offsetBy: 3)...])
+            } else if let bRange = line.range(of: " \"b/", options: .backwards) {
+                let quotedPath = String(line[line.index(after: bRange.lowerBound)...])
+                let decodedPath = GitService.decodeGitPath(quotedPath)
+                currentPath = decodedPath.hasPrefix("b/") ? String(decodedPath.dropFirst(2)) : "unknown"
             } else {
                 currentPath = "unknown"
             }
@@ -1552,6 +1573,7 @@ func splitDiffByFile(_ fullDiff: String) -> [FileDiffSection] {
 // MARK: - Git Graph Content (swim lanes + commit list)
 
 private let graphRowHeight: CGFloat = 26
+private let graphFileRowHeight: CGFloat = 25
 private let graphColWidth: CGFloat = 12
 /// Enough room for a selected circle (r+1) so the leftmost lane isn't
 /// mid-clipped by the scroll view edge.
@@ -1647,7 +1669,10 @@ func computeGraphLayout(entries: [GitLogEntry]) -> GraphLayout {
 private struct GitGraphContentView: View {
     let entries: [GitLogEntry]
     let selectedHash: String?
+    let expandedFiles: [GitFileChange]
+    let isLoadingFiles: Bool
     let onSelect: (String) -> Void
+    let onSelectFile: (String) -> Void
     let onLoadMore: () -> Void
     let hasMore: Bool
 
@@ -1664,12 +1689,18 @@ private struct GitGraphContentView: View {
         let graphWidth = graphLeftPad
             + CGFloat(max(layout.maxColumns, 1)) * graphColWidth
             + graphLeftPad
+        let selectedRow = entries.firstIndex { $0.hash == selectedHash }
+        let expandedRowCount = selectedRow == nil ? 0 : (isLoadingFiles ? 1 : expandedFiles.count)
+        let expandedHeight = CGFloat(expandedRowCount) * graphFileRowHeight
 
         HStack(alignment: .top, spacing: 0) {
             // SVG-like graph using Canvas
             Canvas { context, _ in
                 func cx(_ col: Int) -> CGFloat { graphLeftPad + CGFloat(col) * graphColWidth + graphColWidth / 2 }
-                func cy(_ row: Int) -> CGFloat { CGFloat(row) * graphRowHeight + graphRowHeight / 2 }
+                func cy(_ row: Int) -> CGFloat {
+                    let expansionOffset = selectedRow.map { row > $0 ? expandedHeight : 0 } ?? 0
+                    return CGFloat(row) * graphRowHeight + graphRowHeight / 2 + expansionOffset
+                }
 
                 // Lane segments
                 for seg in layout.segments {
@@ -1708,14 +1739,38 @@ private struct GitGraphContentView: View {
                     }
                 }
             }
-            .frame(width: graphWidth, height: CGFloat(entries.count) * graphRowHeight)
+            .frame(
+                width: graphWidth,
+                height: CGFloat(entries.count) * graphRowHeight + expandedHeight
+            )
             .fixedSize(horizontal: true, vertical: false)
 
             // Commit list — min width so HSplit crushing can't hide the message.
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(entries) { entry in
-                    CommitRow(entry: entry, isSelected: entry.hash == selectedHash)
-                        .onTapGesture { onSelect(entry.hash) }
+                    let isSelected = entry.hash == selectedHash
+                    VStack(alignment: .leading, spacing: 0) {
+                        CommitRow(entry: entry, isSelected: isSelected)
+                            .onTapGesture { onSelect(entry.hash) }
+
+                        if isSelected, isLoadingFiles {
+                            HStack(spacing: 6) {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                Text("Loading changed files…")
+                                    .font(AppFonts.caption)
+                                    .foregroundStyle(AppPalette.textTertiary)
+                            }
+                            .padding(.leading, 10)
+                            .frame(height: graphFileRowHeight)
+                        } else if isSelected {
+                            ForEach(expandedFiles) { change in
+                                CommitChangedFileRow(change: change) {
+                                    onSelectFile(change.path)
+                                }
+                            }
+                        }
+                    }
                 }
 
                 if hasMore {
@@ -1748,6 +1803,11 @@ private struct CommitRow: View {
 
     var body: some View {
         HStack(spacing: 5) {
+            Image(systemName: isSelected ? "chevron.down" : "chevron.right")
+                .font(AppFonts.tinyIcon.weight(.bold))
+                .foregroundStyle(AppPalette.textTertiary)
+                .frame(width: 9)
+
             // At most one badge so the commit message isn't crushed in a
             // narrow dock column (was rendering 2–3 truncated pills).
             if let badge = primaryBadge {
@@ -1784,6 +1844,12 @@ private struct CommitRow: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .help(entry.message)
+        .contextMenu {
+            Button("Copy Commit ID") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(entry.hash, forType: .string)
+            }
+        }
     }
 
     private struct RefBadge {
@@ -1835,6 +1901,50 @@ private struct CommitRow: View {
         if diff < 2592000 { return "\(diff / 604800)w" }
         if diff < 31536000 { return "\(diff / 2592000)mo" }
         return "\(diff / 31536000)y"
+    }
+}
+
+private struct CommitChangedFileRow: View {
+    let change: GitFileChange
+    let onSelect: () -> Void
+    @State private var hovering = false
+
+    private var fileName: String {
+        URL(fileURLWithPath: change.path).lastPathComponent
+    }
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Text(String(change.indexStatus))
+                .font(AppFonts.diffCode.weight(.medium))
+                .foregroundStyle(statusColor)
+                .frame(width: 12)
+
+            Text(fileName)
+                .font(AppFonts.secondaryLabel)
+                .foregroundStyle(AppPalette.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
+        .frame(height: graphFileRowHeight)
+        .background(hovering ? AppPalette.surface.opacity(0.65) : Color.clear)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .onTapGesture { onSelect() }
+        .help(change.path)
+    }
+
+    private var statusColor: Color {
+        switch change.indexStatus {
+        case "M": return Color(nsColor: .systemYellow)
+        case "A": return Color(nsColor: .systemGreen)
+        case "D": return Color(nsColor: .systemRed)
+        case "R": return Color(nsColor: .systemPurple)
+        default: return AppPalette.textSecondary
+        }
     }
 }
 
@@ -1994,4 +2104,9 @@ private struct FileStatusRow: View {
 private enum GitConfirmationAction {
     case deleteBranch(branch: String)
     case discardChanges(changes: [GitFileChange])
+    case discardAll
+    /// Only raised while the untracked list is truncated: `git add -A` reaches
+    /// every untracked file, so the list on screen understates what is about to
+    /// be staged.
+    case stageAllBeyondList
 }

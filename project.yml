@@ -31,6 +31,12 @@ targets:
       - path: openOwl
         excludes:
           - "**/*.entitlements"
+          - Resources/Ghostty-AppleScript-LICENSE.txt
+          - Resources/openOwl.sdef
+      - path: openOwl/Resources/openOwl.sdef
+        buildPhase: resources
+      - path: openOwl/Resources/Ghostty-AppleScript-LICENSE.txt
+        buildPhase: resources
       - path: ghostty-resources
         type: folder
         buildPhase: resources
@@ -39,8 +45,8 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_BUNDLE_IDENTIFIER: com.openowl.app
         PRODUCT_NAME: openOwl
-        MARKETING_VERSION: "1.1.4"
-        CURRENT_PROJECT_VERSION: "7"
+        MARKETING_VERSION: "1.1.6"
+        CURRENT_PROJECT_VERSION: "13"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: openOwl/Resources/Info.plist
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools

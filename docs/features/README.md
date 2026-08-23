@@ -20,10 +20,11 @@
 | 004 | 文件浏览器 | ✅ Done | [004-file-explorer.md](004-file-explorer.md) |
 | 005 | 本地部署服务 | ⏸️ Archived | [archive/FEAT-005-local-deployment.md](../archive/FEAT-005-local-deployment.md) |
 | 006 | 项目管理侧边栏（Project Rail） | ✅ Done | [006-project-sidebar.md](006-project-sidebar.md) |
-| 007 | UI 设计系统 | ✅ Done | [007-ui-design-system.md](007-ui-design-system.md) |
+| 007 | UI 设计系统升级 | 🔵 Draft | [007-ui-design-system.md](007-ui-design-system.md) |
 | 008 | Right Dock + 独立 Terminals | ✅ Done | [008-right-dock.md](008-right-dock.md) |
 | 009 | 文件日志系统 (AppLogger) | ✅ Done | [009-app-logger.md](009-app-logger.md) |
 | 010 | 进程资源异常监控 | 🟡 In Progress | [010-resource-monitor.md](010-resource-monitor.md) |
+| 011 | Ghostty 风格终端 AppleScript 控制 | ✅ Done | [011-terminal-applescript.md](011-terminal-applescript.md) |
 
 ## 分类
 
@@ -31,6 +32,7 @@
 
 - [001-libghostty-integration.md](001-libghostty-integration.md) — libghostty 集成方式、C API 桥接、Metal 渲染
 - [002-terminal-split.md](002-terminal-split.md) — 多标签 + 二叉树分屏、焦点导航、窗格拖拽
+- [011-terminal-applescript.md](011-terminal-applescript.md) — Ghostty 风格对象模型、稳定 ID、surface configuration 与原生 Pane 自动化
 
 ### Git
 
@@ -59,6 +61,9 @@
                     ──→ 004-file-explorer
 
 002-terminal-split ──→ 001-libghostty-integration
+011-terminal-applescript ──→ 001-libghostty-integration
+                         ──→ 002-terminal-split
+                         ──→ 008-right-dock
 010-resource-monitor ──→ 009-app-logger
 ```
 
@@ -66,6 +71,12 @@
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-09 | 003/004：Git 阻止 unresolved conflicts 进入 commit/discard-all，Discard All 覆盖非 ignored 嵌套仓库，并保持仓库切换期间 command mutex 与详情错误 provenance；Files 保留部分 cut 失败项的移动语义，并在 rename/move 后重启 pending initial activation。完整 XCTest 419 tests / 35 suites 通过 |
+| 2026-08-09 | 003/004：Right Dock Git 增加仓库级 draft 与异步 request ownership，修正 Stage/Discard/Unstage、冲突与路径解析边界；文件 rename/move/delete 与 editor URL state 原子同步，并保护 dirty/missing/collision 场景。完整 XCTest 416 tests / 35 suites 通过 |
+| 2026-08-09 | 003：正确解析 Git porcelain v1 新旧 unborn branch header，仅显示真实分支名；空仓库 Git Graph 保持 `No commits yet` 空态且不产生 error banner，detached HEAD 行为不变 |
+| 2026-08-09 | 003：Git Graph 改用 `git log -z` + `%x00` 的 7 字段 NUL 协议，避免合法提交标题与旧可见 record marker 碰撞，并保持空 refs、root parents 与分页解析正确 |
+| 2026-08-09 | 003：Right Dock Git 以 `git rev-parse` 的真实 root 识别仓库，支持 terminal cwd / Files Open Changes 从外层仓库切换到 submodule 或嵌套仓库，同仓库普通子目录保持当前选择与 diff |
+| 2026-08-09 | 004：项目切换同步清理旧 Git/Quick Open 数据，并以 captured project URL 门禁浅扫描提交，防止旧项目结果覆盖新项目 UI |
 | 2026-03-16 | 创建索引，补全 001–006 功能文档 |
 | 2026-05-07 | 加入 008 Right Dock + 独立 Terminals（实现完成） |
 | 2026-05-10 | v1.0.8 下架本地部署，005 文档归档至 docs/archive/ |
@@ -75,3 +86,11 @@
 | 2026-07-28 | 006/008：左侧改为 Muxy 风格 Project Rail，移除宽 NavigationSplitView 侧栏 |
 | 2026-07-30 | 004/006：强化编辑器异步读取提交门禁与交互状态保持，并统一 worktree 归档并发 guard |
 | 2026-07-31 | 004/006/008：同步 editor context preflight、持久化保护、Right Dock 常驻与 resize 中断语义 |
+| 2026-08-21 | 009：移除 `AppExitMonitor` 与 exit.log 相关章节；补记 `[resize-diag]`/`[keyboard-routing]` 为 UserDefaults opt-in（此前照文档操作会等一个默认构建永不写入的输出），tag 清单补入 `[git]` 与 `[worktree]` |
+| 2026-08-21 | 003：Discard All 契约更新为 `reset --hard HEAD`；修正分支管理描述（切换/创建未实现、删除无 UI 路径、Fetch 未接入）；状态与日志命令补齐 `--untracked-files=all` 与 `--all` 两个被漏写的 flag；补记 untracked 500 条截断与图片/二进制 diff；分区数由「三个」更正为实际的两个 |
+| 2026-08-21 | 007：索引状态由 ✅ Done 更正为 🔵 Draft —— 文档本体是现状审查与差距分析的提案，无完成记录 |
+| 2026-08-09 | 003：补充 Git Graph 分页串行化、刷新 generation 隔离、末行可点击空间、root commit 日志与文件详情，以及 commit diff 加载/空 patch/失败状态契约 |
+| 2026-08-09 | 003：补充 commit 切换时折叠/文件选择/滚动状态隔离，以及 quoted UTF-8 路径的统一解码与回归验收 |
+| 2026-08-09 | 003：Git Graph 支持展开 commit 修改文件、点击文件定位 diff、展开区域泳道对齐，以及右键复制完整 Commit ID |
+| 2026-08-09 | 003：仓库切换原子清理旧 Git 状态，非 Git 目录失败后 refresh 不再恢复旧数据；Git Log 展开文件作为唯一入口，右侧 commit diff 移除重复文件侧栏并使用全宽布局 |
+| 2026-08-09 | 加入 011 Ghostty 风格终端 AppleScript 控制（实现与验收完成） |

@@ -53,6 +53,9 @@ struct FileExplorerNode: Identifiable, Hashable {
 3. **扫描边界**: 嵌套 Git repo/worktree 与常见依赖/构建目录只保留目录节点，避免打开 `~/.openowl/workspace` 时递归索引所有子项目
 4. **按需展开**: `expandDirectory()` 用户展开目录时单独扫描该目录
 5. **缓存**: `projectScanCache` 按项目路径缓存，切换项目时即时恢复
+6. **尾随刷新**: 扫描进行中再次收到 watcher 或手动刷新请求时记录一次待刷新；当前扫描结束后立即补跑，避免互斥窗口内的文件变化被丢弃
+7. **项目切换隔离**: 切换项目时立即清空旧 `currentGitContext`；目标项目无缓存时同步清空 `searchableFileNodes`，Quick Open 在新项目扫描完成前不会展示或打开旧项目文件
+8. **浅扫描提交门禁**: 浅层扫描结束、写入 `rootNodes` / `nodeIndex` 前核对启动扫描时捕获的 `projectURL`；切换项目后才结束的旧扫描不得覆盖新项目 UI
 
 ### 3.3 Git 状态映射
 
@@ -95,7 +98,7 @@ classifyGitState: GitFileChange → FileGitState
 - **打开失败不落地空缓冲区**：权限被拒、文件在 stat 后被删、内容非 UTF-8 都会关闭该 tab 并报错。若代之以空字符串，磁盘签名校验仍会通过（磁盘没变），用户会看到一个可编辑的空文档，首次 ⌘S 就把原文件截断
 - **上下文变更先否决、后执行**：`ProjectStore` 在项目/worktree/free terminal 切换或删除的任何副作用前同步调用 editor preflight；auto-save 失败则整个 action 不发生，不会先切换 `activeProjectID` 或 terminal namespace 再恢复旧状态。`activeKind` 监听覆盖 free terminal A → B
 - **异步 worktree 操作分阶段审批**：创建 worktree 在首个 Git 副作用前审批；Git 成功后先把新 worktree 登记为 inactive，实际激活时再次审批。归档 active worktree 则在任何 `await` / Git 副作用前审批并切到 parent，归档 in-flight 期间禁止重新激活
-- **三个保存出口共享签名冲突否决**：⌘S、关闭 dirty tab、上下文变更前 save-all 都调用 `saveTab`；磁盘签名与打开时不一致或无法取得签名时拒绝覆盖，保留 dirty buffer
+- **三个保存出口共享签名冲突否决**：⌘S、关闭 dirty tab、上下文变更前 save-all 都调用 `saveTab`；磁盘签名与打开时不一致或无法取得签名时拒绝覆盖，保留 dirty buffer。签名不一致时，首次拒绝会把当次观察到的磁盘签名记为新的确认基线，因此按提示再次 ⌘S 可以覆盖；若两次保存之间磁盘又变化，则再次拒绝。文件已不可用时不推进基线；覆盖成功后清除旧的保存失败横幅
 - **关闭 tab 时保存失败则不关闭**：dirty tab 的 buffer 是用户编辑的唯一副本，写盘失败或 storage 已被驱逐时弹窗并保留 tab。关闭 active tab A 后自动选择相邻 tab B，并通过正常 `switchToTab` / reload 流程核验 B 的磁盘内容
 - **错误横幅在两种布局下都渲染**：`errorBanner` 同时挂在 tree panel 与 editor-only panel。此前它只在 tree panel 内，而 editor-only 恰是长时间编辑、最可能触发保存失败的模式，错误对用户完全不可见
 - **未保存名称按 editor/window 隔离聚合**：每个 `FileExplorerView` 以自己的 token 发布 dirty tab 名称；view disappear 只移除该 token，不会清空其他窗口的数据。`AppDelegate` 读取 flattened、sorted 的计算结果，并与终端确认合并成一个退出提示；dock 折叠不会触发 view disappear
@@ -105,6 +108,17 @@ classifyGitState: GitFileChange → FileGitState
 - 打开/恢复/reload 的 pending activation 与读取身份分离；一个文件的 reload 完成不会清除另一个文件的待激活状态
 - 只有 reload（storage 对象被替换）才重建编辑器视图，光标位置按新 buffer 长度夹取后恢复；scroll 与 focus 不跨 reload 保留 —— 这是不触发 undo 越界崩溃的代价。保存不重建，编辑器交互状态完整保留
 - 日志：`[file-editor-state]` 记录 `persist` / `restore` / `restore-skip` / `clear`
+
+### 3.7 文件操作与编辑器状态一致性
+
+- rename 与剪切粘贴成功后，按原路径到新路径的映射原子迁移所有 URL-keyed 编辑器状态：open/active/pending/heavy tab、text/image storage、磁盘签名、读取请求，以及 dirty/large/huge 集合；目录操作同时迁移全部已打开后代
+- 多文件 cut/move 部分失败时，pasteboard 仅保留失败 URL，并继续保留 cut pending；移除目标冲突后再次粘贴仍执行 move，已成功移动的 URL 不会重复处理
+- 复制不会迁移现有 tab；文件系统操作失败时不提交任何编辑器 URL 状态变化
+- rename/move 执行前检查目标 URL 映射是否与另一已打开 tab（含目录后代）碰撞；存在碰撞时阻止磁盘操作并显示错误，避免字典重复 key 崩溃或两个 buffer 归并
+- 删除成功后立即从 tree、node index、search、selection、preview 与 Quick Open 裁剪目标及其后代，不等待 FileWatcher 下一轮扫描
+- App 内删除 dirty 文件或包含 dirty tab 的目录会被阻止；成功删除会关闭 clean tab
+- 外部删除 clean 文件时关闭 tab；dirty tab 的内存 buffer 保留，并显示 backing file missing 错误，避免未保存内容丢失
+- rename/move 打断首次打开读取时，将 pending activation 映射到新 URL，并从新 URL 重启完整 activation 流程；成功或失败均按统一读取收尾结束 pending/loading，不把首次打开降级成 reload
 
 ## 4. 注意事项
 
@@ -122,6 +136,11 @@ classifyGitState: GitFileChange → FileGitState
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-09 | 多文件 cut/move 部分失败后，pasteboard 仅保留失败 URL 和 cut pending，重试继续执行 move；rename/move 打断 pending initial read 时按新 URL 重启完整 activation，并正确结束 pending/loading。定向 FileExplorer 35 tests，完整 XCTest 419 tests / 35 suites 通过；SPM patch 已应用且 `git diff --check` 通过 |
+| 2026-08-09 | 文件 rename/cut-move 原子迁移全部 URL-keyed editor state，目录操作覆盖后代；操作前检测 open-tab 目标碰撞并阻止磁盘修改。删除立即裁剪 tree/index/search/selection/preview/Quick Open，App 内 dirty 删除被阻止、clean tab 关闭，外部删除 dirty 文件保留 buffer 并报告 backing file missing。定向 FileExplorer 34 tests、完整 XCTest 416 tests / 35 suites 通过；SPM patch 已应用且 `git diff --check` 通过 |
+| 2026-08-09 | 项目切换立即清理旧 Git context 与无缓存目标的 Quick Open 数据；浅扫描提交结果前核对 captured project URL，阻止旧项目扫描覆盖新项目 UI，并新增跨项目 Quick Open 回归测试 |
+| 2026-08-09 | 文件树刷新采用尾随刷新语义：扫描进行中收到的新请求不会直接丢弃，而是在当前轮完成后立即补跑一次 |
+| 2026-08-09 | FileWatcher 事件新增 editor revision 通知；所有已打开且未编辑的 tab 会按磁盘签名立即 reload，不再等切换 tab 才更新 |
 | 2026-08-04 | 文件树/编辑器分隔条的 `DragGesture` 补上 `coordinateSpace: .global`。分隔条夹在两个面板之间，拖宽文件树会带着分隔条一起右移，`.local` 的坐标原点跟着走、每帧把 translation 抵消掉，拖动因此原地振荡。RightDock 的宽度手柄早修过同款问题并留了注释，这处漏改 |
 | 2026-08-01 | `EditTracker.destroy()` 不再清空 `controller`——单个 tracker 被所有 tab 的编辑器共用，而 SwiftUI 在 `.id(storage)` 重建时先注册新 controller、后拆卸旧的，清空会把活着的实例置 nil，使 `relayout()` 此后永久静默失效（软换行宽度再也修不上）；`controller` 是 weak，无需手动清 |
 | 2026-08-01 | 文件树 outline 选中改用 `AccentBarTableRowView`（accent 左竖条 + 浅色圆角底），与 SwiftUI `selectableRowChrome` 共用 `SelectableRowMetrics`，去掉系统蓝高亮 |

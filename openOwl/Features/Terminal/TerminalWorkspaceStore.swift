@@ -23,6 +23,57 @@ enum TerminalFocusDirection {
     case down
 }
 
+enum TerminalSplitDirection {
+    case left
+    case right
+    case up
+    case down
+
+    var axis: TerminalSplitAxis {
+        switch self {
+        case .left, .right:
+            return .horizontal
+        case .up, .down:
+            return .vertical
+        }
+    }
+
+    var newPaneFirst: Bool {
+        self == .left || self == .up
+    }
+}
+
+struct TerminalPaneLocation: Equatable {
+    let namespace: TerminalNamespace
+    let tabID: UUID
+    let paneID: UUID
+}
+
+struct TerminalSurfaceConfiguration: Equatable {
+    var workingDirectory: String?
+    var command: String?
+    var initialInput: String?
+    var waitAfterCommand: Bool
+    var environmentVariables: [String]
+    var fontSize: Float?
+
+    init(
+        workingDirectory: String? = nil,
+        command: String? = nil,
+        initialInput: String? = nil,
+        waitAfterCommand: Bool = false,
+        environmentVariables: [String] = [],
+        fontSize: Float? = nil
+    ) {
+        self.workingDirectory = workingDirectory
+        self.command = command
+        self.initialInput = initialInput
+        self.waitAfterCommand = waitAfterCommand
+        self.environmentVariables = environmentVariables
+        self.fontSize = fontSize
+    }
+}
+
 struct SplitDividerInfo: Identifiable {
     /// Stable tree-path ID (e.g. "0", "1.0", "1.1") — doesn't change when panes are added
     let id: String
@@ -397,6 +448,10 @@ final class TerminalWorkspaceStore {
     // free-terminal namespace is active.
     private(set) var panePwds: [UUID: String] = [:]
 
+    // Surface startup options are keyed by stable pane identity so SwiftUI can
+    // pass them atomically when the corresponding libghostty surface is created.
+    private var paneLaunchConfigurations: [UUID: TerminalSurfaceConfiguration] = [:]
+
 
 
     // Per-namespace terminal tracking. A namespace is either a project (worktree)
@@ -520,12 +575,20 @@ final class TerminalWorkspaceStore {
     /// Legacy convenience overload — wraps the namespace-based variant for callers
     /// that still think in terms of project ids.
     @discardableResult
-    func newTab(makeActive: Bool = true, forProject projectID: String) -> UUID {
-        newTab(makeActive: makeActive, for: .project(projectID))
+    func newTab(
+        makeActive: Bool = true,
+        forProject projectID: String,
+        configuration: TerminalSurfaceConfiguration? = nil
+    ) -> UUID {
+        newTab(makeActive: makeActive, for: .project(projectID), configuration: configuration)
     }
 
     @discardableResult
-    func newTab(makeActive: Bool = true, for namespace: TerminalNamespace? = nil) -> UUID {
+    func newTab(
+        makeActive: Bool = true,
+        for namespace: TerminalNamespace? = nil,
+        configuration: TerminalSurfaceConfiguration? = nil
+    ) -> UUID {
         let paneID = UUID()
         let tabID = UUID()
         let owner = namespace ?? activeNamespace
@@ -539,6 +602,9 @@ final class TerminalWorkspaceStore {
             focusedPaneID: paneID
         )
 
+        if let configuration {
+            paneLaunchConfigurations[paneID] = configuration
+        }
         tabs.append(tab)
         if let owner {
             tabNamespaceMap[tabID] = owner
@@ -574,19 +640,50 @@ final class TerminalWorkspaceStore {
     }
 
     func splitCurrent(axis: TerminalSplitAxis) {
-        guard let index = activeTabIndex else { return }
+        guard let currentPane = activeFocusedPaneID else { return }
+        let direction: TerminalSplitDirection = axis == .horizontal ? .right : .down
+        _ = split(paneID: currentPane, direction: direction)
+    }
+
+    @discardableResult
+    func split(
+        paneID: UUID,
+        direction: TerminalSplitDirection,
+        configuration: TerminalSurfaceConfiguration? = nil
+    ) -> UUID? {
+        guard let index = tabs.firstIndex(where: { $0.splitTree.containsPane(paneID) }) else {
+            return nil
+        }
+
         var tab = tabs[index]
+        let newPaneID = UUID()
+        guard let newTree = tab.splitTree.insertingPaneBeside(
+            paneID,
+            newPaneID: newPaneID,
+            axis: direction.axis,
+            newPaneFirst: direction.newPaneFirst
+        ) else {
+            return nil
+        }
 
-        guard let currentPane = tab.focusedPaneID ?? tab.splitTree.firstPaneID else { return }
-        let newPane = UUID()
-
-        guard let newTree = tab.splitTree.insertingSplit(at: currentPane, newPaneID: newPane, axis: axis) else { return }
-
+        var launchConfiguration = configuration
+        if launchConfiguration?.workingDirectory == nil, let targetPwd = panePwds[paneID] {
+            if launchConfiguration == nil {
+                launchConfiguration = TerminalSurfaceConfiguration()
+            }
+            launchConfiguration?.workingDirectory = targetPwd
+        }
+        if let launchConfiguration {
+            paneLaunchConfigurations[newPaneID] = launchConfiguration
+        }
         tab.splitTree = newTree
-        tab.focusedPaneID = newPane
+        tab.focusedPaneID = newPaneID
         tabs[index] = tab
 
-        requestFocus(for: newPane)
+        if activeTabID == tab.id {
+            requestFocus(for: newPaneID)
+        }
+        return newPaneID
     }
 
     /// Close a tab by id (for tab-bar X button). Unlike `closeCurrent`,
@@ -600,9 +697,7 @@ final class TerminalWorkspaceStore {
         let removed = tabs[index]
         for pID in removed.splitTree.allPaneIDs {
             destroyPaneHandler?(pID)
-            paneTitles.removeValue(forKey: pID)
-            panePwds.removeValue(forKey: pID)
-            paneSearchStates.removeValue(forKey: pID)
+            cleanPaneState(pID)
         }
         let removedNamespace = tabNamespaceMap[removed.id]
         tabNamespaceMap.removeValue(forKey: removed.id)
@@ -653,9 +748,7 @@ final class TerminalWorkspaceStore {
         let removedTab = tabs[index]
         for pID in removedTab.splitTree.allPaneIDs {
             destroyPaneHandler?(pID)
-            paneTitles.removeValue(forKey: pID)
-            panePwds.removeValue(forKey: pID)
-            paneSearchStates.removeValue(forKey: pID)
+            cleanPaneState(pID)
         }
         tabNamespaceMap.removeValue(forKey: removedTab.id)
         tabs.remove(at: index)
@@ -914,6 +1007,60 @@ final class TerminalWorkspaceStore {
         }
     }
 
+    func location(of paneID: UUID) -> TerminalPaneLocation? {
+        guard let tab = tabs.first(where: { $0.splitTree.containsPane(paneID) }),
+              let namespace = tabNamespaceMap[tab.id]
+        else {
+            return nil
+        }
+        return TerminalPaneLocation(namespace: namespace, tabID: tab.id, paneID: paneID)
+    }
+
+    func launchConfiguration(for paneID: UUID) -> TerminalSurfaceConfiguration? {
+        guard tabs.contains(where: { $0.splitTree.containsPane(paneID) }) else {
+            return nil
+        }
+        return paneLaunchConfigurations[paneID]
+    }
+
+    @discardableResult
+    func closePane(_ paneID: UUID) -> Bool {
+        guard let index = tabs.firstIndex(where: { $0.splitTree.containsPane(paneID) }) else {
+            return false
+        }
+
+        var tab = tabs[index]
+        guard tab.splitTree.leafCount > 1 else { return false }
+        let oldFrames = tab.splitTree.normalizedPaneFrames()
+        guard let oldFrame = oldFrames[paneID],
+              let newTree = tab.splitTree.removingPane(paneID)
+        else {
+            return false
+        }
+
+        let wasFocused = paneID == (tab.focusedPaneID ?? tab.splitTree.firstPaneID)
+        tab.splitTree = newTree
+        if wasFocused {
+            let newFrames = newTree.normalizedPaneFrames()
+            tab.focusedPaneID = nearestPaneID(to: oldFrame, in: newFrames) ?? newTree.firstPaneID
+        }
+        tabs[index] = tab
+
+        if maximizedPaneID == paneID {
+            maximizedPaneID = nil
+        }
+        destroyPaneHandler?(paneID)
+        cleanPaneState(paneID)
+
+        if wasFocused, activeTabID == tab.id, let nextPaneID = tab.focusedPaneID {
+            requestFocus(for: nextPaneID)
+            DispatchQueue.main.async { [weak self] in
+                self?.onContextDidChange?()
+            }
+        }
+        return true
+    }
+
     func isPaneVisible(_ paneID: UUID, in tabID: UUID) -> Bool {
         guard activeTabID == tabID else { return false }
         guard let tab = tabs.first(where: { $0.id == tabID }) else { return false }
@@ -939,9 +1086,7 @@ final class TerminalWorkspaceStore {
         guard let newTree = tab.splitTree.removingPane(currentPane) else { return }
 
         destroyPaneHandler?(currentPane)
-        paneTitles.removeValue(forKey: currentPane)
-        panePwds.removeValue(forKey: currentPane)
-        paneSearchStates.removeValue(forKey: currentPane)
+        cleanPaneState(currentPane)
 
         tab.splitTree = newTree
 
@@ -951,6 +1096,13 @@ final class TerminalWorkspaceStore {
         if let nextPane = tab.focusedPaneID {
             requestFocus(for: nextPane)
         }
+    }
+
+    private func cleanPaneState(_ paneID: UUID) {
+        paneTitles.removeValue(forKey: paneID)
+        panePwds.removeValue(forKey: paneID)
+        paneSearchStates.removeValue(forKey: paneID)
+        paneLaunchConfigurations.removeValue(forKey: paneID)
     }
 
     private func requestFocus(for paneID: UUID) {

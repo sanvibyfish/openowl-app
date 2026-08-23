@@ -145,6 +145,54 @@ enum FileEditorAutomaticReadPolicy {
     }
 }
 
+enum FileEditorURLMutationPolicy {
+    static func remappedURL(_ url: URL, moving source: URL, to destination: URL) -> URL? {
+        let path = url.standardizedFileURL.path
+        let sourcePath = source.standardizedFileURL.path
+        let destinationURL = destination.standardizedFileURL
+        if path == sourcePath { return destinationURL }
+        guard path.hasPrefix(sourcePath + "/") else { return nil }
+        let relativePath = String(path.dropFirst(sourcePath.count + 1))
+        return destinationURL.appendingPathComponent(relativePath).standardizedFileURL
+    }
+
+    static func isAffected(_ url: URL, by roots: [URL]) -> Bool {
+        FileExplorerStore.isURL(url, coveredByAny: roots)
+    }
+
+    static func collisionURL(
+        openURLs: [URL],
+        applying moves: [FileExplorerURLMove]
+    ) -> URL? {
+        var seen = Set<URL>()
+        for openURL in openURLs {
+            let mappedURL = moves.reduce(openURL.standardizedFileURL) { url, move in
+                remappedURL(url, moving: move.source, to: move.destination) ?? url
+            }
+            guard seen.insert(mappedURL).inserted else { return mappedURL }
+        }
+        return nil
+    }
+
+    static func remappingValues<Value>(
+        _ values: [URL: Value],
+        moving source: URL,
+        to destination: URL
+    ) -> [URL: Value] {
+        Dictionary(uniqueKeysWithValues: values.map { url, value in
+            (remappedURL(url, moving: source, to: destination) ?? url, value)
+        })
+    }
+
+    static func remappingSet(
+        _ values: Set<URL>,
+        moving source: URL,
+        to destination: URL
+    ) -> Set<URL> {
+        Set(values.map { remappedURL($0, moving: source, to: destination) ?? $0 })
+    }
+}
+
 enum FileEditorSessionPersistence {
     private static let defaultsKey = "openowl.fileExplorer.editorSessions.v1"
     private static var cache: [String: FileEditorSession]?
@@ -348,6 +396,12 @@ struct FileExplorerView: View {
     @State private var fileReadRequestIDs: [URL: UUID] = [:]
     @State private var editorSessionGeneration = UUID()
     @State private var dirtyTabs: Set<URL> = []
+    /// Tabs whose save was refused because the file changed on disk, mapped to
+    /// the disk signature the user was warned about. Kept separate from
+    /// `tabDiskSignatures` so that consenting to an overwrite never implies
+    /// "this tab is in sync with disk"; keyed by signature so that a *further*
+    /// disk change invalidates the consent and warns again — see `saveTab`.
+    @State private var pendingOverwriteConfirmation: [URL: FileEditorDiskSignature] = [:]
     @State private var editorSessionProjectKey: String?
     @State private var persistDebounceWork: DispatchWorkItem?
 
@@ -431,6 +485,9 @@ struct FileExplorerView: View {
         .onChange(of: store.selectedNodeID) { _, newID in
             handleSelectedNodeChange(newID)
         }
+        .onChange(of: store.fileSystemRevision) { _, _ in
+            reloadOpenTabsAfterFileSystemChange()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openFileFromTerminal)) { notification in
             handleOpenFileNotification(notification)
         }
@@ -507,6 +564,132 @@ struct FileExplorerView: View {
         if store.nodeIndex[url.path] != nil {
             store.selectNode(url.path)
         }
+    }
+
+    private func reloadOpenTabsAfterFileSystemChange() {
+        for tab in openTabs {
+            guard FileEditorDiskSignatureProvider.signature(for: tab.url) != nil else {
+                if !FileManager.default.fileExists(atPath: tab.url.path) {
+                    handleMissingBackingFile(tab.url)
+                }
+                continue
+            }
+            if !dirtyTabs.contains(tab.url) {
+                reloadOpenTabFromDiskIfNeeded(tab.url, reason: "file-watcher")
+            }
+        }
+    }
+
+    private func deleteNodesFromEditor(_ urls: [URL]) {
+        let dirtyAffectedURLs = dirtyTabs.filter {
+            FileEditorURLMutationPolicy.isAffected($0, by: urls)
+        }
+        guard dirtyAffectedURLs.isEmpty else {
+            let names = dirtyAffectedURLs.map(\.lastPathComponent).sorted().joined(separator: ", ")
+            store.errorMessage = "Cannot delete files with unsaved changes: \(names)"
+            return
+        }
+
+        store.deleteNodes(urls) { deletedURLs in
+            for tabURL in openTabs.map(\.url) where
+                FileEditorURLMutationPolicy.isAffected(tabURL, by: deletedURLs) {
+                handleMissingBackingFile(tabURL)
+            }
+        }
+    }
+
+    private func handleMissingBackingFile(_ url: URL) {
+        guard openTabs.contains(where: { $0.url == url }) else { return }
+        if !dirtyTabs.contains(url) {
+            removeTab(url, reason: "backing-file-deleted")
+            return
+        }
+
+        fileReadRequestIDs.removeValue(forKey: url)
+        clearHeavyProgress(for: url)
+        if pendingActivationURL == url { pendingActivationURL = nil }
+        if activeTabURL == url { isEditorLoading = false }
+        store.errorMessage = "\(url.lastPathComponent) was deleted on disk. Its unsaved buffer is still open."
+    }
+
+    private func migrateEditorState(for move: FileExplorerURLMove) {
+        let source = move.source.standardizedFileURL
+        let destination = move.destination.standardizedFileURL
+        let pendingReadURL = pendingActivationURL.flatMap {
+            FileEditorURLMutationPolicy.remappedURL($0, moving: source, to: destination)
+        }
+        let interruptedReads = fileReadRequestIDs.keys.compactMap {
+            FileEditorURLMutationPolicy.remappedURL($0, moving: source, to: destination)
+        }
+
+        openTabs = openTabs.map { tab in
+            EditorTab(url: FileEditorURLMutationPolicy.remappedURL(
+                tab.url,
+                moving: source,
+                to: destination
+            ) ?? tab.url)
+        }
+        activeTabURL = activeTabURL.map {
+            FileEditorURLMutationPolicy.remappedURL($0, moving: source, to: destination) ?? $0
+        }
+        pendingActivationURL = pendingActivationURL.map {
+            FileEditorURLMutationPolicy.remappedURL($0, moving: source, to: destination) ?? $0
+        }
+        heavyProgressURL = heavyProgressURL.map {
+            FileEditorURLMutationPolicy.remappedURL($0, moving: source, to: destination) ?? $0
+        }
+        tabStorages = FileEditorURLMutationPolicy.remappingValues(
+            tabStorages, moving: source, to: destination
+        )
+        tabImageCache = FileEditorURLMutationPolicy.remappingValues(
+            tabImageCache, moving: source, to: destination
+        )
+        tabDiskSignatures = FileEditorURLMutationPolicy.remappingValues(
+            tabDiskSignatures, moving: source, to: destination
+        )
+        pendingOverwriteConfirmation = FileEditorURLMutationPolicy.remappingValues(
+            pendingOverwriteConfirmation, moving: source, to: destination
+        )
+        fileReadRequestIDs = FileEditorURLMutationPolicy.remappingValues(
+            fileReadRequestIDs, moving: source, to: destination
+        )
+        dirtyTabs = FileEditorURLMutationPolicy.remappingSet(
+            dirtyTabs, moving: source, to: destination
+        )
+        largeModeTabs = FileEditorURLMutationPolicy.remappingSet(
+            largeModeTabs, moving: source, to: destination
+        )
+        hugeFilePending = FileEditorURLMutationPolicy.remappingSet(
+            hugeFilePending, moving: source, to: destination
+        )
+
+        // Reads already running captured the old URL. Replace their IDs and
+        // restart only tabs that do not yet have a usable buffer, so an old
+        // completion cannot strand a renamed tab in its loading state.
+        for url in interruptedReads {
+            fileReadRequestIDs.removeValue(forKey: url)
+            guard !dirtyTabs.contains(url),
+                  tabStorages[url] == nil,
+                  tabImageCache[url] == nil else { continue }
+            if url == pendingReadURL {
+                isEditorLoading = true
+                startOpeningFileContent(url, needsLargeMode: largeModeTabs.contains(url))
+            } else if let signature = FileEditorDiskSignatureProvider.signature(for: url) {
+                reloadOpenTabFromDisk(url, signature: signature, reason: "file-moved-during-read")
+            }
+        }
+
+        publishUnsavedTabNames()
+        persistEditorSession(reason: "file-moved")
+    }
+
+    private func approveEditorMoves(_ moves: [FileExplorerURLMove]) -> Bool {
+        guard let collisionURL = FileEditorURLMutationPolicy.collisionURL(
+            openURLs: openTabs.map(\.url),
+            applying: moves
+        ) else { return true }
+        store.errorMessage = "Cannot move files because \(collisionURL.lastPathComponent) is already open."
+        return false
     }
 
     private func handleDisappear() {
@@ -619,11 +802,26 @@ struct FileExplorerView: View {
                         }
                         openDiff(node)
                     },
-                    onDelete: { urls in store.deleteNodes(urls) },
-                    onRename: { node, newName in store.renameNode(node, to: newName) },
+                    onDelete: { urls in deleteNodesFromEditor(urls) },
+                    onRename: { node, newName in
+                        if let move = store.renameNode(
+                            node,
+                            to: newName,
+                            approveMove: { approveEditorMoves([$0]) }
+                        ) {
+                            migrateEditorState(for: move)
+                        }
+                    },
                     onCopy: { urls in store.copyFiles(urls) },
                     onCut: { urls in store.cutFiles(urls) },
-                    onPaste: { targetDir in store.pasteFiles(into: targetDir) },
+                    onPaste: { targetDir in
+                        for move in store.pasteFiles(
+                            into: targetDir,
+                            approveMoves: approveEditorMoves
+                        ) {
+                            migrateEditorState(for: move)
+                        }
+                    },
                     onCopyPath: { url in store.copyPath(url) },
                     onDropFiles: { targetDir, sourceURLs in
                         let fm = FileManager.default
@@ -1374,6 +1572,7 @@ struct FileExplorerView: View {
         tabStorages.removeAll()
         tabImageCache.removeAll()
         tabDiskSignatures.removeAll()
+        pendingOverwriteConfirmation.removeAll()
         fileReadRequestIDs.removeAll()
         editorSessionGeneration = UUID()
         dirtyTabs.removeAll()
@@ -1803,7 +2002,7 @@ struct FileExplorerView: View {
                 presentSaveFailureAlert([SaveFailure(url: url, message: "The edits are no longer held in memory.")])
                 return
             }
-            if let failure = saveTab(url, storage: storage) {
+            if let failure = saveTab(url, storage: storage, allowOverwriteAfterWarning: false) {
                 AppLogger.log("file-editor-state", "close-blocked path=%@ error=%@", url.path, failure.message)
                 presentSaveFailureAlert([failure])
                 return
@@ -1831,6 +2030,7 @@ struct FileExplorerView: View {
         tabDiskSignatures.removeValue(forKey: url)
         fileReadRequestIDs.removeValue(forKey: url)
         dirtyTabs.remove(url)
+        pendingOverwriteConfirmation.removeValue(forKey: url)
         largeModeTabs.remove(url)
         clearHeavyProgress(for: url)
         if pendingActivationURL == url { pendingActivationURL = nil }
@@ -1869,6 +2069,7 @@ struct FileExplorerView: View {
         tabStorages.removeValue(forKey: evictURL)
         tabImageCache.removeValue(forKey: evictURL)
         tabDiskSignatures.removeValue(forKey: evictURL)
+        pendingOverwriteConfirmation.removeValue(forKey: evictURL)
         fileReadRequestIDs.removeValue(forKey: evictURL)
         largeModeTabs.remove(evictURL)
         persistEditorSession(reason: "evict-tab")
@@ -1880,9 +2081,10 @@ struct FileExplorerView: View {
         guard let url = activeTabURL,
               dirtyTabs.contains(url),
               let storage = tabStorages[url] else { return }
-        if let failure = saveTab(url, storage: storage) {
+        if let failure = saveTab(url, storage: storage, allowOverwriteAfterWarning: true) {
             store.errorMessage = "Failed to save \(url.lastPathComponent): \(failure.message)"
         } else {
+            store.errorMessage = nil
             store.refreshNow()
         }
     }
@@ -1903,26 +2105,55 @@ struct FileExplorerView: View {
                 failures.append(SaveFailure(url: url, message: "The edits are no longer held in memory."))
                 continue
             }
-            if let failure = saveTab(url, storage: storage) {
+            if let failure = saveTab(url, storage: storage, allowOverwriteAfterWarning: false) {
                 failures.append(failure)
             }
         }
         return failures
     }
 
-    private func saveTab(_ url: URL, storage: NSTextStorage) -> SaveFailure? {
+    /// - Parameter allowOverwriteAfterWarning: whether this call may spend an
+    ///   overwrite consent the user has already given by pressing ⌘S a second
+    ///   time. Only the explicit single-tab save passes `true`; batch saves
+    ///   (⌘Q, project switch) must never overwrite a changed file on the user's
+    ///   behalf, because nobody is there to read the warning.
+    private func saveTab(
+        _ url: URL,
+        storage: NSTextStorage,
+        allowOverwriteAfterWarning: Bool
+    ) -> SaveFailure? {
         guard let openedSignature = tabDiskSignatures[url],
-              let currentSignature = FileEditorDiskSignatureProvider.signature(for: url),
-              openedSignature == currentSignature else {
-            let message = "The file changed on disk after it was opened. Your edits were not written."
-            AppLogger.log("file-editor-state", "save-blocked reason=disk-changed path=%@", url.path)
+              let currentSignature = FileEditorDiskSignatureProvider.signature(for: url) else {
+            let message = "The file is no longer available on disk. Your edits were not written."
+            AppLogger.log("file-editor-state", "save-blocked reason=disk-unavailable path=%@", url.path)
             return SaveFailure(url: url, message: message)
+        }
+        if openedSignature != currentSignature {
+            // Never advance `tabDiskSignatures` on a refused save. Doing so
+            // marks the tab as in sync while its edits are still unwritten, so
+            // `reloadOpenTabFromDiskIfNeeded` skips it forever and the editor
+            // shows stale content while claiming to be current. Consent to
+            // overwrite is tracked separately and only an explicit ⌘S spends it.
+            guard allowOverwriteAfterWarning,
+                  pendingOverwriteConfirmation[url] == currentSignature else {
+                // Only record consent on the path that actually showed someone
+                // the warning. A batch save (⌘Q, project switch) must not grant
+                // it on the user's behalf — that would let the next single ⌘S
+                // overwrite silently, having never warned at all.
+                if allowOverwriteAfterWarning {
+                    pendingOverwriteConfirmation[url] = currentSignature
+                }
+                let message = "The file changed on disk after it was opened. Your edits were not written. Press ⌘S again to overwrite the version on disk."
+                AppLogger.log("file-editor-state", "save-blocked reason=disk-changed path=%@", url.path)
+                return SaveFailure(url: url, message: message)
+            }
         }
 
         do {
             try storage.string.write(to: url, atomically: true, encoding: .utf8)
             tabDiskSignatures[url] = FileEditorDiskSignatureProvider.signature(for: url)
             dirtyTabs.remove(url)
+            pendingOverwriteConfirmation.removeValue(forKey: url)
             return nil
         } catch {
             AppLogger.log(
@@ -1965,8 +2196,11 @@ struct FileExplorerView: View {
 
     private func openDiff(_ node: FileExplorerNode) {
         guard !node.isDirectory else { return }
+        gitStore.openDiff(
+            forFileURL: node.url,
+            repositoryCandidateURL: store.projectURL ?? node.url.deletingLastPathComponent()
+        )
         rightDockStore.expand(tab: .git)
-        gitStore.openDiff(forFileURL: node.url)
     }
 
     // MARK: - Helpers

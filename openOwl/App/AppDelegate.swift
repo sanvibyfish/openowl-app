@@ -134,6 +134,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let resourceMonitor = ResourceMonitor()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        GitExecutable.logChoice()
+        OpenOwlScriptRuntime.appDelegate = self
         NSApp.setActivationPolicy(.regular)
         UNUserNotificationCenter.current().delegate = self
         applyDevIcon()

@@ -421,6 +421,179 @@ struct FileExplorerErrorHandlingTests {
         ))
     }
 
+    @Test func fileEditorURLMutation_remapsFileAndDirectoryDescendantState() throws {
+        let sourceFile = URL(fileURLWithPath: "/project/src/old.swift")
+        let destinationFile = URL(fileURLWithPath: "/project/src/new.swift")
+        #expect(FileEditorURLMutationPolicy.remappedURL(
+            sourceFile,
+            moving: sourceFile,
+            to: destinationFile
+        ) == destinationFile)
+
+        let sourceDirectory = URL(fileURLWithPath: "/project/src")
+        let destinationDirectory = URL(fileURLWithPath: "/project/lib")
+        let child = URL(fileURLWithPath: "/project/src/features/a.swift")
+        let movedChild = URL(fileURLWithPath: "/project/lib/features/a.swift")
+        #expect(FileEditorURLMutationPolicy.remappedURL(
+            child,
+            moving: sourceDirectory,
+            to: destinationDirectory
+        ) == movedChild)
+
+        let requestID = UUID()
+        let remappedRequests = FileEditorURLMutationPolicy.remappingValues(
+            [child: requestID],
+            moving: sourceDirectory,
+            to: destinationDirectory
+        )
+        #expect(remappedRequests[child] == nil)
+        #expect(remappedRequests[movedChild] == requestID)
+    }
+
+    @Test func fileEditorURLMutation_dirtyDeleteGuardIncludesDirectoryDescendants() {
+        let dirtyChild = URL(fileURLWithPath: "/project/src/a.swift")
+        let unaffected = URL(fileURLWithPath: "/project/tests/a.swift")
+        let roots = [URL(fileURLWithPath: "/project/src")]
+        let affected = Set([dirtyChild, unaffected]).filter {
+            FileEditorURLMutationPolicy.isAffected($0, by: roots)
+        }
+
+        #expect(affected == [dirtyChild])
+    }
+
+    @Test func fileEditorURLMutation_detectsExactAndDirectoryDescendantCollisions() {
+        let missingTargetTab = URL(fileURLWithPath: "/project/lib/a.swift")
+        let sourceFile = URL(fileURLWithPath: "/project/src/a.swift")
+        let exactMove = FileExplorerURLMove(source: sourceFile, destination: missingTargetTab)
+        #expect(FileEditorURLMutationPolicy.collisionURL(
+            openURLs: [sourceFile, missingTargetTab],
+            applying: [exactMove]
+        ) == missingTargetTab)
+
+        let directoryMove = FileExplorerURLMove(
+            source: URL(fileURLWithPath: "/project/src"),
+            destination: URL(fileURLWithPath: "/project/lib")
+        )
+        #expect(FileEditorURLMutationPolicy.collisionURL(
+            openURLs: [sourceFile, missingTargetTab],
+            applying: [directoryMove]
+        ) == missingTargetTab)
+    }
+
+    @Test @MainActor func renameNode_rejectedEditorMoveDoesNotTouchDisk() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-rename-preflight-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sourceURL = directory.appendingPathComponent("source.swift")
+        let destinationURL = directory.appendingPathComponent("target.swift")
+        try "buffer".write(to: sourceURL, atomically: true, encoding: .utf8)
+        let node = FileExplorerNode(
+            id: sourceURL.path,
+            url: sourceURL,
+            name: sourceURL.lastPathComponent,
+            isDirectory: false,
+            gitState: nil,
+            children: nil
+        )
+
+        let result = FileExplorerStore().renameNode(
+            node,
+            to: destinationURL.lastPathComponent,
+            approveMove: { _ in false }
+        )
+
+        #expect(result == nil)
+        #expect(FileManager.default.fileExists(atPath: sourceURL.path))
+        #expect(!FileManager.default.fileExists(atPath: destinationURL.path))
+    }
+
+    @Test @MainActor func cutPaste_partialFailureKeepsOnlyFailedURLsPendingForMove() throws {
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-partial-cut-\(UUID().uuidString)", isDirectory: true)
+        let sourceDirectory = baseURL.appendingPathComponent("source", isDirectory: true)
+        let targetDirectory = baseURL.appendingPathComponent("target", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: targetDirectory, withIntermediateDirectories: true)
+        defer {
+            NSPasteboard.general.clearContents()
+            UserDefaults.standard.removeObject(forKey: "openowl.fileCutPending")
+            try? FileManager.default.removeItem(at: baseURL)
+        }
+
+        let successfulSource = sourceDirectory.appendingPathComponent("a.swift")
+        let failedSource = sourceDirectory.appendingPathComponent("b.swift")
+        let blockingDestination = targetDirectory.appendingPathComponent("b.swift")
+        try "a".write(to: successfulSource, atomically: true, encoding: .utf8)
+        try "b".write(to: failedSource, atomically: true, encoding: .utf8)
+        try "existing".write(to: blockingDestination, atomically: true, encoding: .utf8)
+
+        let store = FileExplorerStore()
+        store.cutFiles([successfulSource, failedSource])
+        let firstMoves = store.pasteFiles(into: targetDirectory)
+
+        #expect(firstMoves == [FileExplorerURLMove(
+            source: successfulSource,
+            destination: targetDirectory.appendingPathComponent("a.swift")
+        )])
+        #expect(UserDefaults.standard.bool(forKey: "openowl.fileCutPending"))
+        let remaining = NSPasteboard.general.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL]
+        #expect(remaining == [failedSource])
+
+        try FileManager.default.removeItem(at: blockingDestination)
+        let retryMoves = store.pasteFiles(into: targetDirectory)
+
+        #expect(retryMoves == [FileExplorerURLMove(
+            source: failedSource,
+            destination: blockingDestination
+        )])
+        #expect(!UserDefaults.standard.bool(forKey: "openowl.fileCutPending"))
+        #expect(!FileManager.default.fileExists(atPath: failedSource.path))
+        #expect(FileManager.default.fileExists(atPath: blockingDestination.path))
+    }
+
+    @Test func pruningNodes_removesDeletedDirectoryDescendants() throws {
+        let rootURL = URL(fileURLWithPath: "/project")
+        let sourceURL = rootURL.appendingPathComponent("src")
+        let childURL = sourceURL.appendingPathComponent("a.swift")
+        let keepURL = rootURL.appendingPathComponent("README.md")
+        let nodes = [
+            FileExplorerNode(
+                id: sourceURL.path,
+                url: sourceURL,
+                name: "src",
+                isDirectory: true,
+                gitState: nil,
+                children: [
+                    FileExplorerNode(
+                        id: childURL.path,
+                        url: childURL,
+                        name: "a.swift",
+                        isDirectory: false,
+                        gitState: nil,
+                        children: nil
+                    )
+                ]
+            ),
+            FileExplorerNode(
+                id: keepURL.path,
+                url: keepURL,
+                name: "README.md",
+                isDirectory: false,
+                gitState: nil,
+                children: nil
+            )
+        ]
+
+        let pruned = FileExplorerStore.pruningNodes(nodes, deleting: [sourceURL])
+
+        #expect(pruned.map(\.url) == [keepURL])
+        #expect(FileExplorerStore.isURL(childURL, coveredByAny: [sourceURL]))
+    }
+
     @Test @MainActor func unsavedTabNames_aggregatesEditorsIndependently() {
         let store = FileExplorerStore()
         let editorA = UUID()
@@ -435,6 +608,35 @@ struct FileExplorerErrorHandlingTests {
 
         store.publishUnsavedTabNames([], for: editorB)
         #expect(store.unsavedTabNames.isEmpty)
+    }
+
+    @Test @MainActor func switchingToUncachedProjectClearsPreviousQuickOpenFiles() async throws {
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-file-switch-\(UUID().uuidString)", isDirectory: true)
+        let firstProjectURL = baseURL.appendingPathComponent("first", isDirectory: true)
+        let secondProjectURL = baseURL.appendingPathComponent("second", isDirectory: true)
+        try FileManager.default.createDirectory(at: firstProjectURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondProjectURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseURL) }
+
+        try "old project\n".write(
+            to: firstProjectURL.appendingPathComponent("old-project.swift"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let store = FileExplorerStore()
+        store.setProject(firstProjectURL)
+        for _ in 0..<100 where store.quickOpenMatches.isEmpty {
+            store.updateQuickOpenResults()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.quickOpenMatches.map(\.node.name) == ["old-project.swift"])
+
+        store.setProject(secondProjectURL)
+        store.updateQuickOpenResults()
+
+        #expect(store.quickOpenMatches.isEmpty)
     }
 
     private var defaultsSuiteName: String {

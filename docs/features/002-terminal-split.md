@@ -50,6 +50,8 @@ indirect enum TerminalSplitNode: Equatable {
 
 每个 pane UUID 对应一个 `ghostty_surface_t`（由 GhosttyAppManager 管理）。
 
+`ghostty_surface_new()` 返回 nil 时，`TerminalNSView` 在原 pane 内居中显示失败提示 `Terminal failed to start.` 并指向 `~/Library/Logs/openOwl/openowl.log`（ghostty 的具体错误只在日志中，提示本身重述失败没有价值），同时写入 `[terminal]` 日志。pane 保留在当前分屏树中，不会自动移除；失败状态会阻止 view 重新挂载时再次创建 surface 或叠加错误 UI。由于该状态按契约不可恢复，AppleScript 对该 pane 的 `input text` 返回终态失败而非 `notReady`。
+
 ### 3.5 放大 / 还原
 
 `maximizedPaneID` 是独立于 `splitTree` 的一个字段——放大**不改动分割树**，只在渲染那一帧把该 pane 的 frame 换成整个 `bounds`，其余 pane `opacity 0` + `allowsHitTesting(false)`，分割线隐藏。因此：
@@ -79,6 +81,8 @@ indirect enum TerminalSplitNode: Equatable {
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-22 | 失败提示改为指向日志（原文案只是重述失败，不可操作），实现由手搓 NSBox + 8 条 AutoLayout 约束压缩为居中 autoresizing label；AppleScript 对失败 pane 的输入返回终态错误，避免脚本重试永不成功的目标。**「重新挂载不重试」的契约保持不变** |
+| 2026-08-14 | `ghostty_surface_new()` 失败时在原 pane 显示可访问的原生错误卡片 `Terminal surface failed to initialize`；pane 不自动移除，失败状态阻止重新挂载时重试创建或重复添加 UI |
 | 2026-08-09 | 修复嵌套分屏的 pane 拖拽只能命中部分窗格：pane 主体重排改由每个 `TerminalScrollView` 在 AppKit 层处理，与文件拖入共用原生拖放入口；`PaneHandleNSView` 同样在 AppKit 层接收手柄到手柄的中心交换。不在 `TerminalNSView` 上方挂 SwiftUI drop target。隐藏 tab/pane 同步注销拖放类型，避免不可见终端抢走文件或 pane 拖拽 |
 | 2026-08-07 | 三点手柄改为 AppKit `PaneHandleNSView`：`mouseDown` 双击放大/还原，`mouseDragged` 自启 `NSDraggingSession`，结束走 `NSDraggingSource` 回调清状态。SwiftUI `.onTapGesture(count: 2)` + `.onDrag` 互相拆台（延迟 mouseDown 导致 drop 失败；空 NSView overlay 收不到点击），双击放大因此失效 |
 | 2026-08-04 | 修复取消拖拽后终端失去响应：`draggingPaneID` 只在 `performDrop` 成功时清除，Esc 取消 / 拖到窗口外松手 / 拖回源窗格都会让它卡住，非源窗格的 `contentShape` drop overlay 随即永久吃掉点击与文本选择。现由手柄 `NSDraggingSource.draggingSession(_:endedAt:)` 统一清状态 |

@@ -115,4 +115,32 @@ struct GitCommitParsingTests {
         let snapshot = try service.parseStatus(output)
         #expect(snapshot.untracked.count == 3)
     }
+
+    @Test func log_preservesSubjectMatchingPreviousRecordSeparator() async throws {
+        let repositoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-git-log-separator-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repositoryURL) }
+
+        func runGit(_ arguments: [String]) throws {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["git"] + arguments
+            process.currentDirectoryURL = repositoryURL
+            try process.run()
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 0)
+        }
+
+        try runGit(["init", "--quiet"])
+        try runGit(["config", "user.name", "openOwl Tests"])
+        try runGit(["config", "user.email", "tests@openowl.local"])
+        try runGit(["commit", "--quiet", "--allow-empty", "-m", "---OPENOWL-RECORD---"])
+
+        let entries = try await GitService(workingDirectory: repositoryURL).log()
+
+        #expect(entries.count == 1)
+        #expect(entries[0].message == "---OPENOWL-RECORD---")
+        #expect(entries[0].parents.isEmpty)
+    }
 }

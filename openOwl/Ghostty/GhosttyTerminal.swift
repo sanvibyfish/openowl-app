@@ -8,6 +8,8 @@ import QuartzCore
 /// - Composing keyAction skipped: key encoder leaks first character during composition.
 class TerminalNSView: NSView {
     private var surface: ghostty_surface_t?
+    private var surfaceCreationFailed = false
+    private var failureNotice: NSView?
     private let ghosttyApp: ghostty_app_t
     private let paneID: UUID
     private var metalLayer: CAMetalLayer!
@@ -26,10 +28,9 @@ class TerminalNSView: NSView {
 
     weak var appManager: GhosttyAppManager?
     var onFocus: (() -> Void)?
-    /// Working directory for the shell. Set before the view is added to a window.
-    /// Passed directly to ghostty_surface_config — avoids changing the app's process cwd
-    /// which triggers macOS TCC prompts in dev builds.
-    var initialWorkingDirectory: String?
+    /// Startup options are assigned before the view enters a window and are
+    /// consumed when its libghostty surface is created.
+    var surfaceConfiguration = TerminalSurfaceConfiguration()
     /// Whether Metal is currently rendering (layer not hidden).
     var isRenderingActive: Bool { !(metalLayer?.isHidden ?? true) }
     var acceptsTerminalKeyboardInput: Bool {
@@ -110,6 +111,22 @@ class TerminalNSView: NSView {
             return
         }
 
+        // A previous attempt failed. Moving into a window is a genuinely new
+        // one — surface creation needs a real window (it reads backingScaleFactor
+        // for the Metal layer), and the conditions that break it are often
+        // transient: the ghostty app still initialising, the Metal device
+        // momentarily unavailable, memory pressure. Clear the failure and try
+        // again. This runs only when the window changes, never per layout, so
+        // a persistent failure cannot spin — it just re-posts the notice, and
+        // the old one is removed first so they never stack.
+        if surfaceCreationFailed {
+            AppLogger.log("terminal", "retrying surface creation on reattach for pane %@", paneID.uuidString)
+            surfaceCreationFailed = false
+            failureNotice?.removeFromSuperview()
+            failureNotice = nil
+        }
+
+
         // First time — create a new surface.
 
         lastSyncedScale = window.backingScaleFactor
@@ -122,58 +139,82 @@ class TerminalNSView: NSView {
         ))
         surfaceConfig.userdata = Unmanaged.passUnretained(self).toOpaque()
         surfaceConfig.scale_factor = Double(window.backingScaleFactor)
-        surfaceConfig.font_size = 0
+        surfaceConfig.font_size = surfaceConfiguration.fontSize ?? 0
+        surfaceConfig.wait_after_command = surfaceConfiguration.waitAfterCommand
 
-        // Set working directory — prefer explicit path, fall back to process cwd
-        let cwd: String
-        if let dir = initialWorkingDirectory {
-            cwd = dir
-        } else {
-            cwd = FileManager.default.currentDirectoryPath
-            NSLog("openOwl: [Terminal] initialWorkingDirectory nil for pane %@, falling back to: %@",
-                  paneID.uuidString, cwd)
+        // All pointers stored in the C configuration remain alive through
+        // ghostty_surface_new, which copies the values synchronously.
+        var cStringStorage: [UnsafeMutablePointer<CChar>] = []
+        defer {
+            for pointer in cStringStorage {
+                free(pointer)
+            }
         }
-        var cwdPtr = strdup(cwd)
-        surfaceConfig.working_directory = UnsafePointer(cwdPtr)
 
-        // Inject environment variables for shell integration
+        func makeCString(_ value: String?) -> UnsafeMutablePointer<CChar>? {
+            guard let value else { return nil }
+            let pointer = strdup(value)!
+            cStringStorage.append(pointer)
+            return pointer
+        }
+
+        surfaceConfig.working_directory = makeCString(surfaceConfiguration.workingDirectory)
+            .map { UnsafePointer($0) }
+        surfaceConfig.command = makeCString(surfaceConfiguration.command)
+            .map { UnsafePointer($0) }
+        surfaceConfig.initial_input = makeCString(surfaceConfiguration.initialInput)
+            .map { UnsafePointer($0) }
+
+        // Inject the host's shell-integration environment, then apply explicit
+        // surface variables so the caller wins when a key is repeated.
         let resourcesPath = Bundle.main.resourceURL?
             .appendingPathComponent("ghostty-resources/terminfo").path
-        var envVars: [ghostty_env_var_s] = []
-        var envStorage: [UnsafeMutablePointer<CChar>] = []
+        var environmentVariables: [(key: String, value: String)] = []
+
+        func setEnvironmentVariable(key: String, value: String) {
+            if let index = environmentVariables.firstIndex(where: { $0.key == key }) {
+                environmentVariables[index] = (key, value)
+            } else {
+                environmentVariables.append((key, value))
+            }
+        }
 
         // TERMINFO_DIRS: so the shell can find xterm-ghostty terminfo
         if let terminfoPath = resourcesPath {
-            let keyPtr = strdup("TERMINFO_DIRS")!
-            let valPtr = strdup(terminfoPath)!
-            envStorage.append(contentsOf: [keyPtr, valPtr])
-            envVars.append(ghostty_env_var_s(key: keyPtr, value: valPtr))
+            setEnvironmentVariable(key: "TERMINFO_DIRS", value: terminfoPath)
         }
 
         // GHOSTTY_SHELL_FEATURES: enables shell integration SSH wrapper
         // that sets TERM=xterm-256color for remote connections (prevents
         // garbled output on servers without xterm-ghostty terminfo)
-        do {
-            let keyPtr = strdup("GHOSTTY_SHELL_FEATURES")!
-            let valPtr = strdup("cursor,sudo,title,ssh-env,ssh-terminfo")!
-            envStorage.append(contentsOf: [keyPtr, valPtr])
-            envVars.append(ghostty_env_var_s(key: keyPtr, value: valPtr))
+        setEnvironmentVariable(
+            key: "GHOSTTY_SHELL_FEATURES",
+            value: "cursor,sudo,title,ssh-env,ssh-terminfo"
+        )
+
+        for item in surfaceConfiguration.environmentVariables {
+            guard let separator = item.firstIndex(of: "=") else { continue }
+            let key = String(item[..<separator])
+            guard !key.isEmpty else { continue }
+            let valueStart = item.index(after: separator)
+            setEnvironmentVariable(key: key, value: String(item[valueStart...]))
         }
 
-        if !envVars.isEmpty {
-            envVars.withUnsafeMutableBufferPointer { buf in
-                surfaceConfig.env_vars = buf.baseAddress
-                surfaceConfig.env_var_count = buf.count
-                self.surface = ghostty_surface_new(self.ghosttyApp, &surfaceConfig)
-            }
-        } else {
-            surface = ghostty_surface_new(ghosttyApp, &surfaceConfig)
+        var envVars: [ghostty_env_var_s] = environmentVariables.map { item in
+            let keyPointer = makeCString(item.key)!
+            let valuePointer = makeCString(item.value)!
+            return ghostty_env_var_s(key: keyPointer, value: valuePointer)
         }
-        for ptr in envStorage { free(ptr) }
-        free(cwdPtr); cwdPtr = nil
+        envVars.withUnsafeMutableBufferPointer { buffer in
+            surfaceConfig.env_vars = buffer.baseAddress
+            surfaceConfig.env_var_count = buffer.count
+            self.surface = ghostty_surface_new(self.ghosttyApp, &surfaceConfig)
+        }
 
         guard surface != nil else {
-            NSLog("openOwl: Failed to create ghostty surface")
+            AppLogger.log("terminal", "ghostty_surface_new returned NULL for pane %@", paneID.uuidString)
+            surfaceCreationFailed = true
+            showFailureNotice()
             return
         }
 
@@ -207,11 +248,45 @@ class TerminalNSView: NSView {
 
     // MARK: - Public API
 
-    func sendText(_ text: String) {
-        guard let surface else { return }
+    /// Returns false when there is no surface to write to. The surface is only
+    /// created in `viewDidMoveToWindow`, so a pane created moments earlier — the
+    /// normal `make new tab` then `input text` script sequence — has none yet,
+    /// and silently swallowing the text there made automation report success
+    /// for a command that never ran.
+    /// True when the surface exists and can never be created for this view, so
+    /// callers can tell a permanent failure from "not attached yet" instead of
+    /// telling an automation script to keep retrying forever.
+    /// Shown in place of the terminal when the surface could not be created.
+    /// Points at the log rather than restating the failure, because the useful
+    /// detail (the ghostty error) is only there.
+    private func showFailureNotice() {
+        let notice = NSTextField(labelWithString:
+            "Terminal failed to start.\nSee ~/Library/Logs/openOwl/openowl.log for details.")
+        notice.alignment = .center
+        notice.maximumNumberOfLines = 2
+        notice.sizeToFit()
+        notice.frame.origin = CGPoint(
+            x: (bounds.width - notice.frame.width) / 2,
+            y: (bounds.height - notice.frame.height) / 2
+        )
+        notice.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+        addSubview(notice)
+        failureNotice = notice
+    }
+
+    /// True while the last surface creation attempt failed. Creation is retried
+    /// when the view is reattached to a window, but nothing an automation
+    /// client can do will trigger that, so callers must not treat this as a
+    /// "retry in a moment" state.
+    var surfaceIsUnavailable: Bool { surfaceCreationFailed }
+
+    @discardableResult
+    func sendText(_ text: String) -> Bool {
+        guard let surface else { return false }
         text.withCString { cstr in
             ghostty_surface_text(surface, cstr, UInt(text.utf8.count))
         }
+        return true
     }
 
     /// Execute a ghostty keybinding action (e.g. "scroll_to_row:42")

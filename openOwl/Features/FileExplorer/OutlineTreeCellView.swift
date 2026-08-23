@@ -11,6 +11,12 @@ final class OutlineTreeCellView: NSTableCellView {
 
     private var trackingArea: NSTrackingArea?
     private var isHovering = false
+    /// True while `OutlineTreeViewController` is rebuilding the outline. A field
+    /// editor torn down inside that window ended editing without the user
+    /// asking, so an in-progress rename must be dropped rather than committed.
+    /// Main-thread only, like every other AppKit view property here.
+    static var isReloading = false
+
     private var currentNode: FileExplorerNode?
 
     var onStage: (() -> Void)?
@@ -114,23 +120,36 @@ final class OutlineTreeCellView: NSTableCellView {
         // Name
         if isRenaming {
             nameField.isEditable = true
-            nameField.isBezeled = false
+            nameField.isBezeled = true
+            nameField.bezelStyle = .roundedBezel
             nameField.drawsBackground = true
-            nameField.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.15)
+            nameField.backgroundColor = .textBackgroundColor
+            nameField.textColor = .controlTextColor
             nameField.focusRingType = .exterior
             nameField.stringValue = node.name
             nameField.delegate = self
             nameField.target = self
             nameField.action = #selector(renameCommitted)
-            window?.makeFirstResponder(nameField)
-            nameField.selectText(nil)
+            // During reloadItem/reloadData the cell is NOT in the view hierarchy
+            // yet, so a synchronous makeFirstResponder fails and the field never
+            // gets focus — Enter/Esc/click-away then all appear dead. Defer to
+            // the next runloop, and re-check isEditable in case the cell was
+            // reused (scrolled away) by then.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.nameField.isEditable else { return }
+                self.window?.makeFirstResponder(self.nameField)
+                self.nameField.selectText(nil)
+            }
         } else {
             nameField.isEditable = false
             nameField.isBezeled = false
             nameField.drawsBackground = false
+            nameField.focusRingType = .default
             nameField.stringValue = node.name
             nameField.textColor = Self.gitColor(for: node.gitState) ?? .labelColor
             nameField.delegate = nil
+            nameField.target = nil
+            nameField.action = nil
         }
 
         // Git badge (files show letter code, directories show dot indicator)
@@ -179,7 +198,14 @@ final class OutlineTreeCellView: NSTableCellView {
 
     @objc private func stageClicked() { onStage?() }
     @objc private func discardClicked() { onDiscard?() }
-    @objc private func renameCommitted() { onCommitRename?(nameField.stringValue) }
+    @objc private func renameCommitted() {
+        let newName = nameField.stringValue
+        if let node = currentNode {
+            configure(node: node, isRenaming: false)
+        }
+        window?.makeFirstResponder(superview)
+        onCommitRename?(newName)
+    }
 
     // MARK: - Helpers
 
@@ -205,19 +231,30 @@ final class OutlineTreeCellView: NSTableCellView {
 extension OutlineTreeCellView: NSTextFieldDelegate {
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
-            // Escape — cancel rename, reset all visual state
-            nameField.isEditable = false
-            nameField.isBezeled = false
-            nameField.drawsBackground = false
-            nameField.focusRingType = .default
             if let node = currentNode {
-                nameField.stringValue = node.name
-                nameField.textColor = Self.gitColor(for: node.gitState) ?? .labelColor
+                configure(node: node, isRenaming: false)
             }
             onCancelRename?()
             window?.makeFirstResponder(superview) // return focus to outline view
             return true
         }
         return false
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        // Click-away commits the rename, matching Finder. Enter already commits
+        // via the action selector; the isEditable guard prevents a second
+        // commit after Enter flipped the field back to label mode.
+        //
+        // The programmatic case — reloadData pulling the field editor out from
+        // under an in-progress rename, which an FSEvent burst during a build
+        // triggers routinely — is identified by the controller announcing it,
+        // not by inspecting the view. Two things that look like evidence are
+        // not: `currentEditor()` is not ordered against this notification, and
+        // detachment from the view hierarchy also happens when the user simply
+        // scrolls the row out of sight or closes the window — cases where
+        // Finder commits, and where dropping the edit loses the user's work.
+        guard nameField.isEditable, !Self.isReloading else { return }
+        renameCommitted()
     }
 }

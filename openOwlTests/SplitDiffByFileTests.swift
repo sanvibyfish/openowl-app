@@ -146,6 +146,20 @@ struct SplitDiffByFileTests {
         #expect(sections[0].path == "path with spaces/file.swift")
     }
 
+    @Test func quotedNonASCIIPath_parsedCorrectly() {
+        let diff = #"""
+diff --git "a/\344\270\255\346\226\207.swift" "b/\344\270\255\346\226\207.swift"
+--- "a/\344\270\255\346\226\207.swift"
++++ "b/\344\270\255\346\226\207.swift"
+@@ -1 +1 @@
+-old
++new
+"""#
+        let sections = splitDiffByFile(diff)
+        #expect(sections.count == 1)
+        #expect(sections[0].path == "中文.swift")
+    }
+
     @Test func binaryFile_diffContent() {
         let diff = "diff --git a/image.png b/image.png\nindex abc..def 100644\nBinary files a/image.png and b/image.png differ"
         let sections = splitDiffByFile(diff)

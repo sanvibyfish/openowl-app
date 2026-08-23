@@ -159,6 +159,7 @@ private struct TerminalTabContentView: View {
                             paneID: paneID,
                             isVisible: isPaneVisible,
                             workingDirectory: projectPath,
+                            launchConfiguration: workspace.launchConfiguration(for: paneID),
                             onFocus: {
                                 DispatchQueue.main.async {
                                     workspace.focusPane(paneID)

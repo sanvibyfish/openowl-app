@@ -52,12 +52,16 @@ struct ProjectSessionList: View {
     }
 
     private var header: some View {
+        // One Spacer per branch, never two. A trailing Spacer shared by all
+        // branches would split the free width with the one before the button,
+        // parking `plus.diamond` mid-header instead of against the edge.
         HStack(spacing: 6) {
             if projectStore.activeFreeTerminalID != nil {
                 Text("TERMINAL")
                     .font(AppFonts.sectionHeader)
                     .tracking(AppFonts.sectionTracking)
                     .foregroundStyle(AppPalette.textTertiary)
+                Spacer(minLength: 0)
             } else if let project = projectStore.activeRootProject {
                 Text(project.displayName)
                     .font(AppFonts.sectionHeader)
@@ -87,8 +91,8 @@ struct ProjectSessionList: View {
                     .font(AppFonts.sectionHeader)
                     .tracking(AppFonts.sectionTracking)
                     .foregroundStyle(AppPalette.textTertiary)
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
         // Same tool-header chrome as right dock / Files / Git.

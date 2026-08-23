@@ -31,9 +31,9 @@
 
 ### T2.5 分支与远程操作 ✅
 - [x] ahead/behind 展示
-- [x] 创建分支并切换
-- [x] 删除分支（普通删除 / 强制删除）
-- [x] Fetch / Pull / Push 操作入口
+- [ ] 创建分支并切换 — **未实现**：`GitService` 无 `createBranch`/`checkout`/`branches`
+- [ ] 删除分支（普通删除 / 强制删除）— **未接入**：service 与 store 方法存在，但 `GitConfirmationAction.deleteBranch` 从未被构造，无可达 UI 路径
+- [x] Pull / Push 操作入口（**Fetch 未接入**：`GitChangesStore.fetch()` 零调用点）
 
 ### T2.6 Discard Changes ✅
 - [x] 单文件 Discard（modified/untracked）
@@ -44,7 +44,7 @@
 
 - 新增 `GitService`：
   - `status/stage/unstage/stageAll/unstageAll/commit/diff/branches/checkout`
-  - `createBranch/deleteBranch/fetch/pull/push/discardModified/discardUntracked`
+  - `deleteBranch/fetch/pull/push/discardModified/discardUntracked`（`createBranch` 未实现；`deleteBranch` 与 `fetch` 无 UI 调用点）
   - 支持 porcelain v1 状态解析与 branch 信息读取
   - 支持 upstream + ahead/behind 解析
 - 新增 `GitChangesStore`：
