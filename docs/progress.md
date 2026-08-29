@@ -182,7 +182,7 @@
 
 ## Notes
 
-- **2026-08-30 — Teammates 面板**：Right Dock 新增 Teammates tab（FEAT-012），实时展示正在运行的 Claude Code Team/swarm 会话（tmux socket 探活 + `ps` 解析 `--agent-id` 进程，pane→agent 用 `pane_pid` 确定性映射），每 5s 轮询；attach 一键在终端 tab 执行 `tmux -L claude-swarm-<pid> a` 并折叠 dock。7 个扫描器单测通过。
+- **2026-08-30 — Teammates 面板（三源）**：Right Dock 新增 Teammates tab（FEAT-012），实时展示 Claude Code Team/swarm（tmux socket + pane_pid→ps 映射）、Codex 会话（`session_index.jsonl` + rollout cwd）、Pi 会话（`~/.pi/agent/sessions` 转录，当前对话即 live），5s 轮询。attach：Claude/Codex → 终端 tab 执行 `tmux -L … a` / `codex resume <id>`，Pi → 编辑器打开转录。17 个扫描器单测；全套 443 tests 通过。
 
 - **v1.1.6 — 尚未发布**（发布说明 🟢 Ready，详情：`docs/releases/v1.1.6.md`）
 

@@ -1,62 +1,11 @@
 import Foundation
 
-// MARK: - Models
-
-/// A Claude Code subagent (teammate) process, as launched by Claude's Team /
-/// swarm mode: `claude … --agent-id <name>@session-<hex> --agent-name <name>
-/// --agent-color <color> … --model opus`.
-struct TeammateAgent: Identifiable, Equatable {
-    let pid: Int32
-    /// Full `--agent-id` value (e.g. `reviewer@session-eb28c314`).
-    let id: String
-    /// `--agent-name` (e.g. `reviewer`).
-    let name: String
-    /// `--team-name` (the parent session id, e.g. `session-eb28c314`).
-    let team: String?
-    /// `--agent-color` name as Claude reports it (purple / pink / orange…).
-    var colorName: String
-    /// `--agent-type` (e.g. `pr-review-toolkit:code-reviewer` or `general-purpose`).
-    let type: String?
-    /// `--model` (e.g. `opus`, `opus[1m]`).
-    let model: String?
-
-    var idForSwiftUI: Int32 { pid }
-}
-
-/// One pane inside a swarm's tmux window. The pane's process is the actual
-/// `claude` agent binary, so we can map pane → agent deterministically via
-/// `pane_pid` (no fragile title matching).
-struct TeammatePane: Identifiable, Equatable {
-    let index: Int
-    /// tmux pane title — Claude's own label for this view (e.g. `✳ general-purpose`).
-    let title: String
-    /// Resolved agent for the pane's pid, when it is a claude teammate.
-    let agent: TeammateAgent?
-
-    var id: Int { index }
-}
-
-/// A live "View teammates" swarm: a tmux server on socket `claude-swarm-<pid>`
-/// whose window shows one pane per teammate (or the orchestrator's view).
-struct ClaudeSwarmSession: Identifiable, Equatable {
-    /// tmux socket base name, e.g. `claude-swarm-42398`.
-    let socketName: String
-    /// The pid embedded in the socket name — the parent `claude` process that
-    /// owns the swarm.
-    let ownerPID: Int32
-    /// Panes in the swarm window, one per teammate.
-    let panes: [TeammatePane]
-    /// Tail of the first pane's captured output (live activity preview).
-    let outputTail: String?
-
-    var id: String { socketName }
-}
-
-// MARK: - Scanner
-
-/// Discovers running Claude swarm sessions. Two sources are cross-referenced:
+/// Discovers running Claude swarm sessions (source `.claude`).
+///
+/// Two sources are cross-referenced:
 /// 1. live tmux sockets under the user's tmux dir (`claude-swarm-<pid>`), and
-/// 2. each pane's process (`pane_pid` → `ps -o args=` → `--agent-*` flags).
+/// 2. each pane's process (`pane_pid` → `ps -o args=` → `--agent-*` flags),
+/// which gives a deterministic pane → agent map without fragile title matching.
 /// All I/O is synchronous subprocess calls — callers run it off the main actor.
 enum ClaudeSwarmScanner {
 
@@ -64,22 +13,43 @@ enum ClaudeSwarmScanner {
 
     private(set) static var cachedTmuxPath: String?
 
-    static func scan(socketRoot: String? = nil) -> [ClaudeSwarmSession] {
+    static func scan(socketRoot: String? = nil) -> [TeammateSession] {
         let root = socketRoot ?? Self.socketRoot
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(atPath: root) else { return [] }
         let sockets = entries.filter { $0.hasPrefix("claude-swarm-") }.sorted()
 
-        var sessions: [ClaudeSwarmSession] = []
+        var sessions: [TeammateSession] = []
         for socket in sockets {
             guard isLive(socket) else { continue }
             let panes = panes(in: socket)
+            let agents = panes.map { pane -> TeammateAgent in
+                if let agent = pane.agent { return agent }
+                // Pane without a resolvable claude process — fall back to the
+                // pane title so the row still says what is in there.
+                var name = pane.title
+                if name.hasPrefix("✳ ") { name.removeFirst(2) }
+                if name.isEmpty { name = "unnamed pane" }
+                return TeammateAgent(
+                    pid: nil,
+                    id: "\(socket)-pane\(pane.index)",
+                    name: name,
+                    team: nil,
+                    colorName: nil,
+                    type: nil,
+                    model: nil
+                )
+            }
             let ownerPID = Int32(socket.dropFirst("claude-swarm-".count)) ?? 0
-            sessions.append(ClaudeSwarmSession(
-                socketName: socket,
-                ownerPID: ownerPID,
-                panes: panes,
-                outputTail: outputTail(of: socket)
+            sessions.append(TeammateSession(
+                source: .claude,
+                id: socket,
+                name: socket,
+                detail: "\(panes.count) \(panes.count == 1 ? "pane" : "panes")",
+                agents: agents,
+                outputTail: outputTail(of: socket),
+                attach: .command("tmux -L \(socket) a"),
+                timestamp: Date()
             ))
         }
         return sessions
@@ -228,4 +198,14 @@ enum ClaudeSwarmScanner {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return text?.isEmpty == true ? nil : text
     }
+}
+
+/// One pane inside a swarm's tmux window. The pane's process is the actual
+/// `claude` agent binary, so pane → agent maps deterministically via `pane_pid`.
+struct TeammatePane: Equatable {
+    let index: Int
+    /// tmux pane title — Claude's own label for this view (e.g. `✳ general-purpose`).
+    let title: String
+    /// Resolved agent for the pane's pid, when it is a claude teammate.
+    let agent: TeammateAgent?
 }

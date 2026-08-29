@@ -1,12 +1,13 @@
 import SwiftUI
 
-/// Right-dock panel that shows live Claude Code Team / swarm sessions
-/// ("teammates") and attaches to them in the built-in terminal.
+/// Right-dock panel that shows live agent sessions — Claude Code Team/swarm,
+/// Codex, and pi — and attaches to them from the built-in terminal.
 ///
 /// Each swarm is a tmux server on socket `claude-swarm-<pid>`; its window has
-/// one pane per teammate. The panel lists those sessions with each pane's
-/// resolved agent (name, color, role, model) plus a live output tail, and an
-/// "attach" action that opens `tmux -L <socket> a` in a new terminal tab.
+/// one pane per teammate. Codex sessions come from the local session index,
+/// pi sessions from the transcript store (the running conversation is a live
+/// pi session). Attach: claude → `tmux -L <socket> a`, codex → `codex resume
+/// <id>` (both open a terminal tab), pi → open the transcript in the editor.
 struct TeammatesView: View {
     @Environment(TeammatesStore.self) private var store
     @Environment(TerminalWorkspaceStore.self) private var workspace
@@ -54,16 +55,14 @@ struct TeammatesView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let error = store.lastError {
-            VStack(spacing: 0) {
-                errorBanner(error)
-                Spacer()
-            }
-        } else if store.sessions.isEmpty {
+        if let notice = store.notice {
+            noticeBanner(notice)
+        }
+        if store.sessions.isEmpty {
             Spacer()
             EmptyStateView(
-                "No teammate sessions",
-                subtitle: "Claude Code team / swarm sessions appear here.\nView teammates: tmux -L claude-swarm-<pid> a",
+                "No agent sessions",
+                subtitle: "Claude swarms, Codex sessions and pi sessions appear here.\nStart one, or view teammates: tmux -L claude-swarm-<pid> a",
                 systemImage: "person.2",
                 density: .compact
             )
@@ -73,7 +72,7 @@ struct TeammatesView: View {
         }
     }
 
-    private func errorBanner(_ message: String) -> some View {
+    private func noticeBanner(_ message: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "exclamationmark.triangle")
                 .font(AppFonts.toolbarIcon)
@@ -97,32 +96,41 @@ struct TeammatesView: View {
         }
     }
 
-    private func sessionCard(_ session: ClaudeSwarmSession) -> some View {
+    private func sessionCard(_ session: TeammateSession) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Image(systemName: "square.split.2x1")
-                    .font(AppFonts.toolbarIcon)
-                    .foregroundStyle(AppPalette.textTertiary)
-                Text(session.socketName)
+                sourceBadge(session.source)
+                Text(session.name)
                     .font(Self.mono(10, .medium))
                     .foregroundStyle(AppPalette.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                if session.isLive {
+                    Circle()
+                        .fill(AppPalette.accent.opacity(0.9))
+                        .frame(width: 6, height: 6)
+                }
                 Spacer(minLength: 4)
-                Text("\(session.panes.count) \(session.panes.count == 1 ? "pane" : "panes")")
-                    .font(AppFonts.caption)
-                    .foregroundStyle(AppPalette.textTertiary)
-                attachButton(session)
+                if let detail = session.detail {
+                    Text(detail)
+                        .font(AppFonts.caption)
+                        .foregroundStyle(AppPalette.textTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                if let attach = session.attach {
+                    attachButton(attach)
+                }
             }
 
-            if session.panes.isEmpty {
-                Text("no panes")
+            if session.agents.isEmpty {
+                Text("no agents")
                     .font(AppFonts.caption)
                     .foregroundStyle(AppPalette.textTertiary)
                     .padding(.leading, 2)
             } else {
-                ForEach(session.panes) { pane in
-                    paneRow(pane)
+                ForEach(session.agents) { agent in
+                    agentRow(agent)
                 }
             }
 
@@ -144,19 +152,20 @@ struct TeammatesView: View {
             RoundedRectangle(cornerRadius: AppSpacing.cornerRadius, style: .continuous)
                 .stroke(AppPalette.border, lineWidth: 1)
         )
+        .accessibilityElement(children: .contain)
     }
 
-    private func paneRow(_ pane: TeammatePane) -> some View {
+    private func agentRow(_ agent: TeammateAgent) -> some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(Self.agentColor(pane.agent?.colorName))
+                .fill(Self.agentColor(agent.colorName))
                 .frame(width: 8, height: 8)
-            Text(pane.agent?.name ?? paneTitle(pane.title))
+            Text(agent.name)
                 .font(AppFonts.primaryLabel)
                 .foregroundStyle(AppPalette.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if let type = pane.agent?.type {
+            if let type = agent.type {
                 Text(type)
                     .font(AppFonts.caption)
                     .foregroundStyle(AppPalette.textTertiary)
@@ -164,7 +173,7 @@ struct TeammatesView: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: 2)
-            if let model = pane.agent?.model {
+            if let model = agent.model {
                 Text(model)
                     .font(Self.mono(9, .regular))
                     .foregroundStyle(AppPalette.textTertiary)
@@ -173,44 +182,85 @@ struct TeammatesView: View {
         }
     }
 
-    // MARK: - Actions
+    // MARK: - Source badge
 
-    private func attachButton(_ session: ClaudeSwarmSession) -> some View {
-        Button {
-            attach(to: session)
-        } label: {
-            Image(systemName: "terminal")
+    /// Category color per ecosystem — color encodes the *source*, not sequence.
+    static func sourceColor(_ source: TeammateSource) -> Color {
+        switch source {
+        case .claude: return Color(red: 0.50, green: 0.47, blue: 0.87) // purple ramp
+        case .codex: return Color(red: 0.11, green: 0.62, blue: 0.46) // teal ramp
+        case .pi: return Color(red: 0.22, green: 0.54, blue: 0.92) // blue ramp
         }
-        .buttonStyle(.icon(font: AppFonts.toolbarIcon, size: 18))
-        .help("Attach in terminal: tmux -L \(session.socketName) a")
-        .accessibilityLabel("Attach \(session.socketName) in terminal")
     }
 
-    private func attach(to session: ClaudeSwarmSession) {
-        let config = TerminalSurfaceConfiguration(command: "tmux -L \(session.socketName) a")
-        _ = workspace.newTab(for: nil, configuration: config)
-        workspace.notifyContextChange()
-        // The point of attach is to watch the swarm — collapse the dock so the
-        // terminal pane is actually visible instead of hiding behind the panel.
-        dock.collapse()
+    private func sourceBadge(_ source: TeammateSource) -> some View {
+        Text(source.label)
+            .font(AppFonts.caption.weight(.medium))
+            .foregroundStyle(Self.sourceColor(source))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(Self.sourceColor(source).opacity(0.16))
+            .clipShape(Capsule())
+    }
+
+    // MARK: - Actions
+
+    private func attachButton(_ attach: TeammateAttach) -> some View {
+        Button {
+            perform(attach)
+        } label: {
+            Image(systemName: iconFor(attach))
+        }
+        .buttonStyle(.icon(font: AppFonts.toolbarIcon, size: 18))
+        .help(helpFor(attach))
+        .accessibilityLabel(helpFor(attach))
+    }
+
+    private func iconFor(_ attach: TeammateAttach) -> String {
+        switch attach {
+        case .command: return "terminal"
+        case .openFile: return "doc.plaintext"
+        }
+    }
+
+    private func helpFor(_ attach: TeammateAttach) -> String {
+        switch attach {
+        case .command(let command): return "Attach in terminal: \(command)"
+        case .openFile(let path): return "Open transcript: \(path)"
+        }
+    }
+
+    private func perform(_ attach: TeammateAttach) {
+        switch attach {
+        case .command(let command):
+            let config = TerminalSurfaceConfiguration(command: command)
+            _ = workspace.newTab(for: nil, configuration: config)
+            workspace.notifyContextChange()
+            // The point of attach is to watch the agent — collapse the dock so
+            // the terminal pane is actually visible instead of hiding behind
+            // the panel.
+            dock.collapse()
+
+        case .openFile(let path):
+            NotificationCenter.default.post(
+                name: .openFileFromTerminal,
+                object: nil,
+                userInfo: ["url": URL(fileURLWithPath: path)]
+            )
+            // The transcript opens in the Files editor — switch the dock so it
+            // is visible instead of sitting behind the Teammates panel.
+            dock.activeTab = .files
+        }
     }
 
     // MARK: - Helpers
 
-    /// Strip Claude's "✳ " view-title prefix when the pane is not (yet) linked
-    /// to an agent process.
-    private func paneTitle(_ title: String) -> String {
-        var text = title
-        if text.hasPrefix("✳ ") { text.removeFirst(2) }
-        return text.isEmpty ? "unnamed pane" : text
-    }
-
-    /// Claude's `--agent-color` name → dot color. Unknown colors fall back to a
-    /// neutral accent so the row still reads as an identifier.
     private static func mono(_ size: CGFloat, _ weight: Font.Weight) -> Font {
         Font.system(size: size, weight: weight, design: .monospaced)
     }
 
+    /// Claude's `--agent-color` name → dot color; the generic "green" means a
+    /// live codex/pi session. Unknown names fall back to a neutral accent.
     static func agentColor(_ name: String?) -> Color {
         guard let name else { return AppPalette.textTertiary }
         switch name.lowercased() {
