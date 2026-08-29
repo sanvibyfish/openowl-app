@@ -182,6 +182,8 @@
 
 ## Notes
 
+- **2026-08-30 — Teammates 面板**：Right Dock 新增 Teammates tab（FEAT-012），实时展示正在运行的 Claude Code Team/swarm 会话（tmux socket 探活 + `ps` 解析 `--agent-id` 进程，pane→agent 用 `pane_pid` 确定性映射），每 5s 轮询；attach 一键在终端 tab 执行 `tmux -L claude-swarm-<pid> a` 并折叠 dock。7 个扫描器单测通过。
+
 - **v1.1.6 — 尚未发布**（发布说明 🟢 Ready，详情：`docs/releases/v1.1.6.md`）
 
 > **2026-08-21 更正**：本条先前记为「v1.1.6 发布 (2026-08-17)，签名 + 公证 + staple + Gatekeeper 通过」，与事实不符。核查结果：`git tag` 最新为 `v1.1.4-2`，v1.1.5 与 v1.1.6 均无 tag；2026-08-13 至 08-18 之间仓库只有一个提交；`build/OpenOwl-1.1.6.dmg` 的 mtime 是 2026-08-19 而非 08-17。该 dmg 亦早于 2026-08-21 的管道层与 Discard All 修复，不可作为 v1.1.6 的发布件。先前条目中列出的「分屏 pane 消息总线命名入口」经核查从未实现（见 `docs/releases/v1.1.6.md` 的「已撤回的内容」）。

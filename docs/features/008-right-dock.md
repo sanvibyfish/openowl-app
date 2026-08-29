@@ -9,7 +9,7 @@
 把"Toolbar 中央 4-tab 切换主区域"的旧布局重构为：
 
 - **中间区永远是 Terminal**（除非 right dock 全屏时被隐藏）
-- **右侧 Right Dock**：可折叠的 inspector，托管 Files / Git 两个固定 tab
+- **右侧 Right Dock**：可折叠的 inspector，托管 Files / Git / Teammates 三个固定 tab（Teammates 面板见 [FEAT-012](012-teammates.md)，实时展示 Claude Code swarm 会话并可一键 attach）
 - **左侧 Project Rail**（2026-07-28）：48pt 窄图标轨，入口含 free terminal + 项目 monogram（见 [FEAT-006](006-project-sidebar.md)）；不再使用宽项目树
 
 详细需求与验收标准见 [REQ-007-right-dock.md](../requirements/REQ-007-right-dock.md)。

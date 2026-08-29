@@ -10,6 +10,7 @@ struct openOwlApp: App {
     @State private var fileExplorerStore = FileExplorerStore()
     @State private var claudeStatusStore = ClaudeStatusStore()
     @State private var rightDockStore = RightDockStore()
+    @State private var teammatesStore = TeammatesStore()
 
     init() {
         Self.setupEnvironment()
@@ -33,6 +34,7 @@ struct openOwlApp: App {
                 .environment(fileExplorerStore)
                 .environment(claudeStatusStore)
                 .environment(rightDockStore)
+                .environment(teammatesStore)
                 .onAppear {
                     // Apply saved appearance preference (system/light/dark)
                     NSApp.appearance = AppAppearance.current.nsAppearance
@@ -62,9 +64,11 @@ struct openOwlApp: App {
                     syncActiveProjectContext()
                     UpdateChecker.shared.checkOnLaunchIfNeeded()
                     claudeStatusStore.startPollingIfNeeded()
+                    teammatesStore.startPollingIfNeeded()
                 }
                 .onDisappear {
                     claudeStatusStore.stopPolling()
+                    teammatesStore.stopPolling()
                     ghosttyManager.stopBackgroundTick()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
@@ -259,6 +263,8 @@ struct openOwlApp: App {
             fileExplorerStore.setProject(cwd)
         case .git:
             gitChangesStore.setPreferredDirectory(cwd)
+        case .teammates:
+            break // roster is workspace-global, not project-scoped
         }
     }
 }

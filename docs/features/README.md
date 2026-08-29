@@ -25,6 +25,7 @@
 | 009 | 文件日志系统 (AppLogger) | ✅ Done | [009-app-logger.md](009-app-logger.md) |
 | 010 | 进程资源异常监控 | 🟡 In Progress | [010-resource-monitor.md](010-resource-monitor.md) |
 | 011 | Ghostty 风格终端 AppleScript 控制 | ✅ Done | [011-terminal-applescript.md](011-terminal-applescript.md) |
+| 012 | Teammates 面板（Claude swarm 实时视图） | ✅ Done | [012-teammates.md](012-teammates.md) |
 
 ## 分类
 

@@ -173,6 +173,11 @@ struct RightDockView: View {
             .opacity(dock.activeTab == .git ? 1 : 0)
             .allowsHitTesting(dock.activeTab == .git)
 
+            TeammatesView()
+                .accessibilityHidden(dock.activeTab != .teammates)
+                .opacity(dock.activeTab == .teammates ? 1 : 0)
+                .allowsHitTesting(dock.activeTab == .teammates)
+
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
