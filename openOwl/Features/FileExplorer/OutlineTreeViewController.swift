@@ -18,6 +18,33 @@ final class KeyableOutlineView: NSOutlineView {
     }
 }
 
+/// `NSClipView` that pins the horizontal scroll origin to 0.
+///
+/// The file tree must never pan sideways — names truncate, like VS Code. But
+/// `scrollRowToVisible` / `scrollToVisible` on an indented row, whose cell
+/// starts at `indentationPerLevel * depth` and is `columnWidth` wide, overflows
+/// the panel's right edge; to reveal the row's trailing edge AppKit scrolls the
+/// clip view to the right. That shoves every row left, clipping the leading
+/// glyphs and the file/folder icon — the "file explorer shows cut-off names"
+/// bug. Every cell sits at `x >= 0` in the outline view (indentation is never
+/// negative), so a positive clip origin is the *only* way leading text can end
+/// up behind the panel's left edge; pinning it to 0 is the complete fix.
+final class TreeClipView: NSClipView {
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+        var rect = super.constrainBoundsRect(proposedBounds)
+        rect.origin.x = 0
+        return rect
+    }
+
+    override func setBoundsOrigin(_ newOrigin: NSPoint) {
+        super.setBoundsOrigin(NSPoint(x: 0, y: newOrigin.y))
+    }
+
+    override func scroll(to newOrigin: NSPoint) {
+        super.scroll(to: NSPoint(x: 0, y: newOrigin.y))
+    }
+}
+
 // MARK: - OutlineTreeViewController
 
 final class OutlineTreeViewController: NSViewController {
@@ -59,6 +86,13 @@ final class OutlineTreeViewController: NSViewController {
         scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
         scrollView.backgroundColor = .clear
+
+        // Pin the horizontal scroll origin to 0 (see TreeClipView). A file tree
+        // truncates names and must never pan sideways, which is what clipped the
+        // left edge of every row when a deeply-indented file was selected.
+        let clipView = TreeClipView()
+        clipView.autoresizingMask = [.width, .height]
+        scrollView.contentView = clipView
 
         outlineView = KeyableOutlineView()
         outlineView.headerView = nil
@@ -106,6 +140,30 @@ final class OutlineTreeViewController: NSViewController {
         if !rootNodes.isEmpty {
             outlineView.reloadData()
         }
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        synchronizeOutlineColumnWidth()
+    }
+
+    /// Keep the file column exactly as wide as the visible panel.
+    ///
+    /// `autoresizesOutlineColumn = false` (kept — see the 2026-03-18 postmortem
+    /// on the column ballooning when a directory is expanded) also stops the
+    /// column tracking the panel width. `sizeLastColumnToFit()` in `viewDidAppear`
+    /// sized the column once against whatever width the hosting view had during
+    /// initial mount — often narrower than the settled panel — so the column ended
+    /// up a few points short and left a dead strip on the right. Re-pin it to the
+    /// outline view's real width on every layout pass, but only when it actually
+    /// changed, so steady-state costs nothing.
+    private func synchronizeOutlineColumnWidth() {
+        guard let column = outlineView.outlineTableColumn else { return }
+        let target = outlineView.bounds.width
+        // Ignore degenerate / not-yet-laid-out widths; the column must never
+        // collapse to zero or go negative.
+        guard target >= 100, abs(target - column.width) > 0.5 else { return }
+        column.width = target
     }
 
     // MARK: - Public API

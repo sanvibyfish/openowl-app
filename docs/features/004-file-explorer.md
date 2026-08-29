@@ -136,6 +136,7 @@ classifyGitState: GitFileChange → FileGitState
 
 | 日期 | 说明 |
 |------|------|
+| 2026-08-27 | 修复文件树首行文字被从左侧裁掉的显示问题。根因是 `scrollRowToVisible` 在选中一个嵌套较深的文件时，会把 clip view 水平滚动到右侧来露出该行（其 cell 右缘超出面板），导致所有更浅的行被整体向左推、首字符和图标被裁掉；同时 `autoresizesOutlineColumn=false` + 只在 `viewDidAppear` 调一次 `sizeLastColumnToFit()` 会让列宽小于面板实际宽度，在右侧留下一段空白。修复：引入 `TreeClipView`（`NSClipView` 子类，把水平滚动原点恒定为 0——文件树只截断名称，永不横向平移），并在 `viewDidLayout` 里按 outline view 实际宽度同步列宽（带变更守卫，稳态零开销）。详见 postmortem `2026-08-27-file-tree-horizontal-clip.md` |
 | 2026-08-09 | 多文件 cut/move 部分失败后，pasteboard 仅保留失败 URL 和 cut pending，重试继续执行 move；rename/move 打断 pending initial read 时按新 URL 重启完整 activation，并正确结束 pending/loading。定向 FileExplorer 35 tests，完整 XCTest 419 tests / 35 suites 通过；SPM patch 已应用且 `git diff --check` 通过 |
 | 2026-08-09 | 文件 rename/cut-move 原子迁移全部 URL-keyed editor state，目录操作覆盖后代；操作前检测 open-tab 目标碰撞并阻止磁盘修改。删除立即裁剪 tree/index/search/selection/preview/Quick Open，App 内 dirty 删除被阻止、clean tab 关闭，外部删除 dirty 文件保留 buffer 并报告 backing file missing。定向 FileExplorer 34 tests、完整 XCTest 416 tests / 35 suites 通过；SPM patch 已应用且 `git diff --check` 通过 |
 | 2026-08-09 | 项目切换立即清理旧 Git context 与无缓存目标的 Quick Open 数据；浅扫描提交结果前核对 captured project URL，阻止旧项目扫描覆盖新项目 UI，并新增跨项目 Quick Open 回归测试 |
