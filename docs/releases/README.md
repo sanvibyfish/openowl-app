@@ -8,6 +8,7 @@
 
 | 版本 | 状态 | 发布日期 | 文档 |
 |------|------|----------|------|
+| v1.1.7 | 🟢 Ready | 2026-08-30 | [Release Notes](v1.1.7.md)（Teammates 面板 + 文件树裁剪修复；已打包待测试） |
 | v1.1.6 | ✅ Done | 2026-08-24 | [Release Notes](v1.1.6.md) |
 | v1.1.5 | ⤴️ Merged | — | [Release Notes](v1.1.5.md)（未单独发布，并入 v1.1.6） |
 | v1.1.4-2 | ✅ Done | 2026-08-09 | [Release Notes](v1.1.4-2.md) |

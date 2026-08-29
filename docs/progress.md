@@ -184,7 +184,8 @@
 
 - **2026-08-30 — Teammates 面板（三源）**：Right Dock 新增 Teammates tab（FEAT-012），实时展示 Claude Code Team/swarm（tmux socket + pane_pid→ps 映射）、Codex 会话（`session_index.jsonl` + rollout cwd）、Pi 会话（`~/.pi/agent/sessions` 转录，当前对话即 live），5s 轮询。attach：Claude/Codex → 终端 tab 执行 `tmux -L … a` / `codex resume <id>`，Pi → 编辑器打开转录。17 个扫描器单测；全套 443 tests 通过。
 
-- **v1.1.6 — 尚未发布**（发布说明 🟢 Ready，详情：`docs/releases/v1.1.6.md`）
+- **v1.1.6 — ✅ 已发布（2026-08-24，tag `v1.1.6`）**，详情：`docs/releases/v1.1.6.md`
+- **v1.1.7 — 已打包待测试（2026-08-30）**：Teammates 面板（Claude/Codex/Pi 三源）+ 文件树左侧裁剪修复，详情：`docs/releases/v1.1.7.md`
 
 > **2026-08-21 更正**：本条先前记为「v1.1.6 发布 (2026-08-17)，签名 + 公证 + staple + Gatekeeper 通过」，与事实不符。核查结果：`git tag` 最新为 `v1.1.4-2`，v1.1.5 与 v1.1.6 均无 tag；2026-08-13 至 08-18 之间仓库只有一个提交；`build/OpenOwl-1.1.6.dmg` 的 mtime 是 2026-08-19 而非 08-17。该 dmg 亦早于 2026-08-21 的管道层与 Discard All 修复，不可作为 v1.1.6 的发布件。先前条目中列出的「分屏 pane 消息总线命名入口」经核查从未实现（见 `docs/releases/v1.1.6.md` 的「已撤回的内容」）。
 
