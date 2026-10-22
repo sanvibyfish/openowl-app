@@ -326,4 +326,35 @@ struct ProjectStorePersistenceTests {
             #expect(!productionProjectPaths.contains(sentinelURL.standardizedFileURL.path))
         }
     }
+
+    // MARK: - Security-scoped access restore
+
+    /// Regression: the restore loop used to sit *after* an early `return` in the
+    /// happy path, so a healthy store file skipped it entirely. Access then came
+    /// only from whatever project the user added during that session, and any
+    /// TCC-protected parent (`~/Documents`, `~/Desktop`) — and every process the
+    /// terminal spawned, GitHub runners included — lost access the moment that
+    /// project went away.
+    @Test @MainActor func relaunchRestoresSecurityScopedAccessForLoadedProjects() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-bookmark-restore-\(UUID().uuidString)", isDirectory: true)
+        let projectURL = root.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let storeURL = root.appendingPathComponent("store/openowl.json")
+
+        let first = ProjectStore(storeURL: storeURL, unreadableStoreAlertPresenter: { _ in })
+        first.addOrActivateProject(projectURL)
+        let added = try #require(first.projects.first { $0.path == projectURL.standardizedFileURL.path })
+        #expect(first.bookmarkStore.activeAccessCount == 1)
+
+        // Simulate a relaunch: same store file, brand-new instances.
+        let second = ProjectStore(storeURL: storeURL, unreadableStoreAlertPresenter: { _ in })
+        #expect(second.projects.contains { $0.id == added.id })
+        #expect(
+            second.bookmarkStore.activeAccessCount == 1,
+            "launch must re-establish the bookmark session; without it every TCC-protected parent is unreachable"
+        )
+    }
 }

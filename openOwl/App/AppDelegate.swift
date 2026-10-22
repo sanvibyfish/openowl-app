@@ -150,6 +150,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         startResourceMonitor()
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // SwiftUI rebuilds its menus when the scene changes; re-assert our View
+        // entries if that dropped them. Idempotent — no-ops when already there.
+        installViewMenu()
+    }
+
     /// Sampling is independent of notification permission — keep the two apart
     /// so the monitor does not wait on (or get skipped by) the auth callback.
     private func startResourceMonitor() {
@@ -291,26 +297,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func installViewMenu() {
         guard let mainMenu = NSApp.mainMenu else { return }
 
-        let menu = NSMenu(title: "View")
-
         let terminal = NSMenuItem(title: "Terminal", action: #selector(menuShowTerminal), keyEquivalent: "")
-        menu.addItem(terminal)
-
         let git = NSMenuItem(title: "Git Changes", action: #selector(menuShowGit), keyEquivalent: "")
-        menu.addItem(git)
-
         let files = NSMenuItem(title: "File Explorer", action: #selector(menuShowFiles), keyEquivalent: "")
-        menu.addItem(files)
-
-        menu.addItem(.separator())
-
         let quickOpen = NSMenuItem(title: "Quick Open", action: #selector(menuQuickOpen), keyEquivalent: "p")
+
+        // SwiftUI's WindowGroup already contributes a "View" menu (full screen,
+        // toolbar). Adding a second NSMenu titled "View" put two "View"s in the
+        // menu bar, so reuse the existing one and put our entries above
+        // SwiftUI's own. Idempotent: called again from applicationDidBecomeActive
+        // in case SwiftUI rebuilt its menu since launch.
+        if let viewMenu = mainMenu.items.compactMap(\.submenu).first(where: { $0.title == "View" }) {
+            guard viewMenu.item(withTitle: "Quick Open") == nil else { return }
+            // Inserted back-to-front so the group lands in reading order at the top.
+            viewMenu.insertItem(quickOpen, at: 0)
+            viewMenu.insertItem(.separator(), at: 0)
+            viewMenu.insertItem(files, at: 0)
+            viewMenu.insertItem(git, at: 0)
+            viewMenu.insertItem(terminal, at: 0)
+            return
+        }
+
+        // No SwiftUI View menu (unexpected, but don't lose the commands).
+        let menu = NSMenu(title: "View")
+        menu.addItem(terminal)
+        menu.addItem(git)
+        menu.addItem(files)
+        menu.addItem(.separator())
         menu.addItem(quickOpen)
 
         let menuItem = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
         menuItem.submenu = menu
-        let insertIndex = min(mainMenu.items.count, 4) // After Terminal
-        mainMenu.insertItem(menuItem, at: insertIndex)
+        mainMenu.insertItem(menuItem, at: min(mainMenu.items.count, 4))
     }
 
     // MARK: - Debug Menu
@@ -549,6 +567,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleLocalKeyDown(_ event: NSEvent) -> Bool {
         guard let workspaceStore else { return false }
+
+        // Quick Open owns Escape while it is up. The responder policy below
+        // otherwise hands Escape to the shell whenever a result row (a
+        // non-text view) has focus, clearing the terminal's input line.
+        if event.keyCode == 53,
+           event.modifierFlags.intersection([.command, .shift, .control, .option]).isEmpty,
+           fileExplorerStore?.isQuickOpenPresented == true {
+            fileExplorerStore?.dismissQuickOpen()
+            return true
+        }
 
         // Search shortcuts: Esc (close) works from anywhere.
         // Return/Shift+Return (navigate) only when the search text field is focused —

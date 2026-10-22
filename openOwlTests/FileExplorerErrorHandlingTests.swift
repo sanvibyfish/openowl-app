@@ -639,6 +639,65 @@ struct FileExplorerErrorHandlingTests {
         #expect(store.quickOpenMatches.isEmpty)
     }
 
+    @Test @MainActor func presentQuickOpen_showsPanelBeforeIndexIsReady() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-quickopen-cold-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "x\n".write(
+            to: root.appendingPathComponent("cold.swift"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let store = FileExplorerStore()
+        // Regression: ⌘P before the Files tab was ever visited used to bail out
+        // because the asynchronous index was still empty, so the panel never
+        // appeared. It must present immediately and fill in when the scan lands.
+        store.presentQuickOpen(projectURL: root)
+        #expect(store.isQuickOpenPresented)
+
+        for _ in 0..<300 where store.quickOpenMatches.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.quickOpenMatches.map(\.node.name) == ["cold.swift"])
+
+        store.dismissQuickOpen()
+        for _ in 0..<50 where store.isQuickOpenPresented {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(!store.isQuickOpenPresented)
+    }
+
+    @Test @MainActor func presentQuickOpen_retargetsToRequestedProject() async throws {
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openowl-quickopen-retarget-\(UUID().uuidString)", isDirectory: true)
+        let firstURL = baseURL.appendingPathComponent("first", isDirectory: true)
+        let secondURL = baseURL.appendingPathComponent("second", isDirectory: true)
+        try FileManager.default.createDirectory(at: firstURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseURL) }
+        try "a\n".write(to: firstURL.appendingPathComponent("a.swift"), atomically: true, encoding: .utf8)
+        try "b\n".write(to: secondURL.appendingPathComponent("b.swift"), atomically: true, encoding: .utf8)
+
+        let store = FileExplorerStore()
+        store.setProject(firstURL)
+        for _ in 0..<300 where store.quickOpenMatches.isEmpty {
+            store.updateQuickOpenResults()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.quickOpenMatches.map(\.node.name) == ["a.swift"])
+
+        // Files tab was never opened for the second project — ⌘P must not
+        // answer with the first project's index.
+        store.presentQuickOpen(projectURL: secondURL)
+        #expect(store.isQuickOpenPresented)
+        for _ in 0..<300 where store.quickOpenMatches.map(\.node.name) != ["b.swift"] {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.quickOpenMatches.map(\.node.name) == ["b.swift"])
+    }
+
     private var defaultsSuiteName: String {
         "openowl.file-editor-session.tests"
     }

@@ -1,6 +1,33 @@
 import AppKit
 import QuartzCore
 
+/// Decides whether the terminal may (re)claim first responder.
+///
+/// SwiftUI reparents the terminal wrapper when overlay chrome is inserted or
+/// removed (the ⌘P quick-open panel, the terminal search bar). Restoring focus
+/// on that reattach is correct in general but must never yank the responder out
+/// of a text field the user is typing into — that made ⌘P look like it "did not
+/// focus" while the keystrokes landed in the shell.
+///
+/// Kept separate from the view so the responder-chain decision is testable
+/// without a live terminal, mirroring `TerminalFallbackResponderPolicy`.
+enum TerminalFocusPolicy {
+    static func shouldClaimFocus(in window: NSWindow?) -> Bool {
+        guard let window else { return false }
+        var responder: NSResponder? = window.firstResponder
+        while let current = responder {
+            // NSTextView covers the shared field editor used while editing an
+            // NSTextField, which is what is actually installed as first
+            // responder during text entry.
+            if current is NSTextView || current is NSTextField {
+                return false
+            }
+            responder = current.nextResponder
+        }
+        return true
+    }
+}
+
 /// Core terminal NSView backed by CAMetalLayer + ghostty_surface_t.
 /// Keyboard, mouse, resize, focus — mirrors Ghostty SurfaceView_AppKit.swift.
 ///
@@ -101,8 +128,12 @@ class TerminalNSView: NSView {
             setupTrackingArea()
             // Only restore focus if the host considers this surface visible.
             // Hidden panes (background tab, maximized sibling) must not grab
-            // focus or trigger ghostty rendering.
-            if hostVisible {
+            // focus or trigger ghostty rendering. And never steal focus from an
+            // active text input: SwiftUI reparents this wrapper when overlay
+            // chrome is inserted, so an unconditional refocus here yanked the
+            // responder straight back out of the ⌘P quick-open field (and the
+            // terminal search bar) the moment it opened.
+            if hostVisible, TerminalFocusPolicy.shouldClaimFocus(in: window) {
                 ghostty_surface_set_focus(surface, true)
                 appManager?.activeSurface = surface
                 window.makeFirstResponder(self)

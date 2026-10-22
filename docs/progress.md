@@ -182,10 +182,12 @@
 
 ## Notes
 
-- **2026-08-30 — Teammates 面板（三源）**：Right Dock 新增 Teammates tab（FEAT-012），实时展示 Claude Code Team/swarm（tmux socket + pane_pid→ps 映射）、Codex 会话（`session_index.jsonl` + rollout cwd）、Pi 会话（`~/.pi/agent/sessions` 转录，当前对话即 live），5s 轮询。attach：Claude/Codex → 终端 tab 执行 `tmux -L … a` / `codex resume <id>`，Pi → 编辑器打开转录。17 个扫描器单测；全套 443 tests 通过。
+- **2026-10-06 — Teammates 面板下架 + ⌘P Quick Open 修复**：Right Dock 的 Teammates tab、`TeammatesStore` / `TeammatesView` 与三个会话扫描器（Claude/Codex/Pi）及 17 个单测整体移除，`RightDockTab` 回到 `files` / `git`；设计文档归档至 `docs/archive/FEAT-012-teammates.md`。Quick Open 修复四层缺陷：默认停在 Git tab 且 Files 从未打开时 ⌘P 无反应（索引为空时直接 return）、切项目后仍可能展示/打开旧项目文件、搜索框拿不下 first responder（输入/↑/↓ 全落到 shell）、以及 SwiftUI 重挂终端 wrapper 时 `viewDidMoveToWindow` 把焦点抢回去。新增 `QuickOpenField`（AppKit `NSTextField` + 显式 `makeFirstResponder` 重试）、`TerminalFocusPolicy`，并在面板打开期间由 AppDelegate 接管 Escape。新增 7 个回归测试；全套 XCTest 435 tests / 38 suites 通过。菜单栏：`installViewMenu()` 不再新建第二个 "View" 菜单（SwiftUI 的 WindowGroup 已经提供一个，导致菜单栏出现两个 View），改为把 Terminal / Git Changes / File Explorer / Quick Open 插入现有的 View 菜单顶部；`applicationDidBecomeActive` 里幂等重装，防止 SwiftUI 重建菜单时丢失。另外补上一直缺失的 `com.apple.security.automation.apple-events` entitlement + `NSAppleEventsUsageDescription`：`tccd` 日志反复报 `kTCCServiceAppleEvents requires entitlement ... but it is missing for responsible={com.openowl.app}`，而内置终端启动的子进程（`open`、链接点击、终端里跑的工具）都会把责任归给 openOwl，于是每次都会弹/拒一个名为 openOwl 的授权提示。
+
+- **2026-10-11 — 权限/日志两个根因修复**：① 安全作用域书签从未在启动时恢复 —— `ProjectStore.load()` 的恢复循环位于 UserDefaults 迁移分支之前、正常分支又提前 `return`，只要 `openowl.json` 可读就完全跳过。后果：`~/Documents` 的访问权只在"本次会话添加过项目"时存在，项目一移除就整体 `Operation not permitted`，终端里跑的一切（GitHub Actions runner 读不到 `.credentials_rsaparams`、`run-helper.sh` exec 失败）跟着挂。现改为 `init` 中在 `load()` + `seedDefaultProjectIfNeeded()` 之后统一恢复，`startAccessing` 改幂等。② `AppLogger` 句柄指向被外部删除的 inode 后日志静默消失：现在每次写入前用 `fstat`/`stat` 比对 inode，不一致就重建目录与文件。新增 4 个回归测试；全套 XCTest 439 tests / 39 suites 通过。
 
 - **v1.1.6 — ✅ 已发布（2026-08-24，tag `v1.1.6`）**，详情：`docs/releases/v1.1.6.md`
-- **v1.1.7 — 已打包待测试（2026-08-30）**：Teammates 面板（Claude/Codex/Pi 三源）+ 文件树左侧裁剪修复，详情：`docs/releases/v1.1.7.md`
+- **v1.1.7 — ⤴️ 未单独发布，并入 v1.1.8**：原本打包的 v1.1.7 从未 tag/发布，内容全部进 v1.1.8，详情：`docs/releases/v1.1.8.md`
 
 > **2026-08-21 更正**：本条先前记为「v1.1.6 发布 (2026-08-17)，签名 + 公证 + staple + Gatekeeper 通过」，与事实不符。核查结果：`git tag` 最新为 `v1.1.4-2`，v1.1.5 与 v1.1.6 均无 tag；2026-08-13 至 08-18 之间仓库只有一个提交；`build/OpenOwl-1.1.6.dmg` 的 mtime 是 2026-08-19 而非 08-17。该 dmg 亦早于 2026-08-21 的管道层与 Discard All 修复，不可作为 v1.1.6 的发布件。先前条目中列出的「分屏 pane 消息总线命名入口」经核查从未实现（见 `docs/releases/v1.1.6.md` 的「已撤回的内容」）。
 

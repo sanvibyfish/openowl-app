@@ -71,6 +71,27 @@ struct BookmarkStoreTests {
         }
     }
 
+    /// `ProjectStore` restores access for every project at launch and also
+    /// starts it when a project is added. Re-starting an open session would
+    /// replace the URL object that `stopAccessing` later releases, leaking the
+    /// first extension for the life of the process.
+    @Test @MainActor func startAccessing_twiceKeepsOneSession() throws {
+        try withTempDir { dir in
+            let (store, _) = makeStore()
+            store.save(projectID: "p1", url: dir)
+
+            let first = store.startAccessing(projectID: "p1")
+            #expect(store.activeAccessCount == 1)
+
+            let second = store.startAccessing(projectID: "p1")
+            #expect(second?.standardizedFileURL.path == first?.standardizedFileURL.path)
+            #expect(store.activeAccessCount == 1)
+
+            store.stopAll()
+            #expect(store.activeAccessCount == 0)
+        }
+    }
+
     // MARK: - remove
 
     @Test @MainActor func remove_deletesBookmark() throws {

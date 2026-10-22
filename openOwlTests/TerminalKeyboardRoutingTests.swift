@@ -204,3 +204,59 @@ struct TerminalKeyboardRoutingTests {
         ))
     }
 }
+
+/// The terminal reparents on SwiftUI overlay churn (⌘P panel, search bar) and
+/// used to blindly refocus itself, killing the field the user had just opened.
+@Suite("Terminal focus reclaim policy")
+@MainActor
+struct TerminalFocusPolicyTests {
+    @Test func claimsFocusWhenWindowHasNoTextInput() {
+        let window = NSWindow()
+        let plain = NSView()
+        window.contentView = plain
+        window.makeFirstResponder(plain)
+
+        #expect(TerminalFocusPolicy.shouldClaimFocus(in: window))
+    }
+
+    @Test func claimsFocusWhenNothingIsFocused() {
+        let window = NSWindow()
+
+        #expect(TerminalFocusPolicy.shouldClaimFocus(in: window))
+    }
+
+    @Test func doesNotClaimFocusFromTextField() {
+        let window = NSWindow()
+        let field = NSTextField()
+        window.contentView = field
+        window.makeFirstResponder(field)
+
+        #expect(!TerminalFocusPolicy.shouldClaimFocus(in: window))
+    }
+
+    @Test func doesNotClaimFocusFromFieldEditor() {
+        let window = NSWindow()
+        let field = NSTextField()
+        window.contentView = field
+        window.makeFirstResponder(field)
+        // Whatever AppKit installs for text entry — the field itself or its
+        // shared field editor — must block the reclaim.
+        let responder = window.firstResponder
+        #expect(responder is NSTextField || responder is NSTextView)
+
+        #expect(!TerminalFocusPolicy.shouldClaimFocus(in: window))
+    }
+
+    @Test func doesNotClaimFocusFromStandaloneTextView() {
+        let window = NSWindow()
+        let textView = NSTextView()
+        window.contentView = textView
+        window.makeFirstResponder(textView)
+
+        #expect(!TerminalFocusPolicy.shouldClaimFocus(in: window))
+    }
+
+    @Test func missingWindowNeverClaims() {
+        #expect(!TerminalFocusPolicy.shouldClaimFocus(in: nil))
+    }
+}

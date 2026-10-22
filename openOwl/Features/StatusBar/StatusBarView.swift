@@ -60,7 +60,6 @@ struct StatusBarView: View {
         switch rightDockStore.activeTab {
         case .files: return .files
         case .git: return .git
-        case .teammates: return .terminal
         }
     }
 

@@ -329,20 +329,35 @@ final class FileExplorerStore {
     }
 
     func presentQuickOpen(projectURL fallback: URL? = nil) {
-        // Lazy-load file index if not yet scanned (e.g. opened from terminal tab)
-        if searchableFileNodes.isEmpty {
-            if let url = self.projectURL ?? fallback {
-                if self.projectURL == url.standardizedFileURL {
-                    refreshNow()  // already set, just needs scan
-                } else {
-                    setProject(url)
-                }
-            }
+        // The panel must open on the FIRST ⌘P, even before the Files tab has
+        // ever been visited: the index is built asynchronously, so waiting for
+        // it here meant the shortcut silently did nothing until the user had
+        // opened the tree. Instead we kick off (or retarget) the scan and let
+        // `refreshQuickOpenIfPresented()` fill the list when it lands.
+        //
+        // Prefer the caller-supplied project (the sidebar's active project):
+        // the stored `projectURL` may still point at a previously scanned
+        // project if the Files tab was never opened for the current one.
+        let target = (fallback ?? self.projectURL)?.standardizedFileURL
+        if let target, self.projectURL != target {
+            setProject(target)  // clears + rescans; its deferred dismiss is
+                                // invalidated by the generation bump below
+        } else if searchableFileNodes.isEmpty, target != nil {
+            refreshNow()        // right project, just no scan yet
         }
-        guard !searchableFileNodes.isEmpty else { return }
+
         quickOpenGeneration += 1  // Invalidate any pending dismiss async block
         quickOpenQuery = ""
         isQuickOpenPresented = true
+        updateQuickOpenResults()
+        syncQuickOpenSelection()
+    }
+
+    /// Recompute results after a scan finishes so a panel opened before the
+    /// index was ready fills in on its own.
+    private func refreshQuickOpenIfPresented() {
+        guard isQuickOpenPresented else { return }
+        updateQuickOpenResults()
         syncQuickOpenSelection()
     }
 
@@ -637,7 +652,7 @@ final class FileExplorerStore {
         if let selectedNodeID, nodeIndex[selectedNodeID] == nil {
             self.selectedNodeID = nil
         }
-        syncQuickOpenSelection()
+        refreshQuickOpenIfPresented()
         loadPreviewForSelection()
 
         // Update cache
@@ -693,7 +708,7 @@ final class FileExplorerStore {
         if let selectedNodeID, nodeIndex[selectedNodeID] == nil {
             self.selectedNodeID = nil
         }
-        syncQuickOpenSelection()
+        refreshQuickOpenIfPresented()
         loadPreviewForSelection()
         writeProjectScanCache(capturedURL.path, ProjectCache(nodes: rootNodes, index: nodeIndex))
     }

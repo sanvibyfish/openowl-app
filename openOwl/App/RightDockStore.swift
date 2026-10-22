@@ -5,7 +5,6 @@ import Observation
 enum RightDockTab: String, CaseIterable, Hashable, Identifiable {
     case files
     case git
-    case teammates
 
     var id: String { rawValue }
 
@@ -13,7 +12,6 @@ enum RightDockTab: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .files: return "Files"
         case .git: return "Git"
-        case .teammates: return "Teammates"
         }
     }
 
@@ -21,7 +19,6 @@ enum RightDockTab: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .files: return "folder"
         case .git: return "point.bottomleft.forward.to.point.topright.scurvepath"
-        case .teammates: return "person.2"
         }
     }
 }
@@ -148,7 +145,6 @@ final class RightDockStore {
         switch activeTab {
         case .files: return filesShowsEditor
         case .git: return gitShowsDiff
-        case .teammates: return false // single-column roster; no detail pane
         }
     }
 

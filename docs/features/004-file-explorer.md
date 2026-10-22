@@ -16,9 +16,11 @@ NSOutlineView 驱动的文件树 + 模糊搜索 Quick Open + 文件预览 + Git 
 3. 文件名旁显示 Git 状态标记（A/M/D/R/U），目录继承最高优先级子文件状态
 
 ### Quick Open
-1. Cmd+P 打开搜索面板
+1. Cmd+P 打开搜索面板（**不要求 Files tab 先被打开**：面板立即出现，文件索引若未就绪则在后台扫描完成后自动填充）
 2. 输入关键字，模糊匹配文件名（支持路径回退搜索）
 3. 方向键选择，Enter 打开文件
+4. 搜索目标跟随当前侧栏活动项目；切项目后即使 Files tab 未打开，也不会回答上一个项目的文件
+5. 输入框始终持有键盘焦点：面板打开后输入、↑/↓、Enter、Escape 都由它接管，不会被终端抢走（实现见 `QuickOpenField`）
 
 ### 文件操作
 - Cmd+C 复制 / Cmd+X 剪切 / Cmd+V 粘贴
@@ -136,6 +138,7 @@ classifyGitState: GitFileChange → FileGitState
 
 | 日期 | 说明 |
 |------|------|
+| 2026-10-06 | 修复 ⌘P Quick Open，四层缺陷：(1) `presentQuickOpen` 在文件索引为空时（默认 dock 停在 Git tab、Files 从未打开）直接 `return`，导致 ⌘P 完全无反应——现在无条件打开面板，并在后台扫描结束后通过 `refreshQuickOpenIfPresented()` 回填结果（`refresh()` / `refreshFullOnly()` 完成时触发）。(2) 目标项目改为优先采用调用方传入的活动项目（`fallback ?? self.projectURL`），避免索引停留在旧项目时 ⌘P 打开旧项目文件。(3) 搜索框改用 AppKit `NSTextField`（`QuickOpenField`）：SwiftUI `TextField` + `@FocusState` 在 ghostty 终端 `NSView` 上拿不下 first responder，面板出现但输入/↑/↓/Escape 全部落到 shell（“不会聚焦” + “终端乱跑”）；现在在挂到 window 后显式 `makeFirstResponder` 并轮询重试 500ms，键命令走 `NSTextFieldDelegate`。(4) 根因兜底：SwiftUI 插入 overlay 会重建终端 wrapper，`TerminalNSView.viewDidMoveToWindow` 的 reattach 分支无条件重聚焦、把刚拿到的焦点抢回去；新增 `TerminalFocusPolicy` 门禁（当前 first responder 是 NSTextField/NSTextView 时不抢）。面板打开期间 Escape 由 AppDelegate 键盘监听接管。新增 5 个回归测试（冷启动立即展示、跨项目重定向、搜索框抢占 first responder、焦点不抢占策略） |
 | 2026-08-27 | 修复文件树首行文字被从左侧裁掉的显示问题。根因是 `scrollRowToVisible` 在选中一个嵌套较深的文件时，会把 clip view 水平滚动到右侧来露出该行（其 cell 右缘超出面板），导致所有更浅的行被整体向左推、首字符和图标被裁掉；同时 `autoresizesOutlineColumn=false` + 只在 `viewDidAppear` 调一次 `sizeLastColumnToFit()` 会让列宽小于面板实际宽度，在右侧留下一段空白。修复：引入 `TreeClipView`（`NSClipView` 子类，把水平滚动原点恒定为 0——文件树只截断名称，永不横向平移），并在 `viewDidLayout` 里按 outline view 实际宽度同步列宽（带变更守卫，稳态零开销）。详见 postmortem `2026-08-27-file-tree-horizontal-clip.md` |
 | 2026-08-09 | 多文件 cut/move 部分失败后，pasteboard 仅保留失败 URL 和 cut pending，重试继续执行 move；rename/move 打断 pending initial read 时按新 URL 重启完整 activation，并正确结束 pending/loading。定向 FileExplorer 35 tests，完整 XCTest 419 tests / 35 suites 通过；SPM patch 已应用且 `git diff --check` 通过 |
 | 2026-08-09 | 文件 rename/cut-move 原子迁移全部 URL-keyed editor state，目录操作覆盖后代；操作前检测 open-tab 目标碰撞并阻止磁盘修改。删除立即裁剪 tree/index/search/selection/preview/Quick Open，App 内 dirty 删除被阻止、clean tab 关闭，外部删除 dirty 文件保留 buffer 并报告 backing file missing。定向 FileExplorer 34 tests、完整 XCTest 416 tests / 35 suites 通过；SPM patch 已应用且 `git diff --check` 通过 |

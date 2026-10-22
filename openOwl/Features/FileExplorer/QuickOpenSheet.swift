@@ -6,7 +6,6 @@ struct QuickOpenPanel: View {
     @Environment(FileExplorerStore.self) private var store
     @Environment(RightDockStore.self) private var rightDockStore
     @State private var selectedIndex: Int = 0
-    @FocusState private var isSearchFocused: Bool
 
     private static let maxResults = 50
 
@@ -29,14 +28,16 @@ struct QuickOpenPanel: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(AppPalette.textTertiary)
 
-                TextField("Go to File", text: $store.quickOpenQuery)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14))
-                    .focused($isSearchFocused)
-                    .onSubmit { openSelected() }
-                    .onKeyPress(.upArrow) { moveSelection(-1); return .handled }
-                    .onKeyPress(.downArrow) { moveSelection(1); return .handled }
-                    .onExitCommand { store.dismissQuickOpen() }
+                // AppKit-backed field: SwiftUI focus could not win the first
+                // responder away from the terminal NSView. See QuickOpenField.
+                QuickOpenField(
+                    text: $store.quickOpenQuery,
+                    placeholder: "Go to File",
+                    onSubmit: { openSelected() },
+                    onMoveSelection: { moveSelection($0) },
+                    onEscape: { store.dismissQuickOpen() }
+                )
+                .frame(maxWidth: .infinity)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -87,17 +88,11 @@ struct QuickOpenPanel: View {
                 .stroke(AppPalette.border, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.35), radius: 20, y: 8)
-        .background {
-            Button("") { store.dismissQuickOpen() }
-                .keyboardShortcut(.escape, modifiers: [])
-                .hidden()
-        }
         .onAppear {
             store.setupQueryAutoSearch()
             store.quickOpenQuery = ""
             store.updateQuickOpenResults()
             selectedIndex = 0
-            isSearchFocused = true
         }
         .onChange(of: store.quickOpenQuery) { _, _ in
             selectedIndex = 0

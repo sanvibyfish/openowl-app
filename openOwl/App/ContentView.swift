@@ -6,6 +6,7 @@ struct ContentView: View {
     @Environment(FileExplorerStore.self) var fileExplorerStore
     @Environment(ProjectStore.self) var projectStore
     @Environment(RightDockStore.self) var rightDockStore
+    @Environment(TerminalWorkspaceStore.self) var workspaceStore
 
     /// Worktree + pane session list next to the icon rail (default on).
     @AppStorage("openowl.ui.sessionListVisible") private var isSessionListVisible = true
@@ -63,7 +64,7 @@ struct ContentView: View {
         }
         .navigationTitle("")
         .background {
-            Button("") { fileExplorerStore.presentQuickOpen(projectURL: projectStore.activeProjectURL) }
+            Button("") { fileExplorerStore.presentQuickOpen(projectURL: quickOpenSearchRoot) }
                 .keyboardShortcut("p", modifiers: [.command])
                 .hidden()
         }
@@ -82,7 +83,16 @@ struct ContentView: View {
         }
         .animation(.easeOut(duration: 0.15), value: fileExplorerStore.isQuickOpenPresented)
         .onReceive(NotificationCenter.default.publisher(for: .quickOpen)) { _ in
-            fileExplorerStore.presentQuickOpen(projectURL: projectStore.activeProjectURL)
+            fileExplorerStore.presentQuickOpen(projectURL: quickOpenSearchRoot)
+        }
+        .onChange(of: fileExplorerStore.isQuickOpenPresented) { _, presented in
+            guard !presented else { return }
+            // Hand the keyboard back after the panel closes, otherwise the
+            // window is left with no first responder and keys go nowhere.
+            guard !rightDockStore.isFullscreen else { return }
+            if let paneID = workspaceStore.activeFocusedPaneID {
+                _ = ghosttyManager.focusPane(paneID)
+            }
         }
         .onChange(of: rightDockStore.activeTab) { _, _ in
             resignFirstResponderForTabSwitch()
@@ -95,6 +105,23 @@ struct ContentView: View {
         .onChange(of: rightDockStore.isFullscreen) { _, newValue in
             AppLogger.log("resize", "RightDock.isFullscreen -> %@ activeTab=%@",
                           newValue ? "TRUE" : "FALSE", rightDockStore.activeTab.rawValue)
+        }
+    }
+
+    /// Directory Quick Open should search. Mirrors `syncActiveProjectContext`:
+    /// projects use their fixed URL, free terminals follow the focused pane's
+    /// shell cwd. Without this, ⌘P in a free terminal could still answer with
+    /// the previously opened project's files.
+    private var quickOpenSearchRoot: URL? {
+        switch projectStore.activeKind {
+        case .project:
+            return projectStore.activeProjectURL
+        case .freeTerminal:
+            // No $HOME fallback: an un-scanned pane should leave the panel
+            // empty rather than kick off a recursive scan of the home folder.
+            return workspaceStore.activePaneWorkingDirectory
+        case .none:
+            return nil
         }
     }
 

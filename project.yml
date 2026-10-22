@@ -45,8 +45,8 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_BUNDLE_IDENTIFIER: com.openowl.app
         PRODUCT_NAME: openOwl
-        MARKETING_VERSION: "1.1.7"
-        CURRENT_PROJECT_VERSION: "14"
+        MARKETING_VERSION: "1.1.8"
+        CURRENT_PROJECT_VERSION: "15"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: openOwl/Resources/Info.plist
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
@@ -92,6 +92,12 @@ targets:
         com.apple.security.cs.allow-jit: true
         com.apple.security.cs.allow-unsigned-executable-memory: true
         com.apple.security.cs.disable-library-validation: true
+        # Hardened runtime requires this entitlement before macOS will let the
+        # app (or a process it is responsible for, e.g. anything run inside the
+        # built-in terminal) send Apple Events. Without it tccd logs
+        # "requires entitlement com.apple.security.automation.apple-events but
+        # it is missing" and attributes the prompt/denial to openOwl.
+        com.apple.security.automation.apple-events: true
 
   openOwlTests:
     type: bundle.unit-test

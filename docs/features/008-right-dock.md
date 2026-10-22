@@ -9,7 +9,7 @@
 把"Toolbar 中央 4-tab 切换主区域"的旧布局重构为：
 
 - **中间区永远是 Terminal**（除非 right dock 全屏时被隐藏）
-- **右侧 Right Dock**：可折叠的 inspector，托管 Files / Git / Teammates 三个固定 tab（Teammates 面板见 [FEAT-012](012-teammates.md)，实时展示 Claude Code swarm 会话并可一键 attach）
+- **右侧 Right Dock**：可折叠的 inspector，托管 Files / Git 两个固定 tab
 - **左侧 Project Rail**（2026-07-28）：48pt 窄图标轨，入口含 free terminal + 项目 monogram（见 [FEAT-006](006-project-sidebar.md)）；不再使用宽项目树
 
 详细需求与验收标准见 [REQ-007-right-dock.md](../requirements/REQ-007-right-dock.md)。
@@ -179,6 +179,7 @@ GeometryReader { geo in
 
 | 日期 | 变更 | 作者 |
 |------|------|------|
+| 2026-10-06 | 移除 Teammates 第三 tab（v1.1.7 加入后整体下架）。`RightDockTab` 只保留 `files` / `git`，`contentArea` 不再挂载 `TeammatesView`，`showsDetailForActiveTab` 去掉 teammates 分支；扫描器与单测一并删除，存档见 `docs/archive/FEAT-012-teammates.md` | Codex |
 | 2026-08-09 | Files / Git 继续以 opacity 常驻保留状态，但非当前 tab 同步从 accessibility tree 隐藏，VoiceOver 不再访问不可见控件 | Codex |
 | 2026-07-31 | `ContentView` 以 width 0 + opacity/disabled/hit-testing/accessibility hidden 保持 `RightDockView` 常驻；折叠或进入 fullscreen 时结束 interactive resize freeze | Codex |
 | 2026-07-28 | 左侧宽 Sidebar 换为 `ProjectRail`；ContentView 去掉 NavigationSplitView，三栏变为 左 rail + Terminal + 右 dock | Lead |

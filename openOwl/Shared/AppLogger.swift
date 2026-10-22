@@ -22,14 +22,25 @@ enum AppLogger {
     private static var fileHandle: FileHandle?
     private static var currentFileSize: UInt64 = 0
 
-    private static let logDir: URL = {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return home.appendingPathComponent("Library/Logs/openOwl", isDirectory: true)
-    }()
+    /// Test seam: point the logger at a temporary directory. Production leaves
+    /// this nil and uses `~/Library/Logs/openOwl`.
+    static var logDirectoryOverride: URL? {
+        didSet {
+            fileHandle?.closeFile()
+            fileHandle = nil
+            currentFileSize = 0
+        }
+    }
 
-    private static let logFile: URL = {
+    private static var logDir: URL {
+        logDirectoryOverride
+            ?? FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Logs/openOwl", isDirectory: true)
+    }
+
+    private static var logFile: URL {
         logDir.appendingPathComponent("openowl.log")
-    }()
+    }
 
     /// Tags that only write when their UserDefaults switch is on.
     /// Every other tag is always on.
@@ -68,8 +79,8 @@ enum AppLogger {
     }
 
     private static func writeToFile(_ line: String) {
-        if fileHandle == nil {
-            openLogFile()
+        if fileHandle == nil || handleIsDetachedFromLogFile() {
+            reopenLogFile()
         }
         guard let handle = fileHandle, let data = line.data(using: .utf8) else { return }
         handle.write(data)
@@ -77,6 +88,32 @@ enum AppLogger {
         if currentFileSize > maxFileSize {
             rotateLogFile()
         }
+    }
+
+    /// True when the open handle no longer points at `openowl.log` — the file or
+    /// its whole directory was removed (cleanup tools, manual deletes), or the
+    /// file was rotated out from under us.
+    ///
+    /// Without this the handle keeps writing into an unlinked inode: every write
+    /// "succeeds", the directory is never recreated, and the log silently stops
+    /// existing on disk until the app is restarted.
+    private static func handleIsDetachedFromLogFile() -> Bool {
+        guard let handle = fileHandle else { return true }
+        var openStat = stat()
+        guard fstat(handle.fileDescriptor, &openStat) == 0 else { return true }
+        var pathStat = stat()
+        let resolved = logFile.withUnsafeFileSystemRepresentation { path -> Bool in
+            guard let path else { return false }
+            return stat(path, &pathStat) == 0
+        }
+        guard resolved else { return true }
+        return openStat.st_ino != pathStat.st_ino
+    }
+
+    private static func reopenLogFile() {
+        fileHandle?.closeFile()
+        fileHandle = nil
+        openLogFile()
     }
 
     private static func openLogFile() {
@@ -100,5 +137,4 @@ enum AppLogger {
         try? fm.removeItem(at: prev)
         try? fm.moveItem(at: logFile, to: prev)
         openLogFile()
-    }
-}
+    }}

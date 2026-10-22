@@ -91,6 +91,7 @@ indirect enum TerminalSplitNode: Equatable {
 | 2026-08-01 | `closeCurrent()` 关掉项目最后一个 tab 时不再补新 tab，改为清空 `activeTabID` 并返回新的 `.projectEmptied`，由宿主把选中态切到 free terminal。上一条的「就地新建 tab」让 `hasTabs` 恒为 true，项目再也无法变成非激活。free terminal 的最后一个 tab 仍返回 `.closeWindow` |
 | 2026-08-01 | `closeCurrent()` 不再跨 namespace 兜底到 `tabs.last`：关掉某 namespace 最后一个 tab 会把活动槽交给另一个 namespace 的 tab，`activeTabID.didSet` 随即把那个 namespace 的记忆改写成用户从未打开过的 tab。现改为就地新建 tab，与 `switchNamespace` 对空 namespace 的处理一致（当日被上一条取代） |
 | 2026-08-01 | 移除 bell 生产端残留：`GhosttyConfig` 不再请求 `notify-on-command-finish`，`onPaneBell` 钩子删除，`RING_BELL` 显式吞掉以免落回系统 beep |
+| 2026-10-06 | `TerminalNSView.viewDidMoveToWindow` 的 reattach 分支新增 `TerminalFocusPolicy` 门禁：当前 first responder 是 NSTextField / NSTextView（含 field editor）时不再 `makeFirstResponder(self)`。SwiftUI 插入或移除 overlay（⌘P Quick Open、终端搜索框）会重建并重挂终端 wrapper，无条件重聚焦会把刚打开的输入框焦点抢回 shell |
 | 2026-08-01 | 项目 namespace 禁用 ⌘T（菜单项置灰 + 键盘监听一并拦截）——只有 free terminal 会绘制 tab bar，项目里建出的 tab 没有任何可见入口，切过去后只能靠侧栏 pane 行找回来。项目布局仍走 worktree + 分屏（⌘D / ⇧⌘D） |
 | 2026-08-01 | 移除 bell 通知整条链路：`paneBellStates` / `handleBell` / `clearBell` / `bellCount`、侧栏 pane 行的铃铛与高亮、rail 与 session 行的未读角标、提示音与系统通知，以及设置里的 Notifications 分区。实现效果不佳，通知方案待重新设计。Ghostty 层的 `onPaneBell` 桥接与 `notify-on-command-finish-action` 配置保留，重做时可直接复用 |
 | 2026-08-01 | 每个 namespace 记住各自最后活动的 tab：切到别的项目再切回来会落回原来那个 tab，而不是一律跳到第一个。记录挂在 `activeTabID` 的 `didSet`，恢复前校验该 tab 仍存在（已关闭则回落到第一个） |

@@ -138,6 +138,17 @@ worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session lis
 - 有 terminal bell 时 monogram 角标显示未读数
 - rail 只列「激活」的 root：本 session 有 terminal tab 的，加上当前选中的那个（选中态先于 tab 创建生效，不带这一条会闪一下）
 
+### 3.8 安全作用域书签与 TCC 授权
+
+`~/Documents`、`~/Desktop`、`~/Downloads` 受 macOS TCC 保护。openOwl 不走"每次访问都弹窗"的路径，而是在用户用 `NSOpenPanel` 选目录拿到隐式授权时，把该 URL 存成 security-scoped bookmark（`~/.openowl/bookmarks.plist`），之后靠 `startAccessingSecurityScopedResource()` 静默恢复。
+
+**这个会话是 App 及其派生所有子进程（终端里的 shell、build、GitHub Actions runner）能读这些目录的唯一凭据** —— 终端不是独立的安全主体，TCC 把子进程的责任进程算在 openOwl 头上。
+
+- **启动时必须为所有项目恢复会话**：`ProjectStore.init` 在 `load()` + `seedDefaultProjectIfNeeded()` 之后统一调用 `restoreSecurityScopedAccess()`，覆盖 store 文件、UserDefaults 迁移、默认项目三条路径。此前该循环写在 `load()` 的迁移分支之前、且正常分支提前 `return`，等于从未执行 —— 授权只在"本次会话里添加过项目"时存在，项目一被移除就整片失效，表现为 `~/Documents` 时而可读时而 `Operation not permitted`
+- `BookmarkStore.startAccessing` 幂等：已有会话直接返回原 URL，避免重复 start 覆盖 URL 对象、泄漏上一个扩展
+- 释放时机只有两处：`remove(projectID:)`（删项目）与 `applicationWillTerminate` 的 `stopAll()`
+- Debug（`com.openowl.app.dev`）与 Release（`com.openowl.app`）是两个 bundle ID，TCC 授权按"签名身份 + bundle ID"记录，互不继承
+
 ## 4. 注意事项
 
 - **激活 = 有终端**：`ProjectRail.isProjectActive` 实时查 `TerminalWorkspaceStore.hasTabs`，没有独立的持久化字段。项目自身或其任一 worktree 有 tab 即算激活
@@ -155,6 +166,7 @@ worktree 的创建与归档流程都住在 `ProjectStore`，rail 和 session lis
 
 | 日期 | 说明 |
 |------|------|
+| 2026-10-11 | 修复安全作用域书签从未在启动时恢复：`load()` 的恢复循环位于迁移分支之前且正常分支提前 `return`，于是只要 `openowl.json` 可读就完全跳过 —— 授权只在"本次会话添加过项目"时存在，项目一被移除 `~/Documents` 就整体变 `Operation not permitted`（终端里的 GitHub runner 因此读不到 `.credentials_rsaparams`、连 `run-helper.sh` 都 exec 不了）。现改为在 `init` 中 `load()` + `seedDefaultProjectIfNeeded()` 之后统一恢复，覆盖 store 文件 / UserDefaults 迁移 / 默认项目三条路径；`startAccessing` 同时改为幂等，避免重复 start 泄漏扩展 |
 | 2026-08-03 | 项目失活改为事务性顺序：先完成 editor context 审批并切到 free terminal，再删除项目最后一个 terminal；审批失败时不再产生空 namespace 或销毁 surface |
 | 2026-08-01 | 恢复「关掉项目最后一个终端 → 项目变非激活」：`closeCurrent` 不再给空掉的项目 namespace 补 tab，改为返回 `.projectEmptied`，由 `AppDelegate` 把选中态切到 free terminal。`82a8a8c` 的补 tab 兜底把这条路堵死了，`hasTabs` 恒为 true |
 | 2026-08-01 | 侧栏与 rail 去掉 bell 驱动的未读角标（`SessionRow.unread`、`RailStripButton.badge`、pane 行铃铛）——随通知链路一并移除，详见 FEAT-002 |

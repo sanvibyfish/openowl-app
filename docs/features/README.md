@@ -25,7 +25,7 @@
 | 009 | 文件日志系统 (AppLogger) | ✅ Done | [009-app-logger.md](009-app-logger.md) |
 | 010 | 进程资源异常监控 | 🟡 In Progress | [010-resource-monitor.md](010-resource-monitor.md) |
 | 011 | Ghostty 风格终端 AppleScript 控制 | ✅ Done | [011-terminal-applescript.md](011-terminal-applescript.md) |
-| 012 | Teammates 面板（Claude swarm 实时视图） | ✅ Done | [012-teammates.md](012-teammates.md) |
+| 012 | Teammates 面板（Claude swarm 实时视图） | ⏸️ Archived | [archive/FEAT-012-teammates.md](../archive/FEAT-012-teammates.md) |
 
 ## 分类
 
@@ -46,6 +46,10 @@
 ### 部署 (Deployment) — 已下架
 
 - v1.0.8 移除本地部署功能。设计文档归档于 [archive/FEAT-005-local-deployment.md](../archive/FEAT-005-local-deployment.md)，方便未来恢复参考。
+
+### 已下架功能 (Removed)
+
+- v1.1.7 移除 Teammates 面板（Right Dock 第三 tab + Claude/Codex/Pi 会话扫描器）。设计文档归档于 [archive/FEAT-012-teammates.md](../archive/FEAT-012-teammates.md)，方便未来重新评估。
 
 ### 基础设施 (Infrastructure)
 
@@ -72,6 +76,7 @@
 
 | 日期 | 说明 |
 |------|------|
+| 2026-10-06 | 012：Teammates 面板整体移除（Right Dock 回到 Files / Git 两 tab，删除三个扫描器与 17 个单测），文档归档至 `docs/archive/FEAT-012-teammates.md`；004：修复 ⌘P Quick Open 在 Files tab 未打开时按下无反应，以及切换项目后仍展示旧项目结果的问题。完整 XCTest 428 tests / 36 suites 通过 |
 | 2026-08-09 | 003/004：Git 阻止 unresolved conflicts 进入 commit/discard-all，Discard All 覆盖非 ignored 嵌套仓库，并保持仓库切换期间 command mutex 与详情错误 provenance；Files 保留部分 cut 失败项的移动语义，并在 rename/move 后重启 pending initial activation。完整 XCTest 419 tests / 35 suites 通过 |
 | 2026-08-09 | 003/004：Right Dock Git 增加仓库级 draft 与异步 request ownership，修正 Stage/Discard/Unstage、冲突与路径解析边界；文件 rename/move/delete 与 editor URL state 原子同步，并保护 dirty/missing/collision 场景。完整 XCTest 416 tests / 35 suites 通过 |
 | 2026-08-09 | 003：正确解析 Git porcelain v1 新旧 unborn branch header，仅显示真实分支名；空仓库 Git Graph 保持 `No commits yet` 空态且不产生 error banner，detached HEAD 行为不变 |

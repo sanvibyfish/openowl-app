@@ -26,6 +26,11 @@ final class BookmarkStore {
         bookmarks[projectID] != nil
     }
 
+    /// Number of projects holding a live security-scoped session. Exposed for
+    /// testing: the restore-on-launch path is otherwise invisible, and it is the
+    /// only thing that makes TCC-protected parents readable.
+    var activeAccessCount: Int { activeAccess.count }
+
     // MARK: - Public API
 
     /// Create and persist a security-scoped bookmark for a user-selected URL.
@@ -51,6 +56,9 @@ final class BookmarkStore {
     /// tracks active sessions and cleans up via stopAll().
     @discardableResult
     func startAccessing(projectID: String) -> URL? {
+        // Idempotent: re-starting an already-open session would replace the URL
+        // object we later call stopAccessing on, leaking the first extension.
+        if let existing = activeAccess[projectID] { return existing }
         guard let data = bookmarks[projectID] else { return nil }
         do {
             var isStale = false

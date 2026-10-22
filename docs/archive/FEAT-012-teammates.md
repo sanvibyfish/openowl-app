@@ -1,6 +1,11 @@
 # FEAT-012: Teammates 面板（Claude / Codex / Pi 会话实时视图）
 
-> 状态：✅ Done | 创建日期：2026-08-30 | 完成日期：2026-08-30
+> 状态：⏸️ Archived（已移除）| 创建日期：2026-08-30 | 完成日期：2026-08-30 | 移除日期：2026-10-06
+>
+> **2026-10-06 整体移除**：Right Dock 的 Teammates tab、`TeammatesStore`、`TeammatesView`
+> 与三个会话扫描器（`ClaudeSwarmScanner` / `CodexSessionScanner` / `PiSessionScanner`）
+> 及对应单测已从代码库删除；`RightDockTab` 回到 `files` / `git` 两个 tab。
+> 本文档仅作历史存档，方便未来重新评估该功能。
 
 ---
 

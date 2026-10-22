@@ -248,6 +248,13 @@ final class ProjectStore {
         }
         seedDefaultFreeTerminalIfNeeded()
 
+        // Re-establish security-scoped access once every project is known —
+        // store file, UserDefaults migration and the seeded default all funnel
+        // through here, so no load path can miss it. See the method doc for why
+        // this is the only thing standing between the app and a TCC-protected
+        // parent like `~/Documents`.
+        restoreSecurityScopedAccess()
+
         // If no project was restored (fresh install or all projects pruned),
         // default the selection to the first free terminal so the center view
         // shows a usable shell.
@@ -583,12 +590,6 @@ final class ProjectStore {
             }
         }
 
-        // Restore security-scoped access for all loaded projects.
-        // This re-establishes TCC authorization granted on previous launches without prompting.
-        for project in projects {
-            bookmarkStore.startAccessing(projectID: project.id)
-        }
-
         guard storeURL == Self.productionStoreURL else { return }
 
         // 2) Migrate from UserDefaults (one-time)
@@ -621,6 +622,36 @@ final class ProjectStore {
             defaults.removeObject(forKey: "openowl.projects.active")
             defaults.removeObject(forKey: "openowl.projects.paths")
         }
+    }
+
+    /// Re-establish security-scoped access for every loaded project.
+    ///
+    /// This is what makes any TCC-protected parent (`~/Documents`, `~/Desktop`,
+    /// …) reachable at all: the bookmark's sandbox extension is the only thing
+    /// the app — and every process it spawns, including whatever the user runs
+    /// in the terminal — has to those paths. Re-resolving on launch also avoids
+    /// macOS treating the paths as fresh programmatic access and re-prompting.
+    ///
+    /// It must run on the normal load path too. It used to sit *after* an early
+    /// `return`, so a healthy store file skipped it entirely: access then
+    /// depended on whichever project the user happened to add during that
+    /// session, and was lost again the moment that project was removed.
+    private func restoreSecurityScopedAccess() {
+        var established = 0
+        for project in projects {
+            if bookmarkStore.startAccessing(projectID: project.id) != nil {
+                established += 1
+            }
+        }
+        // Observability for the "~/Documents flipped to Operation not permitted"
+        // class of bug: this is the only place the app's access to TCC-protected
+        // parents is established, so the numbers belong in the log.
+        AppLogger.log(
+            "bookmark",
+            "restore requested=%d established=%d",
+            projects.count,
+            established
+        )
     }
 
     private func seedDefaultProjectIfNeeded() {

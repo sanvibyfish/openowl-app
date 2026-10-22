@@ -66,7 +66,7 @@ AppLogger.log("resize-diag", "frame=%.1fx%.1f", width, height)
 ## 4. 注意事项
 
 - 日志目录在首次写入时自动创建，无需手动创建
-- `FileHandle` 在 app 生命周期内保持打开，避免频繁 open/close
+- `FileHandle` 在 app 生命周期内保持打开，避免频繁 open/close；但**每次写入前会校验句柄是否仍指向 `openowl.log`**（`fstat` 与 `stat` 比对 inode）。日志目录被清理工具或手动 `rm` 删掉后，旧实现会继续往已 unlink 的 inode 写：写入"成功"、目录永不重建、日志静默消失直到重启。现在检测到不一致就关闭句柄、重建目录与文件
 - 当前 `[resize-diag]` 与 `[file-editor-state]` 相关日志使用 `AppLogger`，其他模块的 `NSLog` 可按需逐步迁移
 - `TerminalScrollView.layout` 只记录尺寸发生变化的 layout；无尺寸变化的 terminal layout 不落盘，避免 terminal 输出热路径被诊断日志拖慢
 - `syncSurfaceSize skipped ... hostVisible=false/tiny ...` 表示 pane 当前隐藏或尺寸未稳定，openOwl 会保留上一次可用 PTY 尺寸，恢复显示后再同步
@@ -84,6 +84,7 @@ AppLogger.log("resize-diag", "frame=%.1fx%.1f", width, height)
 
 | 日期 | 说明 |
 |------|------|
+| 2026-10-11 | 日志目录/文件被外部删除后不再静默失效：写入前用 `fstat`/`stat` 比对 inode，不一致就关闭句柄并重建 `~/Library/Logs/openOwl/` 与 `openowl.log`。此前句柄一直指向已 unlink 的 inode，所有后续日志写入都"成功"但磁盘上永远不再出现，直到 app 重启（实测清理工具删掉日志目录后 app 连续写入不再落盘）。新增 2 个单测（删目录 / 删文件） |
 | 2026-08-21 | 移除 `AppExitMonitor` 与 `AppExitSignalHandler.c`（含 exit.log）。它用 `signal()` 而非 `sigaction()`：不保存原 handler，因此会被随后安装的 libghostty(Zig) panic handler 覆盖；没有 `SA_ONSTACK`/`sigaltstack`，栈溢出型 SIGSEGV 根本进不了 handler；安装部分失败只写 NSLog 而 `install()` 返回 Void，调用方无从得知。即最需要它时最可能是空的。它服务的 2026-08-11 exit(1) 排查为一次性诊断，不对应任何用户需求，却常驻改写了进程的 SIGTERM/SIGABRT 语义 |
 | 2026-08-14 | 致命信号路径移入纯 C：Swift 正常上下文预打开 `exit.log` fd，handler 仅以有界 partial-write / `EINTR` 循环写固定消息，不再错误地于信号上下文调用 `backtrace_symbols_fd`。正常 `atexit` 仍保留 Foundation 时间戳与回溯；两类 handler 独立安装，信号安装部分失败会回滚 |
 | 2026-08-08 | 新增 `[terminal-drop]` 拖放链路日志：`TerminalScrollView` 与 `TerminalNSView` 的 `draggingEntered` / `draggingUpdated` / `prepareForDragOperation` / `performDragOperation` 从裸 `NSLog` 或无日志迁移到 `AppLogger`，Release 也落盘。排查拖图片"放不进来"时第一次有据可查 |
