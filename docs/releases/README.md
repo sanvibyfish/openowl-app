@@ -8,7 +8,7 @@
 
 | 版本 | 状态 | 发布日期 | 文档 |
 |------|------|----------|------|
-| v1.1.8 | 🟢 Ready | — | [Release Notes](v1.1.8.md)（文件树裁剪 / ⌘P Quick Open / 安全作用域书签恢复 / 日志重建 + Teammates 面板下架；已打包、公证通过，待 tag 与发布） |
+| v1.1.8 | ✅ Done | 2026-10-22 | [Release Notes](v1.1.8.md)（文件树裁剪 / ⌘P Quick Open / 安全作用域书签恢复 / 日志重建 + Teammates 面板下架） |
 | v1.1.7 | ⤴️ Merged | — | [Release Notes](v1.1.7.md)（未单独发布，并入 v1.1.8） |
 | v1.1.6 | ✅ Done | 2026-08-24 | [Release Notes](v1.1.6.md) |
 | v1.1.5 | ⤴️ Merged | — | [Release Notes](v1.1.5.md)（未单独发布，并入 v1.1.6） |
@@ -41,6 +41,7 @@
 
 | 日期 | 说明 |
 |------|------|
+| 2026-10-22 | 发布 v1.1.8：打 tag `v1.1.8`（main `de9e480`）并创建 GitHub Release，上传 `OpenOwl-1.1.8.dmg`（build 15，36,251,983 bytes，sha256 `0e2595f3…cacc69`），GitHub 服务端摘要与本地一致；`latest` 已指向该版本 |
 | 2026-10-11 | v1.1.8 发布说明就绪并完成打包：`OpenOwl-1.1.8.dmg`（build 15，36,251,983 bytes）Developer ID 签名、公证 `Accepted`（`3ed6fca5-f10b-48ef-ba3f-424446500004`）、staple 与 Gatekeeper 验证均通过，待 tag 与发布。内容：文件树左侧裁剪修复、⌘P Quick Open 四处缺陷、安全作用域书签启动恢复（`~/Documents` 授权不再随项目增减飘）、AppLogger 日志目录被删后重建、重复 View 菜单合并、`com.apple.security.automation.apple-events` entitlement；Teammates 面板已在发布前下架。v1.1.7 从未 tag/发布，标记为 ⤴️ Merged 并入 v1.1.8 |
 | 2026-08-24 | 发布 v1.1.6：并入原定 v1.1.5 的 Right Dock 与 Terminal AppleScript 内容，新增终端 surface 重挂载重试与侧边栏 header 对齐修复；v1.1.5 标记为 ⤴️ Merged，从未单独发布 |
 | 2026-08-21 | v1.1.6 发布说明就绪：git 子进程管道层加固（读错误不再被吞、等待有界、超时改用 SIGTERM）、Discard All 契约修正为真正的全部丢弃、⌘Q 编辑内容丢失修复；移除三处兜底与 `AppExitMonitor`。同时更正了先前「v1.1.6 已于 2026-08-17 发布」的错误记录——该版本从未发布，且原发布说明的头号功能从未实现 |

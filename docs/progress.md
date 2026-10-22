@@ -29,6 +29,7 @@
 - [x] v1.0.3 — surface 泄漏修复 + 项目 Tab 关闭/拖拽 + Worktree 自动发现 + Debug 诊断系统
 - [x] v1.0.4 — Deployment removeItem 误删用户目录修复
 - [x] v1.0.7 测试版 — 退出保护 + libghostty 默认回退 ReleaseFast
+- [x] v1.1.8 发布（2026-10-22）— OpenOwl-1.1.8.dmg (35MB) 签名 + 公证 + staple + Gatekeeper，上传到 GitHub Releases（tag `v1.1.8`，main `de9e480`）：文件树左侧裁剪、⌘P Quick Open 四处缺陷、安全作用域书签启动恢复、AppLogger 重建、单一 View 菜单、Apple Events entitlement；Teammates 面板下架。v1.1.7 未单独发布，并入本版
 
 ## Done
 
